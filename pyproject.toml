@@ -1,0 +1,110 @@
+[build-system]
+build-backend = "flit_core.buildapi"
+requires = ["flit_core >=3.8.0,<4"]
+
+
+[project]
+name = "birdxplorer"
+description = "birdxplorer is a tool to help you read and get insights from your documents."
+authors = [
+    {name = "osoken"},
+]
+dynamic = [
+    "version", 
+]
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.10"
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Natural Language :: Japanese",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.10",
+]
+
+dependencies = [
+    "pydantic",
+    "python-dateutil",
+    "sqlalchemy",
+    "pydantic_settings",
+]
+
+[project.urls]
+Source = "https://github.com/codeforjapan/BirdXplorer"
+
+[tool.setuptools]
+packages=["birdxplorer"]
+
+[tool.setuptools.package-data]
+birdxplorer = ["py.typed"]
+
+[project.optional-dependencies]
+dev=[
+    "black",
+    "flake8",
+    "pyproject-flake8",
+    "pytest",
+    "mypy",
+    "tox",
+    "isort",
+    "pytest-mock",
+    "pytest-cov",
+    "freezegun",
+    "types-python-dateutil",
+    "psycopg2-binary",
+    "factory_boy",
+]
+prod=[
+    "psycopg2"
+]
+
+
+[tool.pytest.ini_options]
+addopts = ["-sv", "--doctest-modules", "--cov=birdxplorer", "--cov-report=xml", "--cov-report=term-missing"]
+testpaths = ["tests", "birdxplorer"]
+filterwarnings = [
+    "error",
+]
+
+[tool.black]
+line-length = 120
+target-version = ['py310']
+
+[tool.flake8]
+max-line-length = 120
+extend-ignore = "E203"
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+plugins = ["pydantic.mypy"]
+mypy_path = "stubs/"
+
+[tool.pydantic.mypy]
+init_typed = true
+
+[tool.isort]
+profile = "black"
+
+[tool.tox]
+legacy_tox_ini = """
+    [tox]
+    skipsdist = true
+    envlist = py310
+
+    [testenv]
+    setenv = 
+        VIRTUALENV_PIP = 23.2.1
+    deps =
+        -e .[dev]
+    commands = 
+        black birdxplorer tests
+        isort birdxplorer tests
+        pytest
+        pflake8 birdxplorer/ tests/ stubs/
+        mypy birdxplorer --strict
+        mypy tests --strict
+"""
