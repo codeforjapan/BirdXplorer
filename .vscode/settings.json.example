@@ -1,0 +1,28 @@
+{
+  "[*]": {
+    "editor.tabSize": 4
+  },
+  "[typescriptreact]": {
+    "editor.tabSize": 2
+  },
+  "[typescript]": {
+    "editor.tabSize": 2
+  },
+  "[json]": {
+    "editor.tabSize": 2
+  },
+  "editor.formatOnSave": true,
+  "[python]": {
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": true
+    },
+    "editor.defaultFormatter": "ms-python.black-formatter",
+    "editor.formatOnSave": true
+  },
+  "python.analysis.extraPaths": [
+    ".venv/lib/python3.10/site-packages"
+  ],
+  "python.defaultInterpreterPath": ".venv/bin/python",
+  "python.analysis.stubPath": "stubs",
+  "python.formatting.provider": "none",
+}
