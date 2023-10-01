@@ -61,3 +61,13 @@ class BaseModel(PydanticBaseModel):
 
 class Message(BaseModel):
     message: str
+
+
+class UserEnrollment(BaseModel):
+    participant_id: str
+    enrollment_state: str
+    successful_rating_needed_to_earn_in: str
+    timestamp_of_last_state_change: str
+    timestamp_of_last_earn_out: str
+    modeling_population: str
+    modeling_group: str
