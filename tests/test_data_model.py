@@ -40,7 +40,7 @@ class UserEnrollmentTester(BaseDataModelTester):
         super(UserEnrollmentTester, self).__init__(re.compile(r"userEnrollment-[0-9]{5}.tsv"))
 
     def validate(self, row: Mapping[str, str]) -> None:
-        _ = UserEnrollment(**row)
+        _ = UserEnrollment.model_validate(row)
 
 
 def test_user_enrollment() -> None:
