@@ -57,6 +57,7 @@ dev=[
     "types-python-dateutil",
     "psycopg2-binary",
     "factory_boy",
+    "uvicorn",
 ]
 prod=[
     "psycopg2"
