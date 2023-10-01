@@ -59,6 +59,7 @@ dev=[
     "factory_boy",
     "uvicorn",
     "polyfactory",
+    "httpx",
 ]
 prod=[
     "psycopg2"
