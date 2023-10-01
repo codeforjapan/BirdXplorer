@@ -58,6 +58,7 @@ dev=[
     "psycopg2-binary",
     "factory_boy",
     "uvicorn",
+    "polyfactory",
 ]
 prod=[
     "psycopg2"
