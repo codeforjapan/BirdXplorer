@@ -29,6 +29,7 @@ dependencies = [
     "python-dateutil",
     "sqlalchemy",
     "pydantic_settings",
+    "fastapi",
     "JSON-log-formatter"
 ]
 
