@@ -71,3 +71,10 @@ class UserEnrollment(BaseModel):
     timestamp_of_last_earn_out: str
     modeling_population: str
     modeling_group: str
+
+
+class Notes(BaseModel):
+    note_id: str
+    note_author_participant_id: str
+    created_at_millis: int
+    tweet_id: str

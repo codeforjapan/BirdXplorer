@@ -4,7 +4,7 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 
-from birdxplorer.models import UserEnrollment
+from birdxplorer.models import Notes, UserEnrollment
 
 
 class BaseDataModelTester(ABC):
@@ -45,3 +45,15 @@ class UserEnrollmentTester(BaseDataModelTester):
 
 def test_user_enrollment() -> None:
     UserEnrollmentTester()()
+
+
+class NotesTester(BaseDataModelTester):
+    def __init__(self) -> None:
+        super(NotesTester, self).__init__(re.compile(r"notes-[0-9]{5}.tsv"))
+
+    def validate(self, row: Mapping[str, str]) -> None:
+        _ = Notes.model_validate(row)
+
+
+def test_notes() -> None:
+    NotesTester()()
