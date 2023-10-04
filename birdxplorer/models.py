@@ -1,7 +1,8 @@
+from datetime import datetime, timezone
 from typing import TypeAlias
 
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 IncEx: TypeAlias = "set[int] | set[str] | dict[int, IncEx] | dict[str, IncEx] | None"
@@ -74,7 +75,10 @@ class UserEnrollment(BaseModel):
 
 
 class Notes(BaseModel):
-    note_id: str
-    note_author_participant_id: str
-    created_at_millis: int
-    tweet_id: str
+    note_id: str = Field(pattern=r"^[0-9]{19}$")
+    note_author_participant_id: str = Field(pattern=r"^[0-9A-F]{64}$")
+    created_at_millis: int = Field(
+        gt=(int(datetime(2006, 7, 15, 0, 0, 0, 0, timezone.utc).timestamp() * 1000)),
+        lt=(int(datetime.now().timestamp() * 1000)),
+    )
+    tweet_id: str = Field(pattern=r"^[0-9]{9,19}$")
