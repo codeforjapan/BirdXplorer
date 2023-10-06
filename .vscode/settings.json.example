@@ -24,5 +24,8 @@
   ],
   "python.defaultInterpreterPath": ".venv/bin/python",
   "python.analysis.stubPath": "stubs",
+  "flake8.path": [
+    ".venv/bin/pflake8"
+  ],
   "python.formatting.provider": "none",
 }
