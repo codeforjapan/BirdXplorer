@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any, Type, TypeAlias, TypeVar
 
 from pydantic import BaseModel as PydanticBaseModel
@@ -157,6 +158,12 @@ class NoteId(BaseString):
         return dict(super().__get_extra_constraint_dict__(), pattern=r"^[0-9]{19}$")
 
 
+class NotesBelievable(str, Enum):
+    believable_by_few = "BELIEVABLE_BY_FEW"
+    believable_by_many = "BELIEVABLE_BY_MANY"
+    empty = ""
+
+
 class Notes(BaseModel):
     note_id: NoteId
     note_author_participant_id: str = Field(pattern=r"^[0-9A-F]{64}$")
@@ -165,3 +172,4 @@ class Notes(BaseModel):
         lt=(int(datetime.now().timestamp() * 1000)),
     )
     tweet_id: str = Field(pattern=r"^[0-9]{9,19}$")
+    believable: NotesBelievable
