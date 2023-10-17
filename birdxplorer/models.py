@@ -164,7 +164,7 @@ class NotesBelievable(str, Enum):
     empty = ""
 
 
-class Notes(BaseModel):
+class Note(BaseModel):
     note_id: NoteId
     note_author_participant_id: str = Field(pattern=r"^[0-9A-F]{64}$")
     created_at_millis: int = Field(
