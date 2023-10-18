@@ -18,6 +18,16 @@ BirdXplorer is software that helps users explore community notes data on X
 pip install -e ".[dev]"
 ```
 
+### Environment Vars
+
+```bash
+cp .env.example .env
+```
+
+| key                             | value       |
+| ------------------------------- | ----------- |
+| BX_STORAGE_SETTINGS\_\_PASSWORD | birdxplorer |
+
 ### Testing
 
 To run basic unit tests and some integration tests, simply run the following:
@@ -31,4 +41,12 @@ some directory (say `data/20230924`) and run the following:
 
 ```bash
 BX_DATA_DIR=data/20230924 tox
+```
+
+### Run Server
+
+```
+$ pwd
+$ your_dir/BirdXplorer
+$ docker-compose up -d
 ```
