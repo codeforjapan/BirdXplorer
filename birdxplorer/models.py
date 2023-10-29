@@ -75,6 +75,23 @@ class BaseString(str):
         return TypeAdapter(cls).validate_python(v)
 
 
+class UpperCased64DigitsHexadecimalString(BaseString):
+    """
+    >>> UpperCased64DigitsHexadecimalString.from_str("test")
+    Traceback (most recent call last):
+     ...
+    pydantic_core._pydantic_core.ValidationError: 1 validation error for function-after[validate(), constrained-str]
+      String should match pattern '^[0-9A-F]{64}$' [type=string_pattern_mismatch, input_value='test', input_type=str]
+        ...
+    >>> UpperCased64DigitsHexadecimalString.from_str("1234567890123456789012345678901234567890123456789012345678901234")
+    UpperCased64DigitsHexadecimalString('1234567890123456789012345678901234567890123456789012345678901234')
+    """
+
+    @classmethod
+    def __get_extra_constraint_dict__(cls) -> dict[str, Any]:
+        return dict(super().__get_extra_constraint_dict__(), pattern=r"^[0-9A-F]{64}$")
+
+
 class BaseModel(PydanticBaseModel):
     """
     >>> from unittest.mock import patch
@@ -131,21 +148,8 @@ class Message(BaseModel):
     message: str
 
 
-class ParticipantId(BaseString):
-    """
-    >>> ParticipantId.from_str("test")
-    Traceback (most recent call last):
-     ...
-    pydantic_core._pydantic_core.ValidationError: 1 validation error for function-after[validate(), constrained-str]
-      String should match pattern '^[0-9A-F]{64}$' [type=string_pattern_mismatch, input_value='test', input_type=str]
-        ...
-    >>> ParticipantId.from_str("1234567890123456789012345678901234567890123456789012345678901234")
-    ParticipantId('1234567890123456789012345678901234567890123456789012345678901234')
-    """
-
-    @classmethod
-    def __get_extra_constraint_dict__(cls) -> dict[str, Any]:
-        return dict(super().__get_extra_constraint_dict__(), pattern=r"^[0-9A-F]{64}$")
+class ParticipantId(UpperCased64DigitsHexadecimalString):
+    ...
 
 
 class UserEnrollment(BaseModel):
