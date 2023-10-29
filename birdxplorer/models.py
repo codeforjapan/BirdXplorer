@@ -152,9 +152,17 @@ class ParticipantId(UpperCased64DigitsHexadecimalString):
     ...
 
 
+class EnrollmentState(str, Enum):
+    new_user = "newUser"
+    earned_in = "earnedIn"
+    at_risk = "atRisk"
+    earned_out_acknowledged = "earnedOutAcknowledged"
+    earned_out_no_acknowledge = "earnedOutNoAcknowledge"
+
+
 class UserEnrollment(BaseModel):
     participant_id: ParticipantId
-    enrollment_state: str
+    enrollment_state: EnrollmentState
     successful_rating_needed_to_earn_in: str
     timestamp_of_last_state_change: str
     timestamp_of_last_earn_out: str
