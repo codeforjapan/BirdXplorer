@@ -131,8 +131,25 @@ class Message(BaseModel):
     message: str
 
 
+class ParticipantId(BaseString):
+    """
+    >>> ParticipantId.from_str("test")
+    Traceback (most recent call last):
+     ...
+    pydantic_core._pydantic_core.ValidationError: 1 validation error for function-after[validate(), constrained-str]
+      String should match pattern '^[0-9A-F]{64}$' [type=string_pattern_mismatch, input_value='test', input_type=str]
+        ...
+    >>> ParticipantId.from_str("1234567890123456789012345678901234567890123456789012345678901234")
+    ParticipantId('1234567890123456789012345678901234567890123456789012345678901234')
+    """
+
+    @classmethod
+    def __get_extra_constraint_dict__(cls) -> dict[str, Any]:
+        return dict(super().__get_extra_constraint_dict__(), pattern=r"^[0-9A-F]{64}$")
+
+
 class UserEnrollment(BaseModel):
-    participant_id: str
+    participant_id: ParticipantId
     enrollment_state: str
     successful_rating_needed_to_earn_in: str
     timestamp_of_last_state_change: str
