@@ -427,6 +427,7 @@ class ModelingPopulation(str, Enum):
 
 
 UserEnrollmentLastStateChangeTimeStamp = Union[TwitterTimestamp, Literal["0"], Literal["103308100"]]
+UserEnrollmentLastEarnOutTimestamp = Union[TwitterTimestamp, Literal["1"]]
 
 
 class UserEnrollment(BaseModel):
@@ -434,7 +435,7 @@ class UserEnrollment(BaseModel):
     enrollment_state: EnrollmentState
     successful_rating_needed_to_earn_in: str
     timestamp_of_last_state_change: UserEnrollmentLastStateChangeTimeStamp
-    timestamp_of_last_earn_out: str
+    timestamp_of_last_earn_out: UserEnrollmentLastEarnOutTimestamp
     modeling_population: ModelingPopulation
     modeling_group: NonNegativeFloat
 
