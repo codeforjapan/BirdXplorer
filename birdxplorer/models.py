@@ -421,6 +421,11 @@ class EnrollmentState(str, Enum):
     earned_out_no_acknowledge = "earnedOutNoAcknowledge"
 
 
+class ModelingPopulation(str, Enum):
+    control = "CORE"
+    treatment = "EXPANSION"
+
+
 UserEnrollmentLastStateChangeTimeStamp = Union[TwitterTimestamp, Literal["0"], Literal["103308100"]]
 
 
@@ -430,7 +435,7 @@ class UserEnrollment(BaseModel):
     successful_rating_needed_to_earn_in: str
     timestamp_of_last_state_change: UserEnrollmentLastStateChangeTimeStamp
     timestamp_of_last_earn_out: str
-    modeling_population: str
+    modeling_population: ModelingPopulation
     modeling_group: NonNegativeFloat
 
 
