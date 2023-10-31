@@ -523,3 +523,4 @@ class Note(BaseModel):
     not_misleading_personal_opinion: BinaryBool
     trustworthy_sources: BinaryBool
     is_media_note: BinaryBool
+    summary: str
