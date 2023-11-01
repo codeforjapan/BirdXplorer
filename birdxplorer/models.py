@@ -476,3 +476,4 @@ class Note(BaseModel):
     created_at_millis: TwitterTimestamp
     tweet_id: str = Field(pattern=r"^[0-9]{9,19}$")
     believable: NotesBelievable
+    summary: str
