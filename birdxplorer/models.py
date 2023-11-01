@@ -75,6 +75,35 @@ class BaseString(str):
         return TypeAdapter(cls).validate_python(v)
 
 
+class BinaryBool(str):
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls: Type["BinaryBool"], _source_type: Any, _handler: GetCoreSchemaHandler
+    ) -> core_schema.CoreSchema:
+        return core_schema.no_info_after_validator_function(
+            cls.validate,
+            core_schema.str_schema(**cls.__get_extra_constraint_dict__()),
+            serialization=core_schema.plain_serializer_function_ser_schema(cls.serialize, when_used="json"),
+        )
+
+    @classmethod
+    def validate(cls: Type["BinaryBool"], v: Any) -> "BinaryBool":
+        if v not in ["0", "1"]:
+            raise ValueError("Input should be 0 or 1")
+        return cls(v)
+
+    @classmethod
+    def __get_extra_constraint_dict__(cls: Type["BinaryBool"]) -> dict[str, Any]:
+        return {}
+
+    def serialize(self) -> str:
+        return str(self)
+
+    @classmethod
+    def to_bool(cls: Type["BinaryBool"], v: Any) -> bool:
+        return v == "1"
+
+
 class UpperCased64DigitsHexadecimalString(BaseString):
     """
     >>> UpperCased64DigitsHexadecimalString.from_str("test")
@@ -202,3 +231,17 @@ class Note(BaseModel):
     )
     tweet_id: str = Field(pattern=r"^[0-9]{9,19}$")
     believable: NotesBelievable
+    misleading_other: BinaryBool
+    misleading_factual_error: BinaryBool
+    misleading_manipulated_media: BinaryBool
+    misleading_outdated_information: BinaryBool
+    misleading_missing_important_context: BinaryBool
+    misleading_unverified_claim_as_fact: BinaryBool
+    misleading_satire: BinaryBool
+    not_misleading_other: BinaryBool
+    not_misleading_factually_correct: BinaryBool
+    not_misleading_outdated_but_not_when_written: BinaryBool
+    not_misleading_clearly_satire: BinaryBool
+    not_misleading_personal_opinion: BinaryBool
+    trustworthy_sources: BinaryBool
+    is_media_note: BinaryBool
