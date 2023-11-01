@@ -321,6 +321,9 @@ class NotesBelievable(str, Enum):
     believable_by_many = "BELIEVABLE_BY_MANY"
     empty = ""
 
+class BinaryBool(int, Enum):
+    binary_false = 0
+    binary_true = 1
 
 class Note(BaseModel):
     note_id: NoteId
@@ -328,3 +331,18 @@ class Note(BaseModel):
     created_at_millis: TwitterTimestamp
     tweet_id: str = Field(pattern=r"^[0-9]{9,19}$")
     believable: NotesBelievable
+    misleadingOther: BinaryBool
+    misleadingFactualError: BinaryBool
+    misleadingManipulatedMedia: BinaryBool
+    misleadingOutdatedInformation: BinaryBool
+    misleadingMissingImportantContext: BinaryBool
+    misleadingUnverifiedClaimAsFact: BinaryBool
+    misleadingSatire: BinaryBool
+    notMisleadingOther: BinaryBool
+    notMisleadingFactuallyCorrect: BinaryBool
+    notMisleadingOutdatedButNotWhenWritten: BinaryBool
+    notMisleadingClearlySatire: BinaryBool
+    notMisleadingPersonalOpinion: BinaryBool
+    trustworthySources: BinaryBool
+    isMediaNote: BinaryBool
+
