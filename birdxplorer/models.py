@@ -153,7 +153,52 @@ class BaseInt(int):
         return TypeAdapter(cls).validate_python(v)
 
 
-class BaseBoundedInt(BaseInt, ABC):
+class BaseLowerBoundedInt(BaseInt, ABC):
+    """
+    >>> class NaturalNumber(BaseLowerBoundedInt):
+    ...   @classmethod
+    ...   def min_value(cls) -> int:
+    ...     return 1
+    >>> NaturalNumber.from_int(1)
+    NaturalNumber(1)
+    >>> NaturalNumber.from_int(0)
+    Traceback (most recent call last):
+     ...
+    pydantic_core._pydantic_core.ValidationError: 1 validation error for function-after[validate(), constrained-int]
+      Input should be greater than or equal to 1 [type=greater_than_equal, input_value=0, input_type=int]
+     ...
+    """
+
+    @classmethod
+    @abstractmethod
+    def min_value(cls) -> int:
+        raise NotImplementedError
+
+    @classmethod
+    def __get_extra_constraint_dict__(cls) -> dict[str, Any]:
+        return dict(super().__get_extra_constraint_dict__(), ge=cls.min_value())
+
+
+class NonNegativeInt(BaseLowerBoundedInt):
+    """
+    >>> NonNegativeInt.from_int(1)
+    NonNegativeInt(1)
+    >>> NonNegativeInt.from_int(0)
+    NonNegativeInt(0)
+    >>> NonNegativeInt.from_int(-1)
+    Traceback (most recent call last):
+     ...
+    pydantic_core._pydantic_core.ValidationError: 1 validation error for function-after[validate(), constrained-int]
+      Input should be greater than or equal to 0 [type=greater_than_equal, input_value=-1, input_type=int]
+     ...
+    """
+
+    @classmethod
+    def min_value(cls) -> int:
+        return 0
+
+
+class BaseBoundedInt(BaseLowerBoundedInt):
     """
     >>> class Under10NaturalNumber(BaseBoundedInt):
     ...   @classmethod
@@ -184,13 +229,8 @@ class BaseBoundedInt(BaseInt, ABC):
         raise NotImplementedError
 
     @classmethod
-    @abstractmethod
-    def min_value(cls) -> int:
-        raise NotImplementedError
-
-    @classmethod
     def __get_extra_constraint_dict__(cls) -> dict[str, Any]:
-        return dict(super().__get_extra_constraint_dict__(), ge=cls.min_value(), le=cls.max_value())
+        return dict(super().__get_extra_constraint_dict__(), le=cls.max_value())
 
 
 class TwitterTimestamp(BaseBoundedInt):
@@ -388,16 +428,22 @@ class EnrollmentState(str, Enum):
     earned_out_no_acknowledge = "earnedOutNoAcknowledge"
 
 
+class ModelingPopulation(str, Enum):
+    control = "CORE"
+    treatment = "EXPANSION"
+
+
 UserEnrollmentLastStateChangeTimeStamp = Union[TwitterTimestamp, Literal["0"], Literal["103308100"]]
+UserEnrollmentLastEarnOutTimestamp = Union[TwitterTimestamp, Literal["1"]]
 
 
 class UserEnrollment(BaseModel):
     participant_id: ParticipantId
     enrollment_state: EnrollmentState
-    successful_rating_needed_to_earn_in: str
+    successful_rating_needed_to_earn_in: NonNegativeInt
     timestamp_of_last_state_change: UserEnrollmentLastStateChangeTimeStamp
-    timestamp_of_last_earn_out: str
-    modeling_population: str
+    timestamp_of_last_earn_out: UserEnrollmentLastEarnOutTimestamp
+    modeling_population: ModelingPopulation
     modeling_group: NonNegativeFloat
 
 
