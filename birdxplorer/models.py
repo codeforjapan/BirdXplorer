@@ -103,7 +103,11 @@ class BinaryBool(str):
 
     @classmethod
     def to_bool(cls: Type["BinaryBool"], v: Any) -> bool:
-        return v == "1"
+        if isinstance(v, str):
+            if v not in ["0", "1"]:
+                raise ValueError("Input should be 0 or 1")
+            return v == "1"
+        return bool(v)
 
 
 class UpperCased64DigitsHexadecimalString(BaseString):
