@@ -502,6 +502,19 @@ class NotesBelievable(str, Enum):
     believable_by_many = "BELIEVABLE_BY_MANY"
     empty = ""
 
+class NotesClassification(str, Enum):
+    not_misleading = "NOT_MISLEADING"
+    misinformed_or_potentially_misleading = "MISINFORMED_OR_POTENTIALLY_MISLEADING"
+
+class NotesHarmful(str, Enum):
+    little_harm = "LITTLE_HARM"
+    considerable_harm = "CONSIDERABLE_HARM"
+    empty = ""
+
+class NotesValidationDifficulty(str, Enum):
+    easy = "EASY"
+    challenging = "CHALLENGING"
+    empty = ""
 
 class NotesClassification(str, Enum):
     not_misleading = "NOT_MISLEADING"
