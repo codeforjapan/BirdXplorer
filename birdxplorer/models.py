@@ -544,17 +544,3 @@ class Note(BaseModel):
     harmful: NotesHarmful
     validation_difficulty: NotesValidationDifficulty
     summary: str
-    misleading_other: BinaryBool
-    misleading_factual_error: BinaryBool
-    misleading_manipulated_media: BinaryBool
-    misleading_outdated_information: BinaryBool
-    misleading_missing_important_context: BinaryBool
-    misleading_unverified_claim_as_fact: BinaryBool
-    misleading_satire: BinaryBool
-    not_misleading_other: BinaryBool
-    not_misleading_factually_correct: BinaryBool
-    not_misleading_outdated_but_not_when_written: BinaryBool
-    not_misleading_clearly_satire: BinaryBool
-    not_misleading_personal_opinion: BinaryBool
-    trustworthy_sources: BinaryBool
-    is_media_note: BinaryBool
