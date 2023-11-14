@@ -469,6 +469,19 @@ class NotesBelievable(str, Enum):
     believable_by_many = "BELIEVABLE_BY_MANY"
     empty = ""
 
+class NotesClassification(str, Enum):
+    not_misleading = "NOT_MISLEADING"
+    misinformed_or_potentially_misleading = "MISINFORMED_OR_POTENTIALLY_MISLEADING"
+
+class NotesHarmful(str, Enum):
+    little_harm = "LITTLE_HARM"
+    considerable_harm = "CONSIDERABLE_HARM"
+    empty = ""
+
+class NotesValidationDifficulty(str, Enum):
+    easy = "EASY"
+    challenging = "CHALLENGING"
+    empty = ""
 
 class Note(BaseModel):
     note_id: NoteId
@@ -476,4 +489,7 @@ class Note(BaseModel):
     created_at_millis: TwitterTimestamp
     tweet_id: str = Field(pattern=r"^[0-9]{9,19}$")
     believable: NotesBelievable
+    classification: NotesClassification
+    harmful: NotesHarmful
+    validation_difficulty: NotesValidationDifficulty
     summary: str
