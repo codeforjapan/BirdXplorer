@@ -1,12 +1,13 @@
 import json
 import os
 from argparse import ArgumentParser
+from typing import Dict, List
 
 from dotenv import load_dotenv
 from openai import OpenAI
 
 
-def get_topic(client: OpenAI, tweet: str, note: str) -> str:
+def get_topic(client: OpenAI, tweet: str, note: str) -> Dict[str, List[str]]:
     with open(os.path.join(os.path.dirname(__file__), "fewshot_sample.json"), "r") as f:
         fewshot_sample = json.load(f)
 
@@ -41,6 +42,7 @@ def get_topic(client: OpenAI, tweet: str, note: str) -> str:
             },
         ],
         model="gpt-4",
+        temperature=0.0,
     )
 
     return json.loads(chat_completion.choices[0].message.content)
