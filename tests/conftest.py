@@ -47,25 +47,27 @@ def settings_for_test() -> Generator[PostgresStorageSettings, None, None]:
 @fixture(scope="session")
 def db_for_test(settings_for_default: PostgresStorageSettings) -> Generator[int, None, None]:
     engine = create_engine_from_settings(settings_for_default)
-    conn = engine.connect()
-    conn.execute(text("commit"))
-    try:
-        conn.execute(text(f"drop database {TEST_DATABASE_NAME}"))
-    except SQLAlchemyError:
-        pass
-    finally:
-        conn.close()
+    with engine.connect() as conn:
+        conn.execute(text("commit"))
+        try:
+            conn.execute(text(f"drop database {TEST_DATABASE_NAME}"))
+        except SQLAlchemyError:
+            pass
 
-    conn = engine.connect()
-    conn.execute(text("commit"))
-    conn.execute(text(f"create database {TEST_DATABASE_NAME}"))
-    conn.close()
+    with engine.connect() as conn:
+        conn.execute(text("commit"))
+        conn.execute(text(f"create database {TEST_DATABASE_NAME}"))
+
     yield 1
 
-    conn = engine.connect()
-    conn.execute(text("commit"))
-    conn.execute(text(f"drop database {TEST_DATABASE_NAME}"))
-    conn.close()
+    with engine.connect() as conn:
+        for row in conn.execute(text(f"SELECT pid FROM pg_stat_activity WHERE datname = '{TEST_DATABASE_NAME}'")):
+            conn.execute(text(f"SELECT pg_terminate_backend({row[0]})"))
+
+    with engine.connect() as conn:
+        conn = engine.connect()
+        conn.execute(text("commit"))
+        conn.execute(text(f"drop database {TEST_DATABASE_NAME}"))
 
     engine.dispose()
 
