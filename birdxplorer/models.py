@@ -466,8 +466,10 @@ class ModelingPopulation(str, Enum):
     treatment = "EXPANSION"
 
 
-UserEnrollmentLastStateChangeTimeStamp = Union[TwitterTimestamp, Literal["0"], Literal["103308100"]]
-UserEnrollmentLastEarnOutTimestamp = Union[TwitterTimestamp, Literal["1"]]
+UserEnrollmentLastStateChangeTimeStamp = Union[
+    TwitterTimestamp, Literal["0"], Literal["103308100"], Literal[0], Literal[103308100]
+]
+UserEnrollmentLastEarnOutTimestamp = Union[TwitterTimestamp, Literal["1"], Literal[1]]
 
 
 class UserEnrollment(BaseModel):

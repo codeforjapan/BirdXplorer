@@ -1,0 +1,14 @@
+version: '3.1'
+services:
+  db:
+    image: postgres
+    volumes:
+      - bx-db:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=postgres
+    restart: unless-stopped
+    ports:
+      - 5432:5432
+
+volumes:
+  bx-db:
