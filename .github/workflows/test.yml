@@ -9,6 +9,18 @@ jobs:
   test-check:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+
+    services:
+      postgres:
+        image: postgres:14-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,3 +36,5 @@ jobs:
         run: cp .env.example .env
       - name: test
         run: tox
+        env:
+          TEST_DATABASE_NAME: test
