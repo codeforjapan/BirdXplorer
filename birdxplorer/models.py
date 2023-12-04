@@ -522,7 +522,7 @@ class NotesValidationDifficulty(str, Enum):
 
 class Note(BaseModel):
     note_id: NoteId
-    note_author_participant_id: str = Field(pattern=r"^[0-9A-F]{64}$")
+    note_author_participant_id: ParticipantId
     created_at_millis: TwitterTimestamp
     tweet_id: str = Field(pattern=r"^[0-9]{9,19}$")
     believable: NotesBelievable
