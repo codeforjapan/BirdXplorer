@@ -26,6 +26,12 @@ def get_topic(client: OpenAI, tweet: str, note: str) -> Dict[str, List[str]]:
 ```
 このセットに対してのトピックは「{" ".join(fewshot_sample["topics"])}」です。
 これを踏まえて、以下のツイートとコミュニティノートに対して同じ粒度で複数のトピックを提示してください。形式はJSONで、キーをtopicsとして値にトピックを配列で格納してください。
+レスポンスの例:
+```
+{
+  "topics": ["医療", "福祉", ...]
+}
+```
 """,
             },
             {
@@ -41,7 +47,7 @@ def get_topic(client: OpenAI, tweet: str, note: str) -> Dict[str, List[str]]:
 """,
             },
         ],
-        model="gpt-4",
+        model="gpt-3.5-turbo",
         temperature=0.0,
     )
 
