@@ -9,13 +9,14 @@ from openai import OpenAI
 response_sample = """
 {
   "1700958646329": {
-    "topics": ["医療, 福祉"...],
+    "topics": ["医療", "福祉", "政治"],
     "language": "en"
   }
 }
 """
 
 def get_topic(client: OpenAI, note_id: int, tweet: str, note: str) -> Dict[str, List[str]]:
+    print(f"note id: {note_id}")
     with open(os.path.join(os.path.dirname(__file__), "fewshot_sample.json"), "r") as f:
         fewshot_sample = json.load(f)
 
@@ -61,18 +62,16 @@ note id: {note_id}
 
     return json.loads(chat_completion.choices[0].message.content)
 
-
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("input_file")
-    # parser.add_argument("output_file")
+    parser.add_argument("output_file")
     args = parser.parse_args()
     load_dotenv()
     client = OpenAI()
-    with open(args.input_file, "r", encoding="utf-8") as f:
+    with open(args.input_file, "r") as f:
         notes = json.load(f)
-    # create output json file with topics. make the file an array of objects which is each response
-    with open("data/output.json", "w", encoding="utf-8") as f:
+    with open(args.output_file, "w", encoding="utf-8") as f:
         json.dump(
             [
                 get_topic(client, note["noteId"], note["tweetBody"], note["noteBody"])
