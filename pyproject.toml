@@ -71,6 +71,7 @@ addopts = ["-sv", "--doctest-modules", "--cov=birdxplorer", "--cov-report=xml", 
 testpaths = ["tests", "birdxplorer"]
 filterwarnings = [
     "error",
+    "ignore:The \\'app\\' shortcut is now deprecated. Use the explicit style \\'transport=WSGITransport\\(app=\\.\\.\\.\\)\\' instead\\.",
 ]
 
 [tool.black]
