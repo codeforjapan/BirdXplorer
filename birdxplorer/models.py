@@ -449,8 +449,7 @@ class Message(BaseModel):
     message: str
 
 
-class ParticipantId(UpperCased64DigitsHexadecimalString):
-    ...
+class ParticipantId(UpperCased64DigitsHexadecimalString): ...
 
 
 class EnrollmentState(str, Enum):
