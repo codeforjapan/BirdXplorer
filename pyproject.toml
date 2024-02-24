@@ -32,7 +32,6 @@ dependencies = [
     "fastapi",
     "JSON-log-formatter",
     "openai",
-    "typing-extensions",
 ]
 
 [project.urls]
