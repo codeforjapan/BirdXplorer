@@ -10,7 +10,7 @@ from polyfactory.pytest_plugin import register_fixture
 from pytest import fixture
 
 from birdxplorer.exceptions import UserEnrollmentNotFoundError
-from birdxplorer.models import ParticipantId, TwitterTimestamp, UserEnrollment
+from birdxplorer.models import ParticipantId, Topic, TwitterTimestamp, UserEnrollment
 from birdxplorer.settings import GlobalSettings
 from birdxplorer.storage import Storage
 
@@ -33,6 +33,11 @@ class UserEnrollmentFactory(ModelFactory[UserEnrollment]):
     participant_id = Use(lambda: "".join(random.choices("0123456789ABCDEF", k=64)))
     timestamp_of_last_state_change = Use(gen_random_twitter_timestamp)
     timestamp_of_last_earn_out = Use(gen_random_twitter_timestamp)
+
+
+@register_fixture(name="topic_factory")
+class TopicFactory(ModelFactory[Topic]):
+    __model__ = Topic
 
 
 @fixture
@@ -63,3 +68,13 @@ def client(settings_for_test: GlobalSettings, mock_storage: MagicMock) -> Genera
     with patch("birdxplorer.app.gen_storage", return_value=mock_storage):
         app = gen_app(settings=settings_for_test)
         yield TestClient(app)
+
+
+@fixture
+def topic_samples(topic_factory: TopicFactory) -> Generator[List[Topic], None, None]:
+    topics = [
+        topic_factory.build(topic_id=1, label={"en": "topic1", "ja": "トピック1"}, reference_count=12341),
+        topic_factory.build(topic_id=2, label={"en": "topic2", "ja": "トピック2"}, reference_count=1232312342),
+        topic_factory.build(topic_id=3, label={"en": "topic3", "ja": "トピック3"}, reference_count=3),
+    ]
+    yield topics

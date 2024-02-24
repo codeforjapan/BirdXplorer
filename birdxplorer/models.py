@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Literal, Type, TypeAlias, TypeVar, Union
+from typing import Any, Dict, Literal, Type, TypeAlias, TypeVar, Union
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict, Field, GetCoreSchemaHandler, TypeAdapter
@@ -126,6 +126,31 @@ class UpperCased64DigitsHexadecimalString(BaseString):
     @classmethod
     def __get_extra_constraint_dict__(cls) -> dict[str, Any]:
         return dict(super().__get_extra_constraint_dict__(), pattern=r"^[0-9A-F]{64}$")
+
+
+class NonEmptyStringMixin(BaseString):
+    @classmethod
+    def __get_extra_constraint_dict__(cls) -> dict[str, Any]:
+        return dict(super().__get_extra_constraint_dict__(), min_length=1)
+
+
+class TrimmedStringMixin(BaseString):
+    @classmethod
+    def __get_extra_constraint_dict__(cls) -> dict[str, Any]:
+        return dict(super().__get_extra_constraint_dict__(), strip_whitespace=True)
+
+
+class NonEmptyTrimmedString(TrimmedStringMixin, NonEmptyStringMixin):
+    """
+    >>> NonEmptyTrimmedString.from_str("test")
+    NonEmptyTrimmedString('test')
+    >>> NonEmptyTrimmedString.from_str("")
+    Traceback (most recent call last):
+     ...
+    pydantic_core._pydantic_core.ValidationError: 1 validation error for function-after[validate(), constrained-str]
+      String should have at least 1 character [type=string_too_short, input_value='', input_type=str]
+     ...
+    """
 
 
 class BaseInt(int):
@@ -543,3 +568,24 @@ class Note(BaseModel):
     harmful: NotesHarmful
     validation_difficulty: NotesValidationDifficulty
     summary: str
+
+
+class TopicId(NonNegativeInt): ...
+
+
+class LanguageIdentifier(str, Enum):
+    EN = "en"
+    ES = "es"
+    JA = "ja"
+    PT = "pt"
+    DE = "de"
+    FR = "fr"
+
+
+class TopicLabelString(NonEmptyTrimmedString): ...
+
+
+class Topic(BaseModel):
+    topic_id: TopicId
+    label: Dict[LanguageIdentifier, TopicLabelString]
+    reference_count: NonNegativeInt
