@@ -30,7 +30,8 @@ dependencies = [
     "sqlalchemy",
     "pydantic_settings",
     "fastapi",
-    "JSON-log-formatter"
+    "JSON-log-formatter",
+    "openai"
 ]
 
 [project.urls]
