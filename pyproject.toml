@@ -71,6 +71,7 @@ addopts = ["-sv", "--doctest-modules", "--cov=birdxplorer", "--cov-report=xml", 
 testpaths = ["tests", "birdxplorer"]
 filterwarnings = [
     "error",
+    "ignore:The \\'app\\' shortcut is now deprecated. Use the explicit style \\'transport=WSGITransport\\(app=\\.\\.\\.\\)\\' instead\\.",
 ]
 
 [tool.black]
@@ -79,7 +80,7 @@ target-version = ['py310']
 
 [tool.flake8]
 max-line-length = 120
-extend-ignore = "E203"
+extend-ignore = "E203,E701"
 
 [tool.mypy]
 python_version = "3.10"
