@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, Literal, Type, TypeAlias, TypeVar, Union
+from typing import Any, Dict, List, Literal, Type, TypeAlias, TypeVar, Union
 
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import ConfigDict, Field, GetCoreSchemaHandler, TypeAdapter
+from pydantic import ConfigDict, GetCoreSchemaHandler, TypeAdapter
 from pydantic.alias_generators import to_camel
 from pydantic_core import core_schema
 
@@ -126,6 +126,23 @@ class UpperCased64DigitsHexadecimalString(BaseString):
     @classmethod
     def __get_extra_constraint_dict__(cls) -> dict[str, Any]:
         return dict(super().__get_extra_constraint_dict__(), pattern=r"^[0-9A-F]{64}$")
+
+
+class NineToNineteenDigitsDecimalString(BaseString):
+    """
+    >>> NineToNineteenDigitsDecimalString.from_str("test")
+    Traceback (most recent call last):
+     ...
+    pydantic_core._pydantic_core.ValidationError: 1 validation error for function-after[validate(), constrained-str]
+      String should match pattern '^[0-9]{9,19}$' [type=string_pattern_mismatch, input_value='test', input_type=str]
+     ...
+    >>> NineToNineteenDigitsDecimalString.from_str("1234567890123456789")
+    NineToNineteenDigitsDecimalString('1234567890123456789')
+    """
+
+    @classmethod
+    def __get_extra_constraint_dict__(cls) -> dict[str, Any]:
+        return dict(super().__get_extra_constraint_dict__(), pattern=r"^[0-9]{9,19}$")
 
 
 class NonEmptyStringMixin(BaseString):
@@ -544,11 +561,18 @@ class NotesValidationDifficulty(str, Enum):
     empty = ""
 
 
-class Note(BaseModel):
+class TweetId(NineToNineteenDigitsDecimalString): ...
+
+
+class NoteData(BaseModel):
+    """
+    This is for validating the original data from notes.csv.
+    """
+
     note_id: NoteId
     note_author_participant_id: ParticipantId
     created_at_millis: TwitterTimestamp
-    tweet_id: str = Field(pattern=r"^[0-9]{9,19}$")
+    tweet_id: TweetId
     believable: NotesBelievable
     misleading_other: BinaryBool
     misleading_factual_error: BinaryBool
@@ -585,7 +609,24 @@ class LanguageIdentifier(str, Enum):
 class TopicLabelString(NonEmptyTrimmedString): ...
 
 
+TopicLabel: TypeAlias = Dict[LanguageIdentifier, TopicLabelString]
+
+
 class Topic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     topic_id: TopicId
-    label: Dict[LanguageIdentifier, TopicLabelString]
+    label: TopicLabel
     reference_count: NonNegativeInt
+
+
+class SummaryString(NonEmptyTrimmedString): ...
+
+
+class Note(BaseModel):
+    note_id: NoteId
+    post_id: TweetId
+    language: LanguageIdentifier
+    topics: List[Topic]
+    summary: SummaryString
+    created_at: TwitterTimestamp

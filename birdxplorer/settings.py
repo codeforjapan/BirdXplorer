@@ -20,11 +20,11 @@ class PostgresStorageSettings(BaseSettings):
 
     @computed_field  # type: ignore[misc]
     @property
-    def sqlalchemy_database_url(self) -> PostgresDsn:
+    def sqlalchemy_database_url(self) -> str:
         return PostgresDsn(
             url=f"postgresql://{self.username}:"
             f"{self.password.replace('@', '%40')}@{self.host}:{self.port}/{self.database}"
-        )
+        ).unicode_string()
 
 
 class GlobalSettings(BaseSettings):
