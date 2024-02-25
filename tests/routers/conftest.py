@@ -48,16 +48,24 @@ def user_enrollment_samples(
 
 
 @fixture
-def mock_storage(user_enrollment_samples: List[UserEnrollment]) -> Generator[MagicMock, None, None]:
+def mock_storage(
+    user_enrollment_samples: List[UserEnrollment], topic_samples: List[Topic]
+) -> Generator[MagicMock, None, None]:
     mock = MagicMock(spec=Storage)
 
-    def _(participant_id: ParticipantId) -> UserEnrollment:
+    def _get_user_enrollment_by_participant_id(participant_id: ParticipantId) -> UserEnrollment:
         x = {d.participant_id: d for d in user_enrollment_samples}.get(participant_id)
         if x is None:
             raise UserEnrollmentNotFoundError(participant_id=participant_id)
         return x
 
-    mock.get_user_enrollment_by_participant_id.side_effect = _
+    mock.get_user_enrollment_by_participant_id.side_effect = _get_user_enrollment_by_participant_id
+
+    def _get_topics() -> Generator[Topic, None, None]:
+        yield from topic_samples
+
+    mock.get_topics.side_effect = _get_topics
+
     yield mock
 
 
