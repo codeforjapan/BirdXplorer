@@ -8,6 +8,16 @@ permissions:
 jobs:
   test-check:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15.4
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: birdxplorer
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+
     timeout-minutes: 5
     steps:
       - name: Checkout
