@@ -1,13 +1,16 @@
-from typing import List
+from typing import List, Union
 
 from fastapi import APIRouter
 
-from ..models import BaseModel, ParticipantId, Topic, UserEnrollment
+from ..models import BaseModel, ParticipantId, Topic, UserEnrollment, Note
 from ..storage import Storage
 
 
 class TopicListResponse(BaseModel):
     data: List[Topic]
+
+class NoteListResponse(BaseModel):
+    data: List[Note]
 
 
 def gen_router(storage: Storage) -> APIRouter:
@@ -23,5 +26,9 @@ def gen_router(storage: Storage) -> APIRouter:
     @router.get("/topics", response_model=TopicListResponse)
     def get_topics() -> TopicListResponse:
         return TopicListResponse(data=list(storage.get_topics()))
+    
+    @router.get("/notes", response_model=NoteListResponse)
+    def get_notes(created_at_from: Union[int, None] = None, created_at_to: Union[int, None] = None, topic_id: Union[str, None] = None, post_id: Union[str, None] = None, language: Union[str, None] = None) -> NoteListResponse:
+        return NoteListResponse(data=list(storage.get_notes(created_at_from, created_at_to, topic_id, post_id, language)))
 
     return router
