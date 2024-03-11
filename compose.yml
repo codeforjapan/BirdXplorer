@@ -6,7 +6,7 @@ services:
     container_name: postgres_container
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: birdxplorer
+      POSTGRES_PASSWORD: ${BX_STORAGE_SETTINGS__PASSWORD}
       POSTGRES_DB: postgres
     ports:
       - '5432:5432'

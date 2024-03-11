@@ -31,7 +31,7 @@ dependencies = [
     "pydantic_settings",
     "fastapi",
     "JSON-log-formatter",
-    "openai"
+    "openai",
 ]
 
 [project.urls]

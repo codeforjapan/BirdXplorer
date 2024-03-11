@@ -4,7 +4,7 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 
-from birdxplorer.models import Note, UserEnrollment
+from birdxplorer.models import NoteData, UserEnrollment
 
 
 class BaseDataModelTester(ABC):
@@ -52,7 +52,7 @@ class NoteTester(BaseDataModelTester):
         super(NoteTester, self).__init__(re.compile(r"notes-[0-9]{5}.tsv"))
 
     def validate(self, row: Mapping[str, str]) -> None:
-        _ = Note.model_validate(row)
+        _ = NoteData.model_validate(row)
 
 
 def test_notes() -> None:
