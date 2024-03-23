@@ -104,7 +104,7 @@ legacy_tox_ini = """
 
     [testenv]
     setenv = 
-        VIRTUALENV_PIP = 23.2.1
+        VIRTUALENV_PIP = 24.0
         DATA_DIR = {env:BX_DATA_DIR}
     deps =
         -e .[dev]
