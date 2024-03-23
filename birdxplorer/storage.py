@@ -1,14 +1,40 @@
 from typing import Generator, List
 
+from psycopg2.extensions import AsIs, register_adapter
+from pydantic import AnyUrl, HttpUrl
 from sqlalchemy import ForeignKey, create_engine, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 from sqlalchemy.types import DECIMAL, JSON, Integer, String
 
-from .models import LanguageIdentifier, NoteId, ParticipantId, SummaryString
+from .models import (
+    LanguageIdentifier,
+    MediaDetails,
+    NonNegativeInt,
+    NoteId,
+    ParticipantId,
+)
+from .models import Post as PostModel
+from .models import SummaryString
 from .models import Topic as TopicModel
-from .models import TopicId, TopicLabel, TweetId, TwitterTimestamp, UserEnrollment
+from .models import (
+    TopicId,
+    TopicLabel,
+    TweetId,
+    TwitterTimestamp,
+    UserEnrollment,
+    UserId,
+    UserName,
+)
+from .models import XUser as XUserModel
 from .settings import GlobalSettings
+
+
+def adapt_pydantic_http_url(url: AnyUrl) -> AsIs:
+    return AsIs(repr(str(url)))
+
+
+register_adapter(AnyUrl, adapt_pydantic_http_url)
 
 
 class Base(DeclarativeBase):
@@ -21,6 +47,11 @@ class Base(DeclarativeBase):
         LanguageIdentifier: String,
         TwitterTimestamp: DECIMAL,
         SummaryString: String,
+        UserId: String,
+        UserName: String,
+        HttpUrl: String,
+        NonNegativeInt: DECIMAL,
+        MediaDetails: JSON,
     }
 
 
@@ -50,6 +81,30 @@ class TopicRecord(Base):
     label: Mapped[TopicLabel] = mapped_column(nullable=False)
 
 
+class XUserRecord(Base):
+    __tablename__ = "x_users"
+
+    user_id: Mapped[UserId] = mapped_column(primary_key=True)
+    name: Mapped[UserName] = mapped_column(nullable=False)
+    profile_image: Mapped[HttpUrl] = mapped_column(nullable=False)
+    followers_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
+    following_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
+
+
+class PostRecord(Base):
+    __tablename__ = "posts"
+
+    post_id: Mapped[TweetId] = mapped_column(primary_key=True)
+    user_id: Mapped[UserId] = mapped_column(ForeignKey("x_users.user_id"), nullable=False)
+    user: Mapped[XUserRecord] = relationship()
+    text: Mapped[SummaryString] = mapped_column(nullable=False)
+    media_details: Mapped[MediaDetails] = mapped_column()
+    created_at: Mapped[TwitterTimestamp] = mapped_column(nullable=False)
+    like_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
+    repost_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
+    impression_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
+
+
 class Storage:
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
@@ -75,6 +130,27 @@ class Storage:
             ):
                 yield TopicModel(
                     topic_id=topic_record.topic_id, label=topic_record.label, reference_count=reference_count or 0
+                )
+
+    def get_posts(self) -> Generator[PostModel, None, None]:
+        with Session(self.engine) as sess:
+            for post_record in sess.query(PostRecord).all():
+                yield PostModel(
+                    post_id=post_record.post_id,
+                    x_user_id=post_record.user_id,
+                    x_user=XUserModel(
+                        user_id=post_record.user.user_id,
+                        name=post_record.user.name,
+                        profile_image=post_record.user.profile_image,
+                        followers_count=post_record.user.followers_count,
+                        following_count=post_record.user.following_count,
+                    ),
+                    text=post_record.text,
+                    media_details=post_record.media_details,
+                    created_at=post_record.created_at,
+                    like_count=post_record.like_count,
+                    repost_count=post_record.repost_count,
+                    impression_count=post_record.impression_count,
                 )
 
 

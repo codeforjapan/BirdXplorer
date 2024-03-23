@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Any, Dict, List, Literal, Type, TypeAlias, TypeVar, Union
 
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import ConfigDict, GetCoreSchemaHandler, TypeAdapter
+from pydantic import ConfigDict, GetCoreSchemaHandler, HttpUrl, TypeAdapter
 from pydantic.alias_generators import to_camel
 from pydantic_core import core_schema
 
@@ -128,21 +128,21 @@ class UpperCased64DigitsHexadecimalString(BaseString):
         return dict(super().__get_extra_constraint_dict__(), pattern=r"^[0-9A-F]{64}$")
 
 
-class NineToNineteenDigitsDecimalString(BaseString):
+class UpToNineteenDigitsDecimalString(BaseString):
     """
-    >>> NineToNineteenDigitsDecimalString.from_str("test")
+    >>> UpToNineteenDigitsDecimalString.from_str("test")
     Traceback (most recent call last):
      ...
     pydantic_core._pydantic_core.ValidationError: 1 validation error for function-after[validate(), constrained-str]
-      String should match pattern '^[0-9]{9,19}$' [type=string_pattern_mismatch, input_value='test', input_type=str]
+      String should match pattern '^[0-9]{1,19}$' [type=string_pattern_mismatch, input_value='test', input_type=str]
      ...
-    >>> NineToNineteenDigitsDecimalString.from_str("1234567890123456789")
-    NineToNineteenDigitsDecimalString('1234567890123456789')
+    >>> UpToNineteenDigitsDecimalString.from_str("1234567890123456789")
+    UpToNineteenDigitsDecimalString('1234567890123456789')
     """
 
     @classmethod
     def __get_extra_constraint_dict__(cls) -> dict[str, Any]:
-        return dict(super().__get_extra_constraint_dict__(), pattern=r"^[0-9]{9,19}$")
+        return dict(super().__get_extra_constraint_dict__(), pattern=r"^[0-9]{1,19}$")
 
 
 class NonEmptyStringMixin(BaseString):
@@ -561,7 +561,7 @@ class NotesValidationDifficulty(str, Enum):
     empty = ""
 
 
-class TweetId(NineToNineteenDigitsDecimalString): ...
+class TweetId(UpToNineteenDigitsDecimalString): ...
 
 
 class NoteData(BaseModel):
@@ -630,3 +630,35 @@ class Note(BaseModel):
     topics: List[Topic]
     summary: SummaryString
     created_at: TwitterTimestamp
+
+
+class UserId(UpToNineteenDigitsDecimalString): ...
+
+
+class UserName(NonEmptyTrimmedString): ...
+
+
+class XUser(BaseModel):
+    user_id: UserId
+    name: UserName
+    profile_image: HttpUrl
+    followers_count: NonNegativeInt
+    following_count: NonNegativeInt
+
+
+class PostId(UpToNineteenDigitsDecimalString): ...
+
+
+MediaDetails: TypeAlias = List[HttpUrl] | None
+
+
+class Post(BaseModel):
+    post_id: PostId
+    x_user_id: UserId
+    x_user: XUser
+    text: str
+    media_details: MediaDetails = None
+    created_at: TwitterTimestamp
+    like_count: NonNegativeInt
+    repost_count: NonNegativeInt
+    impression_count: NonNegativeInt
