@@ -2,12 +2,16 @@ from typing import List
 
 from fastapi import APIRouter
 
-from ..models import BaseModel, ParticipantId, Topic, UserEnrollment
+from ..models import BaseModel, ParticipantId, Post, Topic, UserEnrollment
 from ..storage import Storage
 
 
 class TopicListResponse(BaseModel):
     data: List[Topic]
+
+
+class PostListResponse(BaseModel):
+    data: List[Post]
 
 
 def gen_router(storage: Storage) -> APIRouter:
@@ -23,5 +27,9 @@ def gen_router(storage: Storage) -> APIRouter:
     @router.get("/topics", response_model=TopicListResponse)
     def get_topics() -> TopicListResponse:
         return TopicListResponse(data=list(storage.get_topics()))
+
+    @router.get("/posts", response_model=PostListResponse)
+    def get_posts() -> PostListResponse:
+        return PostListResponse(data=list(storage.get_posts()))
 
     return router

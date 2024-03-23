@@ -20,17 +20,21 @@ from birdxplorer.exceptions import UserEnrollmentNotFoundError
 from birdxplorer.models import (
     Note,
     ParticipantId,
+    Post,
     Topic,
     TwitterTimestamp,
     UserEnrollment,
+    XUser,
 )
 from birdxplorer.settings import GlobalSettings, PostgresStorageSettings
 from birdxplorer.storage import (
     Base,
     NoteRecord,
     NoteTopicAssociation,
+    PostRecord,
     Storage,
     TopicRecord,
+    XUserRecord,
 )
 
 
@@ -90,6 +94,16 @@ class TopicFactory(ModelFactory[Topic]):
     __model__ = Topic
 
 
+@register_fixture(name="x_user_factory")
+class XUserFactory(ModelFactory[XUser]):
+    __model__ = XUser
+
+
+@register_fixture(name="post_factory")
+class PostFactory(ModelFactory[Post]):
+    __model__ = Post
+
+
 @fixture
 def user_enrollment_samples(
     user_enrollment_factory: UserEnrollmentFactory,
@@ -99,7 +113,7 @@ def user_enrollment_samples(
 
 @fixture
 def mock_storage(
-    user_enrollment_samples: List[UserEnrollment], topic_samples: List[Topic]
+    user_enrollment_samples: List[UserEnrollment], topic_samples: List[Topic], post_samples: List[Post]
 ) -> Generator[MagicMock, None, None]:
     mock = MagicMock(spec=Storage)
 
@@ -115,6 +129,11 @@ def mock_storage(
         yield from topic_samples
 
     mock.get_topics.side_effect = _get_topics
+
+    def _get_posts() -> Generator[Post, None, None]:
+        yield from post_samples
+
+    mock.get_posts.side_effect = _get_posts
 
     yield mock
 
@@ -184,6 +203,74 @@ def note_samples(note_factory: NoteFactory, topic_samples: List[Topic]) -> Gener
         ),
     ]
     yield notes
+
+
+@fixture
+def x_user_samples(x_user_factory: XUserFactory) -> Generator[List[XUser], None, None]:
+    x_users = [
+        x_user_factory.build(
+            user_id="1234567890123456781",
+            name="User1",
+            profile_image_url="https://pbs.twimg.com/profile_images/1468001914302390XXX/xxxxXXXX_normal.jpg",
+            followers_count=100,
+            following_count=200,
+        ),
+        x_user_factory.build(
+            user_id="1234567890123456782",
+            name="User2",
+            profile_image_url="https://pbs.twimg.com/profile_images/1468001914302390YYY/yyyyYYYY_normal.jpg",
+            followers_count=300,
+            following_count=400,
+        ),
+        x_user_factory.build(
+            user_id="1234567890123456783",
+            name="User3",
+            profile_image_url="https://pbs.twimg.com/profile_images/1468001914302390ZZZ/zzzzZZZZ_normal.jpg",
+            followers_count=300,
+            following_count=400,
+        ),
+    ]
+    yield x_users
+
+
+@fixture
+def post_samples(post_factory: PostFactory, x_user_samples: List[XUser]) -> Generator[List[Post], None, None]:
+    posts = [
+        post_factory.build(
+            post_id="2234567890123456781",
+            x_user_id="1234567890123456781",
+            x_user=x_user_samples[0],
+            text="text11",
+            media_details=None,
+            created_at=1152921600000,
+            like_count=10,
+            repost_count=20,
+            impression_count=30,
+        ),
+        post_factory.build(
+            post_id="2234567890123456791",
+            x_user_id="1234567890123456781",
+            x_user=x_user_samples[0],
+            text="text12",
+            media_details=None,
+            created_at=1152921700000,
+            like_count=10,
+            repost_count=20,
+            impression_count=30,
+        ),
+        post_factory.build(
+            post_id="2234567890123456801",
+            x_user_id="1234567890123456782",
+            x_user=x_user_samples[1],
+            text="text21",
+            media_details=None,
+            created_at=1152921800000,
+            like_count=10,
+            repost_count=20,
+            impression_count=30,
+        ),
+    ]
+    yield posts
 
 
 TEST_DATABASE_NAME = "bx_test"
@@ -272,5 +359,51 @@ def note_records_sample(
                 sess.add(assoc)
                 inst.topics.append(assoc)
             res.append(inst)
+        sess.commit()
+    yield res
+
+
+@fixture
+def x_user_records_sample(
+    x_user_samples: List[XUser],
+    engine_for_test: Engine,
+) -> Generator[List[XUserRecord], None, None]:
+    res = [
+        XUserRecord(
+            user_id=d.user_id,
+            name=d.name,
+            profile_image=d.profile_image,
+            followers_count=d.followers_count,
+            following_count=d.following_count,
+        )
+        for d in x_user_samples
+    ]
+    with Session(engine_for_test) as sess:
+        sess.add_all(res)
+        sess.commit()
+    yield res
+
+
+@fixture
+def post_records_sample(
+    x_user_records_sample: List[XUserRecord],
+    post_samples: List[Post],
+    engine_for_test: Engine,
+) -> Generator[List[PostRecord], None, None]:
+    res = [
+        PostRecord(
+            post_id=d.post_id,
+            user_id=d.x_user_id,
+            text=d.text,
+            media_details=d.media_details,
+            created_at=d.created_at,
+            like_count=d.like_count,
+            repost_count=d.repost_count,
+            impression_count=d.impression_count,
+        )
+        for d in post_samples
+    ]
+    with Session(engine_for_test) as sess:
+        sess.add_all(res)
         sess.commit()
     yield res
