@@ -34,3 +34,24 @@ def test_posts_get_has_post_id_filter(client: TestClient, post_samples: List[Pos
     assert res_json == {
         "data": [json.loads(post_samples[0].model_dump_json()), json.loads(post_samples[2].model_dump_json())]
     }
+
+
+def test_posts_get_has_created_at_filter_start_and_end(client: TestClient, post_samples: List[Post]) -> None:
+    response = client.get("/api/v1/data/posts/?createdAtStart=2006-7-25 00:00:00&createdAtEnd=2006-7-30 23:59:59")
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json == {"data": [json.loads(post_samples[1].model_dump_json())]}
+
+
+def test_posts_get_has_created_at_filter_start(client: TestClient, post_samples: List[Post]) -> None:
+    response = client.get("/api/v1/data/posts/?createdAtStart=2006-7-25 00:00:00")
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json == {"data": [json.loads(post_samples[i].model_dump_json()) for i in (1, 2)]}
+
+
+def test_posts_get_has_created_at_filter_end(client: TestClient, post_samples: List[Post]) -> None:
+    response = client.get("/api/v1/data/posts/?createdAtEnd=2006-7-30 00:00:00")
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json == {"data": [json.loads(post_samples[i].model_dump_json()) for i in (0, 1)]}
