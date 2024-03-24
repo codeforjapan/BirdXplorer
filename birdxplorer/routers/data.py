@@ -25,6 +25,10 @@ class PostListResponse(BaseModel):
 
 
 def str_to_twitter_timestamp(s: str) -> TwitterTimestamp:
+    try:
+        return TwitterTimestamp.from_int(int(s))
+    except ValueError:
+        pass
     tmp = dateutil_parse(s)
     if tmp.tzinfo is None:
         tmp = tmp.replace(tzinfo=timezone.utc)
@@ -52,8 +56,8 @@ def gen_router(storage: Storage) -> APIRouter:
     @router.get("/posts", response_model=PostListResponse)
     def get_posts(
         post_id: Union[List[PostId], None] = Query(default=None),
-        created_at_start: Union[None, str, TwitterTimestamp] = Query(default=None),
-        created_at_end: Union[None, str, TwitterTimestamp] = Query(default=None),
+        created_at_start: Union[None, TwitterTimestamp, str] = Query(default=None),
+        created_at_end: Union[None, TwitterTimestamp, str] = Query(default=None),
     ) -> PostListResponse:
         if post_id is not None:
             return PostListResponse(data=list(storage.get_posts_by_ids(post_ids=post_id)))
