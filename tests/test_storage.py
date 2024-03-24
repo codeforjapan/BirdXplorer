@@ -2,7 +2,7 @@ from typing import List
 
 from sqlalchemy.engine import Engine
 
-from birdxplorer.models import Post, Topic
+from birdxplorer.models import Post, PostId, Topic
 from birdxplorer.storage import NoteRecord, PostRecord, Storage, TopicRecord
 
 
@@ -41,5 +41,19 @@ def test_get_posts_by_ids(
     storage = Storage(engine=engine_for_test)
     post_ids = [post_samples[i].post_id for i in (0, 2)]
     expected = [post_samples[i] for i in (0, 2)]
+    actual = list(storage.get_posts_by_ids(post_ids))
+    assert expected == actual
+
+
+def test_get_posts_by_ids_empty(
+    engine_for_test: Engine,
+    post_samples: List[Post],
+    post_records_sample: List[PostRecord],
+    topic_records_sample: List[TopicRecord],
+    note_records_sample: List[NoteRecord],
+) -> None:
+    storage = Storage(engine=engine_for_test)
+    post_ids: List[PostId] = []
+    expected: List[Post] = []
     actual = list(storage.get_posts_by_ids(post_ids))
     assert expected == actual
