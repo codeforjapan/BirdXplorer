@@ -175,7 +175,9 @@ class Storage:
                 yield self._post_record_to_model(post_record)
 
     def get_posts_by_created_at_end(self, end: TwitterTimestamp) -> Generator[PostModel, None, None]:
-        raise NotImplementedError
+        with Session(self.engine) as sess:
+            for post_record in sess.query(PostRecord).filter(PostRecord.created_at < end).all():
+                yield self._post_record_to_model(post_record)
 
 
 def gen_storage(settings: GlobalSettings) -> Storage:

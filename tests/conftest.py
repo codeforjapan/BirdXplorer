@@ -147,7 +147,7 @@ def mock_storage(
 
     def _get_posts_by_created_at_range(start: TwitterTimestamp, end: TwitterTimestamp) -> Generator[Post, None, None]:
         for post in post_samples:
-            if start <= post.created_at <= end:
+            if start <= post.created_at < end:
                 yield post
 
     mock.get_posts_by_created_at_range.side_effect = _get_posts_by_created_at_range
@@ -161,7 +161,7 @@ def mock_storage(
 
     def _get_posts_by_created_at_end(end: TwitterTimestamp) -> Generator[Post, None, None]:
         for post in post_samples:
-            if post.created_at <= end:
+            if post.created_at < end:
                 yield post
 
     mock.get_posts_by_created_at_end.side_effect = _get_posts_by_created_at_end
