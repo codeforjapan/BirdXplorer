@@ -72,3 +72,17 @@ def test_get_posts_by_created_at_range(
     expected = [post_samples[i] for i in (1,)]
     actual = list(storage.get_posts_by_created_at_range(start, end))
     assert expected == actual
+
+
+def test_get_posts_by_created_at_start(
+    engine_for_test: Engine,
+    post_samples: List[Post],
+    post_records_sample: List[PostRecord],
+    topic_records_sample: List[TopicRecord],
+    note_records_sample: List[NoteRecord],
+) -> None:
+    storage = Storage(engine=engine_for_test)
+    start = TwitterTimestamp.from_int(1153921700000)
+    expected = [post_samples[i] for i in (1, 2)]
+    actual = list(storage.get_posts_by_created_at_start(start))
+    assert expected == actual
