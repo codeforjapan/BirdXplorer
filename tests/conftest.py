@@ -145,6 +145,27 @@ def mock_storage(
 
     mock.get_posts_by_ids.side_effect = _get_posts_by_ids
 
+    def _get_posts_by_created_at_range(start: TwitterTimestamp, end: TwitterTimestamp) -> Generator[Post, None, None]:
+        for post in post_samples:
+            if start <= post.created_at <= end:
+                yield post
+
+    mock.get_posts_by_created_at_range.side_effect = _get_posts_by_created_at_range
+
+    def _get_posts_by_created_at_start(start: TwitterTimestamp) -> Generator[Post, None, None]:
+        for post in post_samples:
+            if start <= post.created_at:
+                yield post
+
+    mock.get_posts_by_created_at_start.side_effect = _get_posts_by_created_at_start
+
+    def _get_posts_by_created_at_end(end: TwitterTimestamp) -> Generator[Post, None, None]:
+        for post in post_samples:
+            if post.created_at <= end:
+                yield post
+
+    mock.get_posts_by_created_at_end.side_effect = _get_posts_by_created_at_end
+
     yield mock
 
 
@@ -263,7 +284,7 @@ def post_samples(post_factory: PostFactory, x_user_samples: List[XUser]) -> Gene
             x_user=x_user_samples[0],
             text="text12",
             media_details=None,
-            created_at=1152921700000,
+            created_at=1153921700000,
             like_count=10,
             repost_count=20,
             impression_count=30,
@@ -274,7 +295,7 @@ def post_samples(post_factory: PostFactory, x_user_samples: List[XUser]) -> Gene
             x_user=x_user_samples[1],
             text="text21",
             media_details=None,
-            created_at=1152921800000,
+            created_at=1154921800000,
             like_count=10,
             repost_count=20,
             impression_count=30,

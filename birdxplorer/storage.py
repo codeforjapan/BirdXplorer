@@ -156,6 +156,17 @@ class Storage:
     def get_posts_by_ids(self, post_ids: List[PostId]) -> Generator[PostModel, None, None]:
         raise NotImplementedError
 
+    def get_posts_by_created_at_range(
+        self, start: TwitterTimestamp, end: TwitterTimestamp
+    ) -> Generator[PostModel, None, None]:
+        raise NotImplementedError
+
+    def get_posts_by_created_at_start(self, start: TwitterTimestamp) -> Generator[PostModel, None, None]:
+        raise NotImplementedError
+
+    def get_posts_by_created_at_end(self, end: TwitterTimestamp) -> Generator[PostModel, None, None]:
+        raise NotImplementedError
+
 
 def gen_storage(settings: GlobalSettings) -> Storage:
     engine = create_engine(settings.storage_settings.sqlalchemy_database_url)
