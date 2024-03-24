@@ -76,3 +76,8 @@ def test_posts_get_created_at_end_filter_accepts_integer(client: TestClient, pos
     assert response.status_code == 200
     res_json = response.json()
     assert res_json == {"data": [json.loads(post_samples[i].model_dump_json()) for i in (0, 1)]}
+
+
+def test_posts_get_timestamp_out_of_range(client: TestClient, post_samples: List[Post]) -> None:
+    response = client.get("/api/v1/data/posts/?createdAtStart=1153921700&createdAtEnd=1153921700")
+    assert response.status_code == 422
