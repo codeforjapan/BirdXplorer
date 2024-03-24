@@ -15,7 +15,7 @@ from .models import (
     ParticipantId,
 )
 from .models import Post as PostModel
-from .models import SummaryString
+from .models import PostId, SummaryString
 from .models import Topic as TopicModel
 from .models import (
     TopicId,
@@ -152,6 +152,9 @@ class Storage:
                     repost_count=post_record.repost_count,
                     impression_count=post_record.impression_count,
                 )
+
+    def get_posts_by_ids(self, post_ids: List[PostId]) -> Generator[PostModel, None, None]:
+        raise NotImplementedError
 
 
 def gen_storage(settings: GlobalSettings) -> Storage:

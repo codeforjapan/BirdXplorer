@@ -1,8 +1,8 @@
-from typing import List
+from typing import List, Union
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
-from ..models import BaseModel, ParticipantId, Post, Topic, UserEnrollment
+from ..models import BaseModel, ParticipantId, Post, PostId, Topic, UserEnrollment
 from ..storage import Storage
 
 
@@ -29,7 +29,9 @@ def gen_router(storage: Storage) -> APIRouter:
         return TopicListResponse(data=list(storage.get_topics()))
 
     @router.get("/posts", response_model=PostListResponse)
-    def get_posts() -> PostListResponse:
+    def get_posts(post_id: Union[List[PostId], None] = Query(default=None)) -> PostListResponse:
+        if post_id is not None:
+            return PostListResponse(data=list(storage.get_posts_by_ids(post_ids=post_id)))
         return PostListResponse(data=list(storage.get_posts()))
 
     return router
