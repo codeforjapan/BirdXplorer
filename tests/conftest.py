@@ -21,6 +21,7 @@ from birdxplorer.models import (
     Note,
     ParticipantId,
     Post,
+    PostId,
     Topic,
     TwitterTimestamp,
     UserEnrollment,
@@ -134,6 +135,15 @@ def mock_storage(
         yield from post_samples
 
     mock.get_posts.side_effect = _get_posts
+
+    def _get_posts_by_ids(post_ids: List[PostId]) -> Generator[Post, None, None]:
+        for i in post_ids:
+            for post in post_samples:
+                if post.post_id == i:
+                    yield post
+                    break
+
+    mock.get_posts_by_ids.side_effect = _get_posts_by_ids
 
     yield mock
 
