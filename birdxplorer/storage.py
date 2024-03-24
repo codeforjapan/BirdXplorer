@@ -154,7 +154,25 @@ class Storage:
                 )
 
     def get_posts_by_ids(self, post_ids: List[PostId]) -> Generator[PostModel, None, None]:
-        raise NotImplementedError
+        with Session(self.engine) as sess:
+            for post_record in sess.query(PostRecord).filter(PostRecord.post_id.in_(post_ids)).all():
+                yield PostModel(
+                    post_id=post_record.post_id,
+                    x_user_id=post_record.user_id,
+                    x_user=XUserModel(
+                        user_id=post_record.user.user_id,
+                        name=post_record.user.name,
+                        profile_image=post_record.user.profile_image,
+                        followers_count=post_record.user.followers_count,
+                        following_count=post_record.user.following_count,
+                    ),
+                    text=post_record.text,
+                    media_details=post_record.media_details,
+                    created_at=post_record.created_at,
+                    like_count=post_record.like_count,
+                    repost_count=post_record.repost_count,
+                    impression_count=post_record.impression_count,
+                )
 
     def get_posts_by_created_at_range(
         self, start: TwitterTimestamp, end: TwitterTimestamp
