@@ -2,7 +2,7 @@ from datetime import timezone
 from typing import List, Union
 
 from dateutil.parser import parse as dateutil_parse
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from ..models import (
     BaseModel,
@@ -29,10 +29,13 @@ def str_to_twitter_timestamp(s: str) -> TwitterTimestamp:
         return TwitterTimestamp.from_int(int(s))
     except ValueError:
         pass
-    tmp = dateutil_parse(s)
-    if tmp.tzinfo is None:
-        tmp = tmp.replace(tzinfo=timezone.utc)
-    return TwitterTimestamp.from_int(int(tmp.timestamp() * 1000))
+    try:
+        tmp = dateutil_parse(s)
+        if tmp.tzinfo is None:
+            tmp = tmp.replace(tzinfo=timezone.utc)
+        return TwitterTimestamp.from_int(int(tmp.timestamp() * 1000))
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"Invalid TwitterTimestamp string: {s}")
 
 
 def ensure_twitter_timestamp(t: Union[str, TwitterTimestamp]) -> TwitterTimestamp:
