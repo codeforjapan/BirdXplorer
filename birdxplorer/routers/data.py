@@ -7,10 +7,12 @@ from fastapi import APIRouter, HTTPException, Query
 from ..models import (
     BaseModel,
     Note,
+    NoteId,
     ParticipantId,
     Post,
     PostId,
     Topic,
+    TweetId,
     TwitterTimestamp,
     UserEnrollment,
 )
@@ -63,15 +65,29 @@ def gen_router(storage: Storage) -> APIRouter:
 
     @router.get("/notes", response_model=NoteListResponse)
     def get_notes(
-        created_at_from: Union[int, None] = None,
-        created_at_to: Union[int, None] = None,
-        topic_id: Union[str, None] = None,
-        post_id: Union[str, None] = None,
-        language: Union[str, None] = None,
+        note_id: Union[List[NoteId], None] = Query(default=None),
+        created_at_from: Union[None, int, str] = Query(default=None),
+        created_at_to: Union[None, int, str] = Query(default=None),
+        topic_id: Union[List[str], None] = Query(default=None),
+        post_id: Union[List[TweetId], None] = Query(default=None),
+        language: Union[str, None] = Query(default=None),
     ) -> NoteListResponse:
-        return NoteListResponse(
-            data=list(storage.get_notes(created_at_from, created_at_to, topic_id, post_id, language))
-        )
+        filters = {}
+
+        if note_id is not None:
+            filters["note_ids"] = note_id
+        if created_at_from is not None:
+            filters["created_at_from"] = created_at_from
+        if created_at_to is not None:
+            filters["created_at_to"] = created_at_to
+        if topic_id is not None:
+            filters["topic_ids"] = topic_id
+        if post_id is not None:
+            filters["post_ids"] = post_id
+        if language is not None:
+            filters["language"] = language
+
+        return NoteListResponse(data=list(storage.get_notes(**filters)))
 
     @router.get("/posts", response_model=PostListResponse)
     def get_posts(
