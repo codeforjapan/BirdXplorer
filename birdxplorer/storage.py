@@ -7,13 +7,9 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 from sqlalchemy.types import DECIMAL, JSON, Integer, String
 
-from .models import (
-    LanguageIdentifier,
-    MediaDetails,
-    NonNegativeInt,
-    NoteId,
-    ParticipantId,
-)
+from .models import LanguageIdentifier, MediaDetails, NonNegativeInt
+from .models import Note as NoteModel
+from .models import NoteId, ParticipantId
 from .models import Post as PostModel
 from .models import PostId, SummaryString
 from .models import Topic as TopicModel
@@ -170,7 +166,14 @@ class Storage:
             if language is not None:
                 query = query.filter(NoteRecord.language == language)
             for note_record in query.all():
-                yield note_record
+                yield NoteModel(
+                    note_id=note_record.note_id,
+                    post_id=note_record.post_id,
+                    topics=[topic.topic for topic in note_record.topics],
+                    language=note_record.language,
+                    summary=note_record.summary,
+                    created_at=note_record.created_at,
+                )
 
     def get_posts(self) -> Generator[PostModel, None, None]:
         with Session(self.engine) as sess:
