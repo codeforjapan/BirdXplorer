@@ -3,7 +3,7 @@ from typing import List
 
 from fastapi.testclient import TestClient
 
-from birdxplorer.models import Post, Topic, UserEnrollment
+from birdxplorer.models import Note, Post, Topic, UserEnrollment
 
 
 def test_user_enrollments_get(client: TestClient, user_enrollment_samples: List[UserEnrollment]) -> None:
@@ -80,4 +80,67 @@ def test_posts_get_created_at_end_filter_accepts_integer(client: TestClient, pos
 
 def test_posts_get_timestamp_out_of_range(client: TestClient, post_samples: List[Post]) -> None:
     response = client.get("/api/v1/data/posts/?createdAtStart=1153921700&createdAtEnd=1153921700")
+    assert response.status_code == 422
+
+
+def test_notes_get(client: TestClient, note_samples: List[Note]) -> None:
+    response = client.get("/api/v1/data/notes")
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json == {"data": [json.loads(d.model_dump_json()) for d in note_samples]}
+
+
+def test_notes_get_has_note_id_filter(client: TestClient, note_samples: List[Note]) -> None:
+    response = client.get(f"/api/v1/data/notes/?noteId={note_samples[0].note_id},{note_samples[2].note_id}")
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json == {
+        "data": [json.loads(note_samples[0].model_dump_json()), json.loads(note_samples[2].model_dump_json())]
+    }
+
+
+def test_notes_get_has_created_at_filter_from_and_to(client: TestClient, note_samples: List[Note]) -> None:
+    response = client.get("/api/v1/data/notes/?createdAtFrom=2006-7-25 00:00:00&createdAtTo=2006-7-30 23:59:59")
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json == {"data": [json.loads(note_samples[1].model_dump_json())]}
+
+
+def test_notes_get_has_created_at_filter_from(client: TestClient, note_samples: List[Note]) -> None:
+    response = client.get("/api/v1/data/notes/?createdAtFrom=2006-7-25 00:00:00")
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json == {"data": [json.loads(note_samples[i].model_dump_json()) for i in (1, 2)]}
+
+
+def test_notes_get_has_created_at_filter_to(client: TestClient, note_samples: List[Note]) -> None:
+    response = client.get("/api/v1/data/notes/?createdAtTo=2006-7-30 00:00:00")
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json == {"data": [json.loads(note_samples[i].model_dump_json()) for i in (0, 1)]}
+
+
+def test_notes_get_created_at_range_filter_accepts_integer(client: TestClient, note_samples: List[Note]) -> None:
+    response = client.get("/api/v1/data/notes/?createdAtFrom=1153921700000&createdAtTo=1154921800000")
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json == {"data": [json.loads(note_samples[1].model_dump_json())]}
+
+
+def test_notes_get_created_at_from_filter_accepts_integer(client: TestClient, note_samples: List[Note]) -> None:
+    response = client.get("/api/v1/data/notes/?createdAtFrom=1153921700000")
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json == {"data": [json.loads(note_samples[i].model_dump_json()) for i in (1, 2)]}
+
+
+def test_notes_get_created_at_to_filter_accepts_integer(client: TestClient, note_samples: List[Note]) -> None:
+    response = client.get("/api/v1/data/notes/?createdAtTo=1154921800000")
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json == {"data": [json.loads(note_samples[i].model_dump_json()) for i in (0, 1)]}
+
+
+def test_notes_get_timestamp_out_of_range(client: TestClient, note_samples: List[Note]) -> None:
+    response = client.get("/api/v1/data/notes/?createdAtFrom=1153921700&createdAtTo=1153921700")
     assert response.status_code == 422

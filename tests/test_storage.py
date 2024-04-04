@@ -3,7 +3,7 @@ from typing import List
 
 from sqlalchemy.engine import Engine
 
-from birdxplorer.models import Note, Post, PostId, Topic, TwitterTimestamp
+from birdxplorer.models import Note, Post, PostId, Topic, TweetId, TwitterTimestamp
 from birdxplorer.storage import NoteRecord, PostRecord, Storage, TopicRecord
 
 
@@ -111,7 +111,7 @@ def test_get_notes_by_ids(
     storage = Storage(engine=engine_for_test)
     note_ids = [note_samples[i].note_id for i in (0, 2)]
     expected = [note_samples[i] for i in (0, 2)]
-    actual = list(storage.get_notes(note_id=note_ids))
+    actual = list(storage.get_notes(note_ids=note_ids))
     assert expected == actual
 
 
@@ -123,7 +123,7 @@ def test_get_notes_by_ids_empty(
     storage = Storage(engine=engine_for_test)
     note_ids: List[int] = []
     expected: List[Note] = []
-    actual = list(storage.get_notes(note_id=note_ids))
+    actual = list(storage.get_notes(note_ids=note_ids))
     assert expected == actual
 
 
@@ -133,10 +133,10 @@ def test_get_notes_by_created_at_range(
     note_records_sample: List[NoteRecord],
 ) -> None:
     storage = Storage(engine=engine_for_test)
-    start = datetime.now() - timedelta(days=2)
-    end = datetime.now() - timedelta(days=1)
-    expected = [note for note in note_samples if start <= note.created_at <= end]
-    actual = list(storage.get_notes(created_at_from=start, created_at_to=end))
+    created_at_from = TwitterTimestamp.from_int(1152921602000)
+    created_at_to = TwitterTimestamp.from_int(1152921603000)
+    expected = [note for note in note_samples if created_at_from <= note.created_at <= created_at_to]
+    actual = list(storage.get_notes(created_at_from=created_at_from, created_at_to=created_at_to))
     assert expected == actual
 
 
@@ -146,9 +146,9 @@ def test_get_notes_by_created_at_from(
     note_records_sample: List[NoteRecord],
 ) -> None:
     storage = Storage(engine=engine_for_test)
-    start = datetime.now() - timedelta(days=1)
-    expected = [note for note in note_samples if note.created_at >= start]
-    actual = list(storage.get_notes(created_at_from=start))
+    created_at_from = TwitterTimestamp.from_int(1152921602000)
+    expected = [note for note in note_samples if note.created_at >= created_at_from]
+    actual = list(storage.get_notes(created_at_from=created_at_from))
     assert expected == actual
 
 
@@ -158,9 +158,9 @@ def test_get_notes_by_created_at_to(
     note_records_sample: List[NoteRecord],
 ) -> None:
     storage = Storage(engine=engine_for_test)
-    end = datetime.now() - timedelta(days=1)
-    expected = [note for note in note_samples if note.created_at <= end]
-    actual = list(storage.get_notes(created_at_to=end))
+    created_at_to = TwitterTimestamp.from_int(1152921603000)
+    expected = [note for note in note_samples if note.created_at <= created_at_to]
+    actual = list(storage.get_notes(created_at_to=created_at_to))
     assert expected == actual
 
 
@@ -171,7 +171,7 @@ def test_get_notes_by_topic_ids(
 ) -> None:
     storage = Storage(engine=engine_for_test)
     topic_ids = [1, 2]
-    expected = [note for note in note_samples if note.topic_id in topic_ids]
+    expected = [note for note in note_samples if note.topics == topic_ids]
     actual = list(storage.get_notes(topic_ids=topic_ids))
     assert expected == actual
 
@@ -194,7 +194,7 @@ def test_get_notes_by_post_ids(
     note_records_sample: List[NoteRecord],
 ) -> None:
     storage = Storage(engine=engine_for_test)
-    post_ids = [1, 2]
+    post_ids = [TweetId.from_str("1"), TweetId.from_str("2")]
     expected = [note for note in note_samples if note.post_id in post_ids]
     actual = list(storage.get_notes(post_ids=post_ids))
     assert expected == actual
