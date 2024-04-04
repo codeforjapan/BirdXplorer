@@ -140,7 +140,7 @@ def test_get_notes_by_created_at_range(
     assert expected == actual
 
 
-def test_get_notes_by_created_at_start(
+def test_get_notes_by_created_at_from(
     engine_for_test: Engine,
     note_samples: List[Note],
     note_records_sample: List[NoteRecord],
@@ -152,7 +152,7 @@ def test_get_notes_by_created_at_start(
     assert expected == actual
 
 
-def test_get_notes_by_created_at_end(
+def test_get_notes_by_created_at_to(
     engine_for_test: Engine,
     note_samples: List[Note],
     note_records_sample: List[NoteRecord],
