@@ -149,12 +149,12 @@ class Storage:
                 )
 
     def get_notes(
-        self, note_id=None, created_at_from=None, created_at_to=None, topic_ids=None, post_ids=None, language=None
-    ) -> Generator[NoteRecord, None, None]:
+        self, note_ids=None, created_at_from=None, created_at_to=None, topic_ids=None, post_ids=None, language=None
+    ) -> Generator[NoteModel, None, None]:
         with Session(self.engine) as sess:
             query = sess.query(NoteRecord)
-            if note_id is not None:
-                query = query.filter(NoteRecord.note_id.in_(note_id))
+            if note_ids is not None:
+                query = query.filter(NoteRecord.note_id.in_(note_ids))
             if created_at_from is not None:
                 query = query.filter(NoteRecord.created_at >= created_at_from)
             if created_at_to is not None:
@@ -169,7 +169,17 @@ class Storage:
                 yield NoteModel(
                     note_id=note_record.note_id,
                     post_id=note_record.post_id,
-                    topics=[topic.topic for topic in note_record.topics],
+                    topics=[
+                        TopicModel(
+                            topic_id=topic.topic_id,
+                            label=topic.topic.label,
+                            reference_count=sess.query(func.count(NoteTopicAssociation.note_id))
+                            .filter(NoteTopicAssociation.topic_id == topic.topic_id)
+                            .scalar()
+                            or 0,
+                        )
+                        for topic in note_record.topics
+                    ],
                     language=note_record.language,
                     summary=note_record.summary,
                     created_at=note_record.created_at,
