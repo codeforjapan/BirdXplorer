@@ -195,7 +195,7 @@ def test_get_notes_by_post_ids(
     note_records_sample: List[NoteRecord],
 ) -> None:
     storage = Storage(engine=engine_for_test)
-    post_ids = [TweetId.from_str("1"), TweetId.from_str("2")]
+    post_ids = [TweetId.from_str("2234567890123456781"), TweetId.from_str("2234567890123456782")]
     expected = [note for note in note_samples if note.post_id in post_ids]
     actual = list(storage.get_notes(post_ids=post_ids))
     assert expected == actual
