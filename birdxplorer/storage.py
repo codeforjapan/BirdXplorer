@@ -160,7 +160,15 @@ class Storage:
             if created_at_to is not None:
                 query = query.filter(NoteRecord.created_at <= created_at_to)
             if topic_ids is not None:
-                query = query.join(NoteTopicAssociation).filter(NoteTopicAssociation.topic_id.in_(topic_ids))
+                # 同じトピックIDを持つノートを取得するためのサブクエリ
+                # とりあえずANDを実装
+                subq = (
+                    select(NoteTopicAssociation.note_id)
+                    .group_by(NoteTopicAssociation.note_id)
+                    .having(func.array_agg(NoteTopicAssociation.topic_id) == topic_ids)
+                    .subquery()
+                )
+                query = query.join(subq, NoteRecord.note_id == subq.c.note_id)
             if post_ids is not None:
                 query = query.filter(NoteRecord.post_id.in_(post_ids))
             if language is not None:

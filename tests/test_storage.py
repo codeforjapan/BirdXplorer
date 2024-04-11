@@ -170,9 +170,10 @@ def test_get_notes_by_topic_ids(
     note_records_sample: List[NoteRecord],
 ) -> None:
     storage = Storage(engine=engine_for_test)
-    topic_ids = [1, 2]
-    expected = [note for note in note_samples if note.topics == topic_ids]
-    actual = list(storage.get_notes(topic_ids=topic_ids))
+    topics = note_samples[0].topics
+    topic_ids = [0]
+    expected = sorted([note for note in note_samples if note.topics == topics], key=lambda note: note.note_id)
+    actual = sorted(list(storage.get_notes(topic_ids=topic_ids)), key=lambda note: note.note_id)
     assert expected == actual
 
 
