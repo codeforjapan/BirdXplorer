@@ -114,7 +114,10 @@ def user_enrollment_samples(
 
 @fixture
 def mock_storage(
-    user_enrollment_samples: List[UserEnrollment], topic_samples: List[Topic], post_samples: List[Post]
+    user_enrollment_samples: List[UserEnrollment],
+    topic_samples: List[Topic],
+    post_samples: List[Post],
+    note_samples: List[Note],
 ) -> Generator[MagicMock, None, None]:
     mock = MagicMock(spec=Storage)
 
@@ -129,7 +132,26 @@ def mock_storage(
     def _get_topics() -> Generator[Topic, None, None]:
         yield from topic_samples
 
+    def _get_notes(
+        note_ids=None, created_at_from=None, created_at_to=None, topic_ids=None, post_ids=None, language=None
+    ) -> Generator[Note, None, None]:
+        for note in note_samples:
+            if note_ids is not None and note.note_id not in note_ids:
+                continue
+            if created_at_from is not None and note.created_at < created_at_from:
+                continue
+            if created_at_to is not None and note.created_at > created_at_to:
+                continue
+            if topic_ids is not None and not set(topic_ids).issubset({topic.topic_id for topic in note.topics}):
+                continue
+            if post_ids is not None and note.post_id not in post_ids:
+                continue
+            if language is not None and note.language != language:
+                continue
+            yield note
+
     mock.get_topics.side_effect = _get_topics
+    mock.get_notes.side_effect = _get_notes
 
     def _get_posts() -> Generator[Post, None, None]:
         yield from post_samples
