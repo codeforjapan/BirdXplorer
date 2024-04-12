@@ -65,11 +65,11 @@ def gen_router(storage: Storage) -> APIRouter:
 
     @router.get("/notes", response_model=NoteListResponse)
     def get_notes(
-        note_ids: Union[List[NoteId], None] = Query(default=None),
-        created_at_from: Union[None, int, str] = Query(default=None),
-        created_at_to: Union[None, int, str] = Query(default=None),
-        topic_ids: Union[List[str], None] = Query(default=None),
-        post_ids: Union[List[TweetId], None] = Query(default=None),
+        note_ids: Union[List[NoteId], None] = Query(default=None, alias="noteIds"),
+        created_at_from: Union[None, int] = Query(default=None, alias="createdAtFrom"),
+        created_at_to: Union[None, int] = Query(default=None, alias="createdAtTo"),
+        topic_ids: Union[List[str], None] = Query(default=None, alias="topicIds"),
+        post_ids: Union[List[TweetId], None] = Query(default=None, alias="postIds"),
         language: Union[str, None] = Query(default=None),
     ) -> NoteListResponse:
         filters = {}
@@ -77,9 +77,9 @@ def gen_router(storage: Storage) -> APIRouter:
         if note_ids is not None:
             filters["note_ids"] = note_ids
         if created_at_from is not None:
-            filters["created_at_from"] = created_at_from
+            filters["created_at_from"] = TwitterTimestamp.from_int(created_at_from)
         if created_at_to is not None:
-            filters["created_at_to"] = created_at_to
+            filters["created_at_to"] = TwitterTimestamp.from_int(created_at_to)
         if topic_ids is not None:
             filters["topic_ids"] = topic_ids
         if post_ids is not None:
