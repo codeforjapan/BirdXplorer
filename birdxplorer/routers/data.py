@@ -3,6 +3,7 @@ from typing import List, Union
 
 from dateutil.parser import parse as dateutil_parse
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import AnyHttpUrl, Field
 
 from ..models import (
     BaseModel,
@@ -16,12 +17,18 @@ from ..models import (
 from ..storage import Storage
 
 
+class ResponseMeta(BaseModel):
+    next: Union[AnyHttpUrl, None] = None
+    prev: Union[AnyHttpUrl, None] = None
+
+
 class TopicListResponse(BaseModel):
     data: List[Topic]
 
 
 class PostListResponse(BaseModel):
     data: List[Post]
+    meta: ResponseMeta = Field(default=ResponseMeta())
 
 
 def str_to_twitter_timestamp(s: str) -> TwitterTimestamp:
