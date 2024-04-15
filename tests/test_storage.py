@@ -2,7 +2,17 @@ from typing import List
 
 from sqlalchemy.engine import Engine
 
-from birdxplorer.models import Note, Post, PostId, Topic, TweetId, TwitterTimestamp
+from birdxplorer.models import (
+    LanguageIdentifier,
+    Note,
+    NoteId,
+    Post,
+    PostId,
+    Topic,
+    TopicId,
+    TweetId,
+    TwitterTimestamp,
+)
 from birdxplorer.storage import NoteRecord, PostRecord, Storage, TopicRecord
 
 
@@ -120,7 +130,7 @@ def test_get_notes_by_ids_empty(
     note_records_sample: List[NoteRecord],
 ) -> None:
     storage = Storage(engine=engine_for_test)
-    note_ids: List[int] = []
+    note_ids: List[NoteId] = []
     expected: List[Note] = []
     actual = list(storage.get_notes(note_ids=note_ids))
     assert expected == actual
@@ -170,7 +180,7 @@ def test_get_notes_by_topic_ids(
 ) -> None:
     storage = Storage(engine=engine_for_test)
     topics = note_samples[0].topics
-    topic_ids = [0]
+    topic_ids: List[TopicId] = [TopicId.from_int(0)]
     expected = sorted([note for note in note_samples if note.topics == topics], key=lambda note: note.note_id)
     actual = sorted(list(storage.get_notes(topic_ids=topic_ids)), key=lambda note: note.note_id)
     assert expected == actual
@@ -182,7 +192,7 @@ def test_get_notes_by_topic_ids_empty(
     note_records_sample: List[NoteRecord],
 ) -> None:
     storage = Storage(engine=engine_for_test)
-    topic_ids: List[int] = []
+    topic_ids: List[TopicId] = []
     expected: List[Note] = []
     actual = list(storage.get_notes(topic_ids=topic_ids))
     assert expected == actual
@@ -206,7 +216,7 @@ def test_get_notes_by_post_ids_empty(
     note_records_sample: List[NoteRecord],
 ) -> None:
     storage = Storage(engine=engine_for_test)
-    post_ids: List[int] = []
+    post_ids: List[TweetId] = []
     expected: List[Note] = []
     actual = list(storage.get_notes(post_ids=post_ids))
     assert expected == actual
@@ -218,19 +228,7 @@ def test_get_notes_by_language(
     note_records_sample: List[NoteRecord],
 ) -> None:
     storage = Storage(engine=engine_for_test)
-    language = "en"
+    language = LanguageIdentifier("en")
     expected = [note for note in note_samples if note.language == language]
-    actual = list(storage.get_notes(language=language))
-    assert expected == actual
-
-
-def test_get_notes_by_language_empty(
-    engine_for_test: Engine,
-    note_samples: List[Note],
-    note_records_sample: List[NoteRecord],
-) -> None:
-    storage = Storage(engine=engine_for_test)
-    language = ""
-    expected: List[Note] = []
     actual = list(storage.get_notes(language=language))
     assert expected == actual

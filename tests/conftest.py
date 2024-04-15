@@ -1,7 +1,7 @@
 import os
 import random
 from collections.abc import Generator
-from typing import List, Type
+from typing import List, Type, Union
 from unittest.mock import MagicMock, patch
 
 from dotenv import load_dotenv
@@ -18,11 +18,15 @@ from sqlalchemy.sql import text
 
 from birdxplorer.exceptions import UserEnrollmentNotFoundError
 from birdxplorer.models import (
+    LanguageIdentifier,
     Note,
+    NoteId,
     ParticipantId,
     Post,
     PostId,
     Topic,
+    TopicId,
+    TweetId,
     TwitterTimestamp,
     UserEnrollment,
     XUser,
@@ -133,7 +137,12 @@ def mock_storage(
         yield from topic_samples
 
     def _get_notes(
-        note_ids=None, created_at_from=None, created_at_to=None, topic_ids=None, post_ids=None, language=None
+        note_ids: Union[List[NoteId], None] = None,
+        created_at_from: Union[None, TwitterTimestamp] = None,
+        created_at_to: Union[None, TwitterTimestamp] = None,
+        topic_ids: Union[List[TopicId], None] = None,
+        post_ids: Union[List[TweetId], None] = None,
+        language: Union[LanguageIdentifier, None] = None,
     ) -> Generator[Note, None, None]:
         for note in note_samples:
             if note_ids is not None and note.note_id not in note_ids:

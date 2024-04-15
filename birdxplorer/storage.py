@@ -1,4 +1,4 @@
-from typing import Generator, List
+from typing import Generator, List, Union
 
 from psycopg2.extensions import AsIs, register_adapter
 from pydantic import AnyUrl, HttpUrl
@@ -149,7 +149,13 @@ class Storage:
                 )
 
     def get_notes(
-        self, note_ids=None, created_at_from=None, created_at_to=None, topic_ids=None, post_ids=None, language=None
+        self,
+        note_ids: Union[List[NoteId], None] = None,
+        created_at_from: Union[None, TwitterTimestamp] = None,
+        created_at_to: Union[None, TwitterTimestamp] = None,
+        topic_ids: Union[List[TopicId], None] = None,
+        post_ids: Union[List[TweetId], None] = None,
+        language: Union[LanguageIdentifier, None] = None,
     ) -> Generator[NoteModel, None, None]:
         with Session(self.engine) as sess:
             query = sess.query(NoteRecord)
