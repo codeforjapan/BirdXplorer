@@ -61,6 +61,7 @@ dev=[
     "uvicorn",
     "polyfactory",
     "httpx",
+    "types-psycopg2",
 ]
 prod=[
     "psycopg2"
