@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "birdxplorer_etl"
+version = "0.1.0"
+description = "BirdXplorer ETL is data extraction, t l "
+authors = [
+    { name = "Ryoma" },
+]
+dependencies = [
+    "pandas",
+    "sqlalchemy",
+    "requests",
+    "pytest",
+    'prefect'
+]
+
+[tool.pytest.ini_options]
+addopts = "-v -s"
+testpaths = [
+    "tests",
+]
