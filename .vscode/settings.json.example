@@ -14,7 +14,7 @@
   "editor.formatOnSave": true,
   "[python]": {
     "editor.codeActionsOnSave": {
-      "source.organizeImports": true
+      "source.organizeImports": "explicit"
     },
     "editor.defaultFormatter": "ms-python.black-formatter",
     "editor.formatOnSave": true
@@ -23,9 +23,21 @@
     ".venv/lib/python3.10/site-packages"
   ],
   "python.defaultInterpreterPath": ".venv/bin/python",
-  "python.analysis.stubPath": "stubs",
+  "python.analysis.stubPath": "common/stubs",
+  "black-formatter.args": [
+    "--config",
+    "common/pyproject.toml"
+  ],
   "flake8.path": [
     ".venv/bin/pflake8"
   ],
-  "python.formatting.provider": "none",
+  "flake8.args": [
+    "--config",
+    "common/pyproject.toml"
+  ],
+  "isort.args": [
+    "--settings-path",
+    "common/pyproject.toml"
+  ],
+  "python.formatting.provider": "none"
 }

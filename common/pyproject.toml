@@ -4,16 +4,16 @@ requires = ["flit_core >=3.8.0,<4"]
 
 
 [project]
-name = "birdxplorer"
-description = "birdxplorer is a tool to help you read and get insights from your documents."
+name = "birdxplorer_common"
+description = "Common library for BirdXplorer"
 authors = [
     {name = "osoken"},
 ]
 dynamic = [
     "version", 
 ]
-readme = "README.md"
-license = {file = "LICENSE"}
+readme = "../README.md"
+license = {file = "../LICENSE"}
 requires-python = ">=3.10"
 
 classifiers = [
@@ -29,16 +29,14 @@ dependencies = [
     "python-dateutil",
     "sqlalchemy",
     "pydantic_settings",
-    "fastapi",
     "JSON-log-formatter",
-    "openai",
 ]
 
 [project.urls]
 Source = "https://github.com/codeforjapan/BirdXplorer"
 
 [tool.setuptools]
-packages=["birdxplorer"]
+packages=["birdxplorer_common"]
 
 [tool.setuptools.package-data]
 birdxplorer = ["py.typed"]
@@ -58,9 +56,7 @@ dev=[
     "types-python-dateutil",
     "psycopg2-binary",
     "factory_boy",
-    "uvicorn",
     "polyfactory",
-    "httpx",
     "types-psycopg2",
 ]
 prod=[
@@ -69,11 +65,10 @@ prod=[
 
 
 [tool.pytest.ini_options]
-addopts = ["-sv", "--doctest-modules", "--cov=birdxplorer", "--cov-report=xml", "--cov-report=term-missing"]
-testpaths = ["tests", "birdxplorer"]
+addopts = ["-sv", "--doctest-modules", "--cov=birdxplorer_common", "--cov-report=xml", "--cov-report=term-missing"]
+testpaths = ["tests", "birdxplorer_common"]
 filterwarnings = [
     "error",
-    "ignore:The \\'app\\' shortcut is now deprecated. Use the explicit style \\'transport=WSGITransport\\(app=\\.\\.\\.\\)\\' instead\\.",
 ]
 
 [tool.black]
@@ -110,10 +105,10 @@ legacy_tox_ini = """
     deps =
         -e .[dev]
     commands = 
-        black birdxplorer tests
-        isort birdxplorer tests
+        black birdxplorer_common tests
+        isort birdxplorer_common tests
         pytest
-        pflake8 birdxplorer/ tests/ stubs/
-        mypy birdxplorer --strict
+        pflake8 birdxplorer_common/ tests/ stubs/
+        mypy birdxplorer_common --strict
         mypy tests --strict
 """
