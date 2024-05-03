@@ -4,7 +4,7 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 
-from birdxplorer.models import NoteData, UserEnrollment
+from birdxplorer_common.models import NoteData, UserEnrollment
 
 
 class BaseDataModelTester(ABC):
