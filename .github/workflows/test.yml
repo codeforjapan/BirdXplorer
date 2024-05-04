@@ -35,3 +35,43 @@ jobs:
       - name: test
         working-directory: common
         run: tox
+
+  api-test-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: api/pyproject.toml
+      - name: dependency install
+        run: pip install -e "./api[dev]"
+      - name: copy env
+        run: cp .env.example api/.env
+      - name: test
+        working-directory: api
+        run: tox
+
+  etl-test-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: etl/pyproject.toml
+      - name: dependency install
+        run: pip install -e "./etl[dev]"
+      - name: copy env
+        run: cp .env.example etl/.env
+      - name: test
+        working-directory: etl
+        run: tox
