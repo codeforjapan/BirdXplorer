@@ -1,6 +1,9 @@
 from datetime import timezone
 from typing import List, Union
 
+from dateutil.parser import parse as dateutil_parse
+from fastapi import APIRouter, HTTPException, Query
+
 from birdxplorer_common.models import (
     BaseModel,
     LanguageIdentifier,
@@ -16,8 +19,6 @@ from birdxplorer_common.models import (
     UserEnrollment,
 )
 from birdxplorer_common.storage import Storage
-from dateutil.parser import parse as dateutil_parse
-from fastapi import APIRouter, HTTPException, Query
 
 
 class TopicListResponse(BaseModel):

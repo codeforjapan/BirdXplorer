@@ -1,7 +1,7 @@
-from birdxplorer_common.settings import GlobalSettings
 from pytest_mock import MockerFixture
 
 from birdxplorer_api.app import gen_app
+from birdxplorer_common.settings import GlobalSettings
 
 
 def test_gen_app(mocker: MockerFixture, default_settings: GlobalSettings) -> None:

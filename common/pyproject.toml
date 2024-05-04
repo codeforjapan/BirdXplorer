@@ -91,6 +91,7 @@ init_typed = true
 
 [tool.isort]
 profile = "black"
+known_first_party = "birdxplorer_api,birdxplorer_common"
 
 [tool.tox]
 legacy_tox_ini = """

@@ -4,6 +4,13 @@ from collections.abc import Generator
 from typing import List, Type, Union
 from unittest.mock import MagicMock, patch
 
+from dotenv import load_dotenv
+from fastapi.testclient import TestClient
+from polyfactory import Use
+from polyfactory.factories.pydantic_factory import ModelFactory
+from polyfactory.pytest_plugin import register_fixture
+from pytest import fixture
+
 from birdxplorer_common.exceptions import UserEnrollmentNotFoundError
 from birdxplorer_common.models import (
     LanguageIdentifier,
@@ -21,12 +28,6 @@ from birdxplorer_common.models import (
 )
 from birdxplorer_common.settings import GlobalSettings, PostgresStorageSettings
 from birdxplorer_common.storage import Storage
-from dotenv import load_dotenv
-from fastapi.testclient import TestClient
-from polyfactory import Use
-from polyfactory.factories.pydantic_factory import ModelFactory
-from polyfactory.pytest_plugin import register_fixture
-from pytest import fixture
 
 
 def gen_random_twitter_timestamp() -> int:
