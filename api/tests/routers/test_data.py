@@ -1,8 +1,9 @@
 import json
 from typing import List
 
-from birdxplorer_common.models import Note, Post, Topic, UserEnrollment
 from fastapi.testclient import TestClient
+
+from birdxplorer_common.models import Note, Post, Topic, UserEnrollment
 
 
 def test_user_enrollments_get(client: TestClient, user_enrollment_samples: List[UserEnrollment]) -> None:
