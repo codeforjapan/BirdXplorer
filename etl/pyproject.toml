@@ -4,8 +4,8 @@ requires = ["flit_core >=3.8.0,<4"]
 
 
 [project]
-name = "birdxplorer_api"
-description = "The Web API for BirdXplorer project."
+name = "birdxplorer_etl"
+description = "ETL module for BirdXplorer"
 authors = [
     {name = "osoken"},
 ]
@@ -26,18 +26,13 @@ classifiers = [
 
 dependencies = [
     "birdxplorer_common @ git+https://github.com/codeforjapan/BirdXplorer.git@feature/issue-53-divide-python-packages#subdirectory=common",
-    "fastapi",
-    "python-dateutil",
-    "pydantic",
-    "starlette",
-    "python-dotenv",
 ]
 
 [project.urls]
 Source = "https://github.com/codeforjapan/BirdXplorer"
 
 [tool.setuptools]
-packages=["birdxplorer"]
+packages=["birdxplorer_etl"]
 
 [tool.setuptools.package-data]
 birdxplorer = ["py.typed"]
@@ -57,19 +52,19 @@ dev=[
     "types-python-dateutil",
     "psycopg2-binary",
     "factory_boy",
-    "uvicorn",
     "polyfactory",
-    "httpx",
+    "types-psycopg2",
 ]
 prod=[
+    "psycopg2"
 ]
 
+
 [tool.pytest.ini_options]
-addopts = ["-sv", "--doctest-modules", "--ignore-glob=birdxplorer_api/main.py", "--cov=birdxplorer_api", "--cov-report=xml", "--cov-report=term-missing"]
-testpaths = ["tests", "birdxplorer_api"]
+addopts = ["-sv", "--doctest-modules", "--cov=birdxplorer_etl", "--cov-report=xml", "--cov-report=term-missing"]
+testpaths = ["tests", "birdxplorer_etl"]
 filterwarnings = [
     "error",
-    "ignore:The \\'app\\' shortcut is now deprecated. Use the explicit style \\'transport=WSGITransport\\(app=\\.\\.\\.\\)\\' instead\\.",
 ]
 
 [tool.black]
@@ -85,6 +80,7 @@ python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 plugins = ["pydantic.mypy"]
+mypy_path = "stubs/"
 
 [tool.pydantic.mypy]
 init_typed = true
@@ -102,13 +98,14 @@ legacy_tox_ini = """
     [testenv]
     setenv = 
         VIRTUALENV_PIP = 24.0
+        DATA_DIR = {env:BX_DATA_DIR}
     deps =
         -e .[dev]
     commands = 
-        black birdxplorer_api tests
-        isort birdxplorer_api tests
+        black birdxplorer_etl tests
+        isort birdxplorer_etl tests
         pytest
-        pflake8 birdxplorer_api/ tests/
-        mypy birdxplorer_api --strict
+        pflake8 birdxplorer_etl/ tests/
+        mypy birdxplorer_etl --strict
         mypy tests --strict
 """
