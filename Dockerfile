@@ -9,9 +9,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONUSERBASE=/app/__pypackages__
 
-# 一旦flit_coreによるビルドを通すために毎回丸ごとコピーする。
-# あとでビルドに必要な最小限のファイルを調べます。
-COPY . .
+COPY pyproject.toml README.md ./
+COPY birdxplorer/__init__.py ./birdxplorer/__init__.py
 RUN pip install --user --no-cache-dir -e ".[${ENVIRONMENT}]"
 
 FROM python:3.11-slim-bookworm as runner
