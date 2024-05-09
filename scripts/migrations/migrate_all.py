@@ -6,9 +6,9 @@ from argparse import ArgumentParser
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 
-from birdxplorer.logger import get_logger
-from birdxplorer.settings import GlobalSettings
-from birdxplorer.storage import (
+from birdxplorer_common.logger import get_logger
+from birdxplorer_common.settings import GlobalSettings
+from birdxplorer_common.storage import (
     Base,
     NoteRecord,
     NoteTopicAssociation,
@@ -57,7 +57,11 @@ if __name__ == "__main__":
                     )
                 )
             sess.commit()
-        with open(os.path.join(args.data_dir, args.notes_topics_association_file_name), "r", encoding="utf-8") as fin:
+        with open(
+            os.path.join(args.data_dir, args.notes_topics_association_file_name),
+            "r",
+            encoding="utf-8",
+        ) as fin:
             for d in csv.DictReader(fin):
                 if (
                     sess.query(NoteTopicAssociation)
@@ -109,7 +113,7 @@ if __name__ == "__main__":
                         post_id=d["post_id"],
                         user_id=d["user_id"],
                         text=d["text"],
-                        media_details=json.loads(d["media_details"]) if len(d["media_details"]) > 0 else None,
+                        media_details=(json.loads(d["media_details"]) if len(d["media_details"]) > 0 else None),
                         created_at=d["created_at"],
                         like_count=d["like_count"],
                         repost_count=d["repost_count"],
