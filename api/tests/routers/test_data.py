@@ -3,7 +3,7 @@ from typing import List
 
 from fastapi.testclient import TestClient
 
-from birdxplorer.models import Note, Post, Topic, UserEnrollment
+from birdxplorer_common.models import Note, Post, Topic, UserEnrollment
 
 
 def test_user_enrollments_get(client: TestClient, user_enrollment_samples: List[UserEnrollment]) -> None:
@@ -32,7 +32,10 @@ def test_posts_get_has_post_id_filter(client: TestClient, post_samples: List[Pos
     assert response.status_code == 200
     res_json = response.json()
     assert res_json == {
-        "data": [json.loads(post_samples[0].model_dump_json()), json.loads(post_samples[2].model_dump_json())]
+        "data": [
+            json.loads(post_samples[0].model_dump_json()),
+            json.loads(post_samples[2].model_dump_json()),
+        ]
     }
 
 
@@ -95,7 +98,10 @@ def test_notes_get_has_note_id_filter(client: TestClient, note_samples: List[Not
     assert response.status_code == 200
     res_json = response.json()
     assert res_json == {
-        "data": [json.loads(note_samples[0].model_dump_json()), json.loads(note_samples[2].model_dump_json())]
+        "data": [
+            json.loads(note_samples[0].model_dump_json()),
+            json.loads(note_samples[2].model_dump_json()),
+        ]
     }
 
 
