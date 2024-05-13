@@ -11,7 +11,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 COPY pyproject.toml README.md ./
-COPY birdxplorer/__init__.py ./birdxplorer/
+COPY birdxplorer_api/__init__.py ./birdxplorer_api/
 RUN pip install --no-cache-dir -e ".[${ENVIRONMENT}]"
 
 FROM python:${PYTHON_VERSION_CODE}-slim-bookworm as runner
@@ -26,4 +26,4 @@ USER app
 COPY --from=builder /usr/local/lib/python${PYTHON_VERSION_CODE}/site-packages /usr/local/lib/python${PYTHON_VERSION_CODE}/site-packages
 COPY --chown=app:app . ./
 
-ENTRYPOINT ["python", "-m", "uvicorn", "birdxplorer.main:app", "--host", "0.0.0.0"]
+ENTRYPOINT ["python", "-m", "uvicorn", "birdxplorer_api.main:app", "--host", "0.0.0.0"]
