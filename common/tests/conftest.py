@@ -2,10 +2,8 @@ import os
 import random
 from collections.abc import Generator
 from typing import List, Type
-from unittest.mock import MagicMock, patch
 
 from dotenv import load_dotenv
-from fastapi.testclient import TestClient
 from polyfactory import Use
 from polyfactory.factories.pydantic_factory import ModelFactory
 from polyfactory.pytest_plugin import register_fixture
@@ -16,24 +14,20 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import text
 
-from birdxplorer.exceptions import UserEnrollmentNotFoundError
-from birdxplorer.models import (
+from birdxplorer_common.models import (
     Note,
-    ParticipantId,
     Post,
-    PostId,
     Topic,
     TwitterTimestamp,
     UserEnrollment,
     XUser,
 )
-from birdxplorer.settings import GlobalSettings, PostgresStorageSettings
-from birdxplorer.storage import (
+from birdxplorer_common.settings import GlobalSettings, PostgresStorageSettings
+from birdxplorer_common.storage import (
     Base,
     NoteRecord,
     NoteTopicAssociation,
     PostRecord,
-    Storage,
     TopicRecord,
     XUserRecord,
 )
@@ -110,72 +104,6 @@ def user_enrollment_samples(
     user_enrollment_factory: UserEnrollmentFactory,
 ) -> Generator[List[UserEnrollment], None, None]:
     yield [user_enrollment_factory.build() for _ in range(3)]
-
-
-@fixture
-def mock_storage(
-    user_enrollment_samples: List[UserEnrollment], topic_samples: List[Topic], post_samples: List[Post]
-) -> Generator[MagicMock, None, None]:
-    mock = MagicMock(spec=Storage)
-
-    def _get_user_enrollment_by_participant_id(participant_id: ParticipantId) -> UserEnrollment:
-        x = {d.participant_id: d for d in user_enrollment_samples}.get(participant_id)
-        if x is None:
-            raise UserEnrollmentNotFoundError(participant_id=participant_id)
-        return x
-
-    mock.get_user_enrollment_by_participant_id.side_effect = _get_user_enrollment_by_participant_id
-
-    def _get_topics() -> Generator[Topic, None, None]:
-        yield from topic_samples
-
-    mock.get_topics.side_effect = _get_topics
-
-    def _get_posts() -> Generator[Post, None, None]:
-        yield from post_samples
-
-    mock.get_posts.side_effect = _get_posts
-
-    def _get_posts_by_ids(post_ids: List[PostId]) -> Generator[Post, None, None]:
-        for i in post_ids:
-            for post in post_samples:
-                if post.post_id == i:
-                    yield post
-                    break
-
-    mock.get_posts_by_ids.side_effect = _get_posts_by_ids
-
-    def _get_posts_by_created_at_range(start: TwitterTimestamp, end: TwitterTimestamp) -> Generator[Post, None, None]:
-        for post in post_samples:
-            if start <= post.created_at < end:
-                yield post
-
-    mock.get_posts_by_created_at_range.side_effect = _get_posts_by_created_at_range
-
-    def _get_posts_by_created_at_start(start: TwitterTimestamp) -> Generator[Post, None, None]:
-        for post in post_samples:
-            if start <= post.created_at:
-                yield post
-
-    mock.get_posts_by_created_at_start.side_effect = _get_posts_by_created_at_start
-
-    def _get_posts_by_created_at_end(end: TwitterTimestamp) -> Generator[Post, None, None]:
-        for post in post_samples:
-            if post.created_at < end:
-                yield post
-
-    mock.get_posts_by_created_at_end.side_effect = _get_posts_by_created_at_end
-
-    yield mock
-
-
-@fixture
-def client(settings_for_test: GlobalSettings, mock_storage: MagicMock) -> Generator[TestClient, None, None]:
-    from birdxplorer.app import gen_app
-
-    with patch("birdxplorer.app.gen_storage", return_value=mock_storage):
-        app = gen_app(settings=settings_for_test)
-        yield TestClient(app)
 
 
 @fixture

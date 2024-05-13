@@ -1,4 +1,4 @@
-from typing import Generator, List
+from typing import Generator, List, Union
 
 from psycopg2.extensions import AsIs, register_adapter
 from pydantic import AnyUrl, HttpUrl
@@ -7,13 +7,9 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 from sqlalchemy.types import DECIMAL, JSON, Integer, String
 
-from .models import (
-    LanguageIdentifier,
-    MediaDetails,
-    NonNegativeInt,
-    NoteId,
-    ParticipantId,
-)
+from .models import LanguageIdentifier, MediaDetails, NonNegativeInt
+from .models import Note as NoteModel
+from .models import NoteId, ParticipantId
 from .models import Post as PostModel
 from .models import PostId, SummaryString
 from .models import Topic as TopicModel
@@ -150,6 +146,57 @@ class Storage:
             ):
                 yield TopicModel(
                     topic_id=topic_record.topic_id, label=topic_record.label, reference_count=reference_count or 0
+                )
+
+    def get_notes(
+        self,
+        note_ids: Union[List[NoteId], None] = None,
+        created_at_from: Union[None, TwitterTimestamp] = None,
+        created_at_to: Union[None, TwitterTimestamp] = None,
+        topic_ids: Union[List[TopicId], None] = None,
+        post_ids: Union[List[TweetId], None] = None,
+        language: Union[LanguageIdentifier, None] = None,
+    ) -> Generator[NoteModel, None, None]:
+        with Session(self.engine) as sess:
+            query = sess.query(NoteRecord)
+            if note_ids is not None:
+                query = query.filter(NoteRecord.note_id.in_(note_ids))
+            if created_at_from is not None:
+                query = query.filter(NoteRecord.created_at >= created_at_from)
+            if created_at_to is not None:
+                query = query.filter(NoteRecord.created_at <= created_at_to)
+            if topic_ids is not None:
+                # 同じトピックIDを持つノートを取得するためのサブクエリ
+                # とりあえずANDを実装
+                subq = (
+                    select(NoteTopicAssociation.note_id)
+                    .group_by(NoteTopicAssociation.note_id)
+                    .having(func.array_agg(NoteTopicAssociation.topic_id) == topic_ids)
+                    .subquery()
+                )
+                query = query.join(subq, NoteRecord.note_id == subq.c.note_id)
+            if post_ids is not None:
+                query = query.filter(NoteRecord.post_id.in_(post_ids))
+            if language is not None:
+                query = query.filter(NoteRecord.language == language)
+            for note_record in query.all():
+                yield NoteModel(
+                    note_id=note_record.note_id,
+                    post_id=note_record.post_id,
+                    topics=[
+                        TopicModel(
+                            topic_id=topic.topic_id,
+                            label=topic.topic.label,
+                            reference_count=sess.query(func.count(NoteTopicAssociation.note_id))
+                            .filter(NoteTopicAssociation.topic_id == topic.topic_id)
+                            .scalar()
+                            or 0,
+                        )
+                        for topic in note_record.topics
+                    ],
+                    language=note_record.language,
+                    summary=note_record.summary,
+                    created_at=note_record.created_at,
                 )
 
     def get_posts(self) -> Generator[PostModel, None, None]:

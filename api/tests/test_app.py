@@ -1,12 +1,12 @@
 from pytest_mock import MockerFixture
 
-from birdxplorer.app import gen_app
-from birdxplorer.settings import GlobalSettings
+from birdxplorer_api.app import gen_app
+from birdxplorer_common.settings import GlobalSettings
 
 
 def test_gen_app(mocker: MockerFixture, default_settings: GlobalSettings) -> None:
-    FastAPI = mocker.patch("birdxplorer.app.FastAPI")
-    get_logger = mocker.patch("birdxplorer.app.get_logger")
+    FastAPI = mocker.patch("birdxplorer_api.app.FastAPI")
+    get_logger = mocker.patch("birdxplorer_api.app.get_logger")
     expected = FastAPI.return_value
 
     actual = gen_app(settings=default_settings)
