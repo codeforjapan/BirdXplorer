@@ -7,12 +7,42 @@ name = "birdxplorer_etl"
 version = "0.1.0"
 description = "BirdXplorer ETL is data extraction, t l "
 authors = [
-    { name = "Ryoma" },
+    {name = "osoken"},
+    {name = "yu23ki14"}
+]
+dynamic = [
+    "version", 
 ]
 dependencies = [
+    "birdxplorer_common @ git+https://github.com/codeforjapan/BirdXplorer.git@feature/issue-53-divide-python-packages#subdirectory=common",
     "pandas",
     "sqlalchemy",
     "requests",
+    "pytest",
+    "prefect"
+]
+
+[project.urls]
+Source = "https://github.com/codeforjapan/BirdXplorer"
+
+[tool.setuptools]
+packages=[
+    "birdxplorer_etl",
+    "pandas",
+    "sqlalchemy",
+    "requests",
+    "pytest",
+    "stringcase"
+]
+
+[tool.setuptools.package-data]
+birdxplorer = ["py.typed"]
+
+[project.optional-dependencies]
+dev=[
+    "black",
+    "flake8",
+    "pyproject-flake8",
     "pytest",
     'prefect'
 ]
