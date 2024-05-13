@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 
+from birdxplorer_common.settings import GlobalSettings
+
 from .app import gen_app
-from .settings import GlobalSettings
 
 
 def main() -> FastAPI:

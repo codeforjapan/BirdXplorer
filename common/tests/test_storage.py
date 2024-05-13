@@ -2,7 +2,7 @@ from typing import List
 
 from sqlalchemy.engine import Engine
 
-from birdxplorer.models import (
+from birdxplorer_common.models import (
     LanguageIdentifier,
     Note,
     NoteId,
@@ -13,7 +13,7 @@ from birdxplorer.models import (
     TweetId,
     TwitterTimestamp,
 )
-from birdxplorer.storage import NoteRecord, PostRecord, Storage, TopicRecord
+from birdxplorer_common.storage import NoteRecord, PostRecord, Storage, TopicRecord
 
 
 def test_get_topic_list(
@@ -181,7 +181,10 @@ def test_get_notes_by_topic_ids(
     storage = Storage(engine=engine_for_test)
     topics = note_samples[0].topics
     topic_ids: List[TopicId] = [TopicId.from_int(0)]
-    expected = sorted([note for note in note_samples if note.topics == topics], key=lambda note: note.note_id)
+    expected = sorted(
+        [note for note in note_samples if note.topics == topics],
+        key=lambda note: note.note_id,
+    )
     actual = sorted(list(storage.get_notes(topic_ids=topic_ids)), key=lambda note: note.note_id)
     assert expected == actual
 
@@ -204,7 +207,10 @@ def test_get_notes_by_post_ids(
     note_records_sample: List[NoteRecord],
 ) -> None:
     storage = Storage(engine=engine_for_test)
-    post_ids = [TweetId.from_str("2234567890123456781"), TweetId.from_str("2234567890123456782")]
+    post_ids = [
+        TweetId.from_str("2234567890123456781"),
+        TweetId.from_str("2234567890123456782"),
+    ]
     expected = [note for note in note_samples if note.post_id in post_ids]
     actual = list(storage.get_notes(post_ids=post_ids))
     assert expected == actual
