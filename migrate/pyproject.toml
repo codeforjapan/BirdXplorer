@@ -1,0 +1,103 @@
+[build-system]
+build-backend = "flit_core.buildapi"
+requires = ["flit_core >=3.8.0,<4"]
+
+
+[project]
+name = "birdxplorer_migration"
+description = "The Migration Scripts for BirdXplorer project."
+authors = [
+    {name = "osoken"},
+]
+dynamic = [
+    "version",
+]
+readme = "README.md"
+license = {file = "../LICENSE"}
+requires-python = ">=3.10"
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Natural Language :: Japanese",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.10",
+]
+
+dependencies = [
+    "birdxplorer_common @ git+https://github.com/codeforjapan/BirdXplorer.git@feature/issue-53-divide-python-packages#subdirectory=common",
+    "sqlalchemy",
+    "python-dotenv",
+]
+
+[project.urls]
+Source = "https://github.com/codeforjapan/BirdXplorer"
+
+[tool.setuptools]
+packages=["birdxplorer"]
+
+[tool.setuptools.package-data]
+birdxplorer = ["py.typed"]
+
+[project.optional-dependencies]
+dev=[
+    "black",
+    "flake8",
+    "pyproject-flake8",
+    "pytest",
+    "mypy",
+    "tox",
+    "isort",
+    "pytest-mock",
+    "pytest-cov",
+    "freezegun",
+    "types-python-dateutil",
+    "psycopg2-binary",
+    "factory_boy",
+    "uvicorn",
+    "polyfactory",
+    "httpx",
+]
+prod=[
+]
+
+[tool.black]
+line-length = 120
+target-version = ['py310']
+
+[tool.flake8]
+max-line-length = 120
+extend-ignore = "E203,E701"
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic.mypy]
+init_typed = true
+
+[tool.isort]
+profile = "black"
+known_first_party = "birdxplorer_api,birdxplorer_common,birdxplorer_etl"
+
+[tool.tox]
+legacy_tox_ini = """
+    [tox]
+    skipsdist = true
+    envlist = py310
+
+    [testenv]
+    setenv =
+        VIRTUALENV_PIP = 24.0
+    deps =
+        -e .[dev]
+    commands =
+        black birdxplorer_api tests
+        isort birdxplorer_api tests
+        pytest
+        pflake8 birdxplorer_api/ tests/
+        mypy birdxplorer_api --strict
+        mypy tests --strict
+"""
