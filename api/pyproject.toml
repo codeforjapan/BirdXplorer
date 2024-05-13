@@ -10,9 +10,9 @@ authors = [
     {name = "osoken"},
 ]
 dynamic = [
-    "version", 
+    "version",
 ]
-readme = "../README.md"
+readme = "README.md"
 license = {file = "../LICENSE"}
 requires-python = ">=3.10"
 
@@ -100,11 +100,11 @@ legacy_tox_ini = """
     envlist = py310
 
     [testenv]
-    setenv = 
+    setenv =
         VIRTUALENV_PIP = 24.0
     deps =
         -e .[dev]
-    commands = 
+    commands =
         black birdxplorer_api tests
         isort birdxplorer_api tests
         pytest
