@@ -29,6 +29,16 @@ services:
         - action: rebuild
           path: ./api
           target: /app/api
+  migrate:
+    depends_on:
+      - db
+    build:
+      args:
+        - ENVIRONMENT=dev
+      context: ./migrate
+      dockerfile: Dockerfile
+    env_file:
+      - .env
 
 
 volumes:
