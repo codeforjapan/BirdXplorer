@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from ..models import Message
+from birdxplorer_common.models import Message
 
 
 def gen_router() -> APIRouter:

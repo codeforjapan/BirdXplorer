@@ -4,16 +4,16 @@ requires = ["flit_core >=3.8.0,<4"]
 
 
 [project]
-name = "birdxplorer"
-description = "birdxplorer is a tool to help you read and get insights from your documents."
+name = "birdxplorer_etl"
+description = "ETL module for BirdXplorer"
 authors = [
     {name = "osoken"},
 ]
 dynamic = [
     "version", 
 ]
-readme = "README.md"
-license = {file = "LICENSE"}
+readme = "../README.md"
+license = {file = "../LICENSE"}
 requires-python = ">=3.10"
 
 classifiers = [
@@ -25,20 +25,14 @@ classifiers = [
 ]
 
 dependencies = [
-    "pydantic",
-    "python-dateutil",
-    "sqlalchemy",
-    "pydantic_settings",
-    "fastapi",
-    "JSON-log-formatter",
-    "openai",
+    "birdxplorer_common @ git+https://github.com/codeforjapan/BirdXplorer.git@feature/issue-53-divide-python-packages#subdirectory=common",
 ]
 
 [project.urls]
 Source = "https://github.com/codeforjapan/BirdXplorer"
 
 [tool.setuptools]
-packages=["birdxplorer"]
+packages=["birdxplorer_etl"]
 
 [tool.setuptools.package-data]
 birdxplorer = ["py.typed"]
@@ -58,9 +52,7 @@ dev=[
     "types-python-dateutil",
     "psycopg2-binary",
     "factory_boy",
-    "uvicorn",
     "polyfactory",
-    "httpx",
     "types-psycopg2",
 ]
 prod=[
@@ -69,11 +61,10 @@ prod=[
 
 
 [tool.pytest.ini_options]
-addopts = ["-sv", "--doctest-modules", "--cov=birdxplorer", "--cov-report=xml", "--cov-report=term-missing"]
-testpaths = ["tests", "birdxplorer"]
+addopts = ["-sv", "--doctest-modules", "--cov=birdxplorer_etl", "--cov-report=xml", "--cov-report=term-missing"]
+testpaths = ["tests", "birdxplorer_etl"]
 filterwarnings = [
     "error",
-    "ignore:The \\'app\\' shortcut is now deprecated. Use the explicit style \\'transport=WSGITransport\\(app=\\.\\.\\.\\)\\' instead\\.",
 ]
 
 [tool.black]
@@ -96,6 +87,7 @@ init_typed = true
 
 [tool.isort]
 profile = "black"
+known_first_party = "birdxplorer_api,birdxplorer_common,birdxplorer_etl"
 
 [tool.tox]
 legacy_tox_ini = """
@@ -110,10 +102,10 @@ legacy_tox_ini = """
     deps =
         -e .[dev]
     commands = 
-        black birdxplorer tests
-        isort birdxplorer tests
+        black birdxplorer_etl tests
+        isort birdxplorer_etl tests
         pytest
-        pflake8 birdxplorer/ tests/ stubs/
-        mypy birdxplorer --strict
+        pflake8 birdxplorer_etl/ tests/
+        mypy birdxplorer_etl --strict
         mypy tests --strict
 """
