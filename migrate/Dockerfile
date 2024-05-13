@@ -30,5 +30,5 @@ COPY --from=builder /wait /wait
 COPY --from=builder /usr/local/lib/python${PYTHON_VERSION_CODE}/site-packages /usr/local/lib/python${PYTHON_VERSION_CODE}/site-packages
 COPY --chown=app:app . ./
 
-ENV WAIT_COMMAND="python birdxplorer_migration/scripts/migrations/migrate_all.py birdxplorer_migration/data/appv1/"
+ENV WAIT_COMMAND="python birdxplorer_migration/scripts/migrate_all.py birdxplorer_migration/data/appv1/"
 ENTRYPOINT ["/wait"]
