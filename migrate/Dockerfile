@@ -12,12 +12,28 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 COPY pyproject.toml README.md ./
 COPY birdxplorer_migration/__init__.py ./birdxplorer_migration/
+
+RUN if [ "${ENVIRONMENT}" = "prod" ]; then \
+    apt-get update && apt-get install -y --no-install-recommends \
+    postgresql-client-15 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*; \
+    fi
+
 RUN pip install --no-cache-dir -e ".[${ENVIRONMENT}]"
 
 FROM python:${PYTHON_VERSION_CODE}-slim-bookworm as runner
 ARG PYTHON_VERSION_CODE
+ARG ENVIRONMENT
 
 WORKDIR /app
+
+RUN if [ "${ENVIRONMENT}" = "prod" ]; then \
+    apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*; \
+    fi
 
 RUN groupadd -r app && useradd -r -g app app
 RUN chown -R app:app /app

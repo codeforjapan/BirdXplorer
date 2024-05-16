@@ -59,6 +59,7 @@ dev=[
     "httpx",
 ]
 prod=[
+    "psycopg2"
 ]
 
 [tool.black]
