@@ -25,7 +25,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "birdxplorer_common @ git+https://github.com/codeforjapan/BirdXplorer.git@feature/issue-53-divide-python-packages#subdirectory=common",
+    "birdxplorer_common @ git+https://github.com/codeforjapan/BirdXplorer.git@main#subdirectory=common",
     "fastapi",
     "python-dateutil",
     "pydantic",

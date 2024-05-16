@@ -10,7 +10,7 @@ authors = [
     {name = "osoken"},
 ]
 dynamic = [
-    "version", 
+    "version",
 ]
 readme = "../README.md"
 license = {file = "../LICENSE"}
@@ -25,7 +25,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "birdxplorer_common @ git+https://github.com/codeforjapan/BirdXplorer.git@feature/issue-53-divide-python-packages#subdirectory=common",
+    "birdxplorer_common @ git+https://github.com/codeforjapan/BirdXplorer.git@main#subdirectory=common",
 ]
 
 [project.urls]
@@ -96,12 +96,12 @@ legacy_tox_ini = """
     envlist = py310
 
     [testenv]
-    setenv = 
+    setenv =
         VIRTUALENV_PIP = 24.0
         DATA_DIR = {env:BX_DATA_DIR}
     deps =
         -e .[dev]
-    commands = 
+    commands =
         black birdxplorer_etl tests
         isort birdxplorer_etl tests
         pytest
