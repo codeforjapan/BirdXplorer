@@ -26,6 +26,13 @@ def init_db():
     logger.info(f"Initializing database at {db_path}")
     engine = create_engine("sqlite:///" + db_path)
     Base.metadata.create_all(engine)
+
+    # 一時データベースのテーブル作成する
+    # ToDo: noteテーブル以外に必要なものを追加
+    if not inspect(engine).has_table("note"):
+        logger.info("Creating table note")
+        RowNoteRecord.metadata.create_all(engine)
+
     Session = sessionmaker(bind=engine)
 
     return Session()
