@@ -52,6 +52,7 @@ class Base(DeclarativeBase):
         HttpUrl: String,
         NonNegativeInt: DECIMAL,
         MediaDetails: JSON,
+        BinaryBool: String
     }
 
 

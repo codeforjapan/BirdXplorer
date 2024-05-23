@@ -2,10 +2,17 @@ from prefect import task, flow
 from extract import extract_data
 from transform import transform_data
 from load import load_data
+from lib.sqlite.init import init_db
+from sqlalchemy.orm import Session
 
 @task
-def extract():
-    extract_data()
+def initialize():
+    db = init_db()
+    return {'db': db}
+
+@task
+def extract(db: Session):
+    extract_data(db)
 
 @task
 def transform():
@@ -17,7 +24,8 @@ def load():
 
 @flow
 def run_etl():
-    e = extract()
+    i = initialize()
+    e = extract(i['db'])
     t = transform()
     l = load()
 
