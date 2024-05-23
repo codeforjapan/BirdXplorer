@@ -24,7 +24,6 @@ from .models import (
     BinaryBool,
     NotesClassification,
     NotesHarmful,
-    NotesValidationDifficulty
 )
 from .models import XUser as XUserModel
 from .settings import GlobalSettings
