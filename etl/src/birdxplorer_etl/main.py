@@ -31,9 +31,9 @@ def load():
 @flow
 def run_etl():
     i = initialize()
-    e = extract(i["db"])
-    t = transform()
-    l = load()
+    _ = extract(i["db"])
+    _ = transform()
+    _ = load()
 
 
 run_etl()
