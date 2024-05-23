@@ -31,6 +31,14 @@ def init_db():
     # ToDo: noteテーブル以外に必要なものを追加
     if not inspect(engine).has_table("note"):
         logger.info("Creating table note")
+    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "note.db"))
+    logger.info(f"Initializing database at {db_path}")
+    engine = create_engine("sqlite:///" + db_path)
+
+    # 一時データベースのテーブル作成する
+    # ToDo: noteテーブル以外に必要なものを追加
+    if not inspect(engine).has_table("note"):
+        logger.info("Creating table note")
         RowNoteRecord.metadata.create_all(engine)
 
     Session = sessionmaker(bind=engine)
