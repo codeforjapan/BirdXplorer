@@ -26,6 +26,9 @@ Source = "https://github.com/codeforjapan/BirdXplorer"
 [tool.setuptools.package-data]
 birdxplorer = ["py.typed"]
 
+[tool.setuptools]
+package-dir = {"" = "src"}
+
 [project.optional-dependencies]
 dev=[
     "black",
