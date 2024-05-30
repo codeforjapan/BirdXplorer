@@ -11,7 +11,7 @@ authors = [
     {name = "yu23ki14"}
 ]
 dependencies = [
-    "birdxplorer_common @ git+https://github.com/codeforjapan/BirdXplorer.git@feature/issue-53-divide-python-packages#subdirectory=common",
+    "birdxplorer_common[dev] @ git+https://github.com/codeforjapan/BirdXplorer.git@etl/main#subdirectory=common",
     "pandas",
     "sqlalchemy",
     "requests",
