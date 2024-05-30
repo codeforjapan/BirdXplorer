@@ -35,5 +35,4 @@ def run_etl():
     _ = transform()
     _ = load()
 
-
 run_etl()
