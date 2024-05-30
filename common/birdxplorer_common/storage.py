@@ -5,11 +5,11 @@ from pydantic import AnyUrl, HttpUrl
 from sqlalchemy import ForeignKey, create_engine, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
-from sqlalchemy.types import DECIMAL, JSON, Integer, String
+from sqlalchemy.types import CHAR, DECIMAL, JSON, Integer, String
 
-from .models import LanguageIdentifier, MediaDetails, NonNegativeInt
+from .models import BinaryBool, LanguageIdentifier, MediaDetails, NonNegativeInt
 from .models import Note as NoteModel
-from .models import NoteId, ParticipantId
+from .models import NoteId, NotesClassification, NotesHarmful, ParticipantId
 from .models import Post as PostModel
 from .models import PostId, SummaryString
 from .models import Topic as TopicModel
@@ -21,9 +21,6 @@ from .models import (
     UserEnrollment,
     UserId,
     UserName,
-    BinaryBool,
-    NotesClassification,
-    NotesHarmful,
 )
 from .models import XUser as XUserModel
 from .settings import GlobalSettings
@@ -51,7 +48,7 @@ class Base(DeclarativeBase):
         HttpUrl: String,
         NonNegativeInt: DECIMAL,
         MediaDetails: JSON,
-        BinaryBool: String
+        BinaryBool: CHAR,
     }
 
 
@@ -104,6 +101,7 @@ class PostRecord(Base):
     repost_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
     impression_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
 
+
 class RowNoteRecord(Base):
     __tablename__ = "row_notes"
 
@@ -130,6 +128,7 @@ class RowNoteRecord(Base):
     harmful: Mapped[NotesHarmful] = mapped_column(nullable=False)
     validation_difficulty: Mapped[SummaryString] = mapped_column(nullable=False)
     summary: Mapped[SummaryString] = mapped_column(nullable=False)
+
 
 class Storage:
     def __init__(self, engine: Engine) -> None:
