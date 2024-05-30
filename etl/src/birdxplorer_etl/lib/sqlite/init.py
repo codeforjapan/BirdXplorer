@@ -5,7 +5,7 @@ from prefect import get_run_logger
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 
-from birdxplorer_common.storage import RowNoteRecord
+from birdxplorer_common.storage import Base, RowNoteRecord
 
 
 def init_db():
@@ -22,6 +22,10 @@ def init_db():
         logger.info("Creating table note")
         RowNoteRecord.metadata.create_all(engine)
 
+    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "note.db"))
+    logger.info(f"Initializing database at {db_path}")
+    engine = create_engine("sqlite:///" + db_path)
+    Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
 
     return Session()
