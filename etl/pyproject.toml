@@ -4,12 +4,25 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "birdxplorer_etl"
-version = "0.1.0"
 description = "BirdXplorer ETL is data extraction"
 authors = [
     {name = "osoken"},
     {name = "yu23ki14"}
 ]
+dynamic = [
+    "version",
+]
+
+requires-python = ">=3.10"
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Natural Language :: Japanese",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.10"
+]
+
 dependencies = [
     "birdxplorer_common[dev] @ git+https://github.com/codeforjapan/BirdXplorer.git@etl/main#subdirectory=common",
     "pandas",
@@ -43,3 +56,46 @@ addopts = "-v -s"
 testpaths = [
     "tests",
 ]
+
+[tool.black]
+line-length = 120
+target-version = ['py310']
+
+[tool.flake8]
+max-line-length = 120
+extend-ignore = "E203,E701"
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+plugins = ["pydantic.mypy"]
+mypy_path = "stubs/"
+
+[tool.pydantic.mypy]
+init_typed = true
+
+[tool.isort]
+profile = "black"
+known_first_party = "birdxplorer_api,birdxplorer_common,birdxplorer_etl"
+
+[tool.tox]
+legacy_tox_ini = """
+    [tox]
+    skipsdist = true
+    envlist = py310
+
+    [testenv]
+    setenv =
+        VIRTUALENV_PIP = 24.0
+        DATA_DIR = {env:BX_DATA_DIR}
+    deps =
+        -e .[dev]
+    commands =
+        black birdxplorer_etl tests
+        isort birdxplorer_etl tests
+        pytest
+        pflake8 birdxplorer_etl/ tests/
+        mypy birdxplorer_etl --strict
+        mypy tests --strict
+"""

@@ -1,10 +1,10 @@
 from prefect import flow, task
 from sqlalchemy.orm import Session
 
-from .extract import extract_data
-from .lib.sqlite.init import init_db
-from .load import load_data
-from .transform import transform_data
+from lib.sqlite.init import init_db
+from extract import extract_data
+from load import load_data
+from transform import transform_data
 
 
 @task
@@ -35,4 +35,5 @@ def run_etl():
     _ = transform()
     _ = load()
 
-run_etl()
+if __name__ == "__main__":
+    run_etl()
