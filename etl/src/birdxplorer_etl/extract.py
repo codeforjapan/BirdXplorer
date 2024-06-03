@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from birdxplorer_common.storage import RowNoteRecord
 
-from . import settings
+import settings
 
 
 def extract_data(db: Session):

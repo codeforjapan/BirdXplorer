@@ -12,7 +12,7 @@ def init_db():
     logger = get_run_logger()
 
     # ToDo: dbファイルをS3など外部に置く必要がある。
-    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "note.db"))
+    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "data", "note.db"))
     logger.info(f"Initializing database at {db_path}")
     engine = create_engine("sqlite:///" + db_path)
 
