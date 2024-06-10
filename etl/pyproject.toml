@@ -1,19 +1,18 @@
 [build-system]
-build-backend = "flit_core.buildapi"
-requires = ["flit_core >=3.8.0,<4"]
-
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "birdxplorer_etl"
-description = "ETL module for BirdXplorer"
+description = "BirdXplorer ETL is data extraction"
 authors = [
     {name = "osoken"},
+    {name = "yu23ki14"}
 ]
 dynamic = [
     "version",
 ]
-readme = "../README.md"
-license = {file = "../LICENSE"}
+
 requires-python = ">=3.10"
 
 classifiers = [
@@ -21,21 +20,27 @@ classifiers = [
     "Natural Language :: Japanese",
     "Operating System :: OS Independent",
     "Programming Language :: Python",
-    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.10"
 ]
 
 dependencies = [
-    "birdxplorer_common @ git+https://github.com/codeforjapan/BirdXplorer.git@main#subdirectory=common",
+    "birdxplorer_common[dev] @ git+https://github.com/codeforjapan/BirdXplorer.git@etl/main#subdirectory=common",
+    "pandas",
+    "sqlalchemy",
+    "requests",
+    "pytest",
+    "prefect",
+    "stringcase"
 ]
 
 [project.urls]
 Source = "https://github.com/codeforjapan/BirdXplorer"
 
-[tool.setuptools]
-packages=["birdxplorer_etl"]
-
 [tool.setuptools.package-data]
 birdxplorer = ["py.typed"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
 
 [project.optional-dependencies]
 dev=[
@@ -43,28 +48,13 @@ dev=[
     "flake8",
     "pyproject-flake8",
     "pytest",
-    "mypy",
-    "tox",
-    "isort",
-    "pytest-mock",
-    "pytest-cov",
-    "freezegun",
-    "types-python-dateutil",
-    "psycopg2-binary",
-    "factory_boy",
-    "polyfactory",
-    "types-psycopg2",
+    'prefect'
 ]
-prod=[
-    "psycopg2"
-]
-
 
 [tool.pytest.ini_options]
-addopts = ["-sv", "--doctest-modules", "--cov=birdxplorer_etl", "--cov-report=xml", "--cov-report=term-missing"]
-testpaths = ["tests", "birdxplorer_etl"]
-filterwarnings = [
-    "error",
+addopts = "-v -s"
+testpaths = [
+    "tests",
 ]
 
 [tool.black]
