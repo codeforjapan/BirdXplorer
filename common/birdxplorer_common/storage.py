@@ -5,11 +5,11 @@ from pydantic import AnyUrl, HttpUrl
 from sqlalchemy import ForeignKey, create_engine, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
-from sqlalchemy.types import DECIMAL, JSON, Integer, String
+from sqlalchemy.types import CHAR, DECIMAL, JSON, Integer, String
 
-from .models import LanguageIdentifier, MediaDetails, NonNegativeInt
+from .models import BinaryBool, LanguageIdentifier, MediaDetails, NonNegativeInt
 from .models import Note as NoteModel
-from .models import NoteId, ParticipantId
+from .models import NoteId, NotesClassification, NotesHarmful, ParticipantId
 from .models import Post as PostModel
 from .models import PostId, SummaryString
 from .models import Topic as TopicModel
@@ -48,6 +48,7 @@ class Base(DeclarativeBase):
         HttpUrl: String,
         NonNegativeInt: DECIMAL,
         MediaDetails: JSON,
+        BinaryBool: CHAR,
     }
 
 
@@ -99,6 +100,34 @@ class PostRecord(Base):
     like_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
     repost_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
     impression_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
+
+
+class RowNoteRecord(Base):
+    __tablename__ = "row_notes"
+
+    note_id: Mapped[NoteId] = mapped_column(primary_key=True)
+    note_author_participant_id: Mapped[ParticipantId] = mapped_column(nullable=False)
+    created_at_millis: Mapped[TwitterTimestamp] = mapped_column(nullable=False)
+    tweet_id: Mapped[TweetId] = mapped_column(nullable=False)
+    believable: Mapped[BinaryBool] = mapped_column(nullable=False)
+    misleading_other: Mapped[BinaryBool] = mapped_column(nullable=False)
+    misleading_factual_error: Mapped[BinaryBool] = mapped_column(nullable=False)
+    misleading_manipulated_media: Mapped[BinaryBool] = mapped_column(nullable=False)
+    misleading_outdated_information: Mapped[BinaryBool] = mapped_column(nullable=False)
+    misleading_missing_important_context: Mapped[BinaryBool] = mapped_column(nullable=False)
+    misleading_unverified_claim_as_fact: Mapped[BinaryBool] = mapped_column(nullable=False)
+    misleading_satire: Mapped[BinaryBool] = mapped_column(nullable=False)
+    not_misleading_other: Mapped[BinaryBool] = mapped_column(nullable=False)
+    not_misleading_factually_correct: Mapped[BinaryBool] = mapped_column(nullable=False)
+    not_misleading_outdated_but_not_when_written: Mapped[BinaryBool] = mapped_column(nullable=False)
+    not_misleading_clearly_satire: Mapped[BinaryBool] = mapped_column(nullable=False)
+    not_misleading_personal_opinion: Mapped[BinaryBool] = mapped_column(nullable=False)
+    trustworthy_sources: Mapped[BinaryBool] = mapped_column(nullable=False)
+    is_media_note: Mapped[BinaryBool] = mapped_column(nullable=False)
+    classification: Mapped[NotesClassification] = mapped_column(nullable=False)
+    harmful: Mapped[NotesHarmful] = mapped_column(nullable=False)
+    validation_difficulty: Mapped[SummaryString] = mapped_column(nullable=False)
+    summary: Mapped[SummaryString] = mapped_column(nullable=False)
 
 
 class Storage:
