@@ -5,7 +5,7 @@ from prefect import get_run_logger
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 
-from birdxplorer_common.storage import RowNoteRecord
+from birdxplorer_common.storage import RowNoteRecord, RowPostRecord
 
 
 def init_db():
@@ -21,6 +21,9 @@ def init_db():
     if not inspect(engine).has_table("note"):
         logger.info("Creating table note")
         RowNoteRecord.metadata.create_all(engine)
+    if not inspect(engine).has_table("row_posts"):
+        logger.info("Creating table post")
+        RowPostRecord.metadata.create_all(engine)
 
     Session = sessionmaker(bind=engine)
 

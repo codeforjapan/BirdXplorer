@@ -49,6 +49,7 @@ class Base(DeclarativeBase):
         NonNegativeInt: DECIMAL,
         MediaDetails: JSON,
         BinaryBool: CHAR,
+        String: String,
     }
 
 
@@ -128,6 +129,41 @@ class RowNoteRecord(Base):
     harmful: Mapped[NotesHarmful] = mapped_column(nullable=False)
     validation_difficulty: Mapped[SummaryString] = mapped_column(nullable=False)
     summary: Mapped[SummaryString] = mapped_column(nullable=False)
+
+
+class RowPostRecord(Base):
+    __tablename__ = "row_posts"
+
+    post_id: Mapped[TweetId] = mapped_column(primary_key=True)
+    author_id: Mapped[UserId] = mapped_column(ForeignKey("row_users.user_id"), nullable=False)
+    text: Mapped[SummaryString] = mapped_column(nullable=False)
+    media_type: Mapped[String] = mapped_column(nullable=True)
+    media_url: Mapped[String] = mapped_column(nullable=True)
+    created_at: Mapped[TwitterTimestamp] = mapped_column(nullable=False)
+    like_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
+    repost_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
+    bookmark_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
+    impression_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
+    quote_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
+    reply_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
+    lang: Mapped[String] = mapped_column()
+
+
+class RowUserRecord(Base):
+    __tablename__ = "row_users"
+
+    user_id: Mapped[UserId] = mapped_column(primary_key=True)
+    name: Mapped[UserName] = mapped_column(nullable=False)
+    user_name: Mapped[UserName] = mapped_column(nullable=False)
+    description: Mapped[SummaryString] = mapped_column(nullable=False)
+    profile_image_url: Mapped[String] = mapped_column(nullable=False)
+    followers_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
+    following_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
+    tweet_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
+    verified: Mapped[BinaryBool] = mapped_column(nullable=False)
+    verified_type: Mapped[String] = mapped_column(nullable=False)
+    location: Mapped[String] = mapped_column(nullable=False)
+    url: Mapped[String] = mapped_column(nullable=False)
 
 
 class Storage:

@@ -24,7 +24,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "birdxplorer_common[dev] @ git+https://github.com/codeforjapan/BirdXplorer.git@etl/main#subdirectory=common",
+    "birdxplorer_common[dev] @ file:///home/yu23ki14/cfj/BirdXplorer/common",
     "pandas",
     "sqlalchemy",
     "requests",
