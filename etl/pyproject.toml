@@ -42,14 +42,6 @@ birdxplorer = ["py.typed"]
 package-dir = {"" = "src"}
 
 [project.optional-dependencies]
-test=[
-    "birdxplorer_common @ git+https://github.com/codeforjapan/BirdXplorer.git@etl/${GIT_BRANCH_NAME}#subdirectory=common",
-    "black",
-    "flake8",
-    "pyproject-flake8",
-    "pytest",
-    'prefect'
-]
 dev=[
     "birdxplorer_common[dev] @ file://../common",
     "black",
