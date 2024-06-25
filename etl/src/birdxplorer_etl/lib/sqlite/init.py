@@ -5,7 +5,7 @@ from prefect import get_run_logger
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 
-from birdxplorer_common.storage import RowNoteRecord, RowPostRecord
+from birdxplorer_common.storage import RowNoteRecord, RowPostRecord, RowUserRecord
 
 
 def init_db():
@@ -18,12 +18,15 @@ def init_db():
 
     # 一時データベースのテーブル作成する
     # ToDo: noteテーブル以外に必要なものを追加
-    if not inspect(engine).has_table("note"):
+    if not inspect(engine).has_table("row_notes"):
         logger.info("Creating table note")
         RowNoteRecord.metadata.create_all(engine)
     if not inspect(engine).has_table("row_posts"):
         logger.info("Creating table post")
         RowPostRecord.metadata.create_all(engine)
+    if not inspect(engine).has_table("row_users"):
+        logger.info("Creating table user")
+        RowUserRecord.metadata.create_all(engine)
 
     Session = sessionmaker(bind=engine)
 
