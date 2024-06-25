@@ -5,7 +5,7 @@ import stringcase
 from prefect import get_run_logger
 from sqlalchemy.orm import Session
 from lib.x.postlookup import lookup
-from birdxplorer_common.storage import RowNoteRecord, RowPostRecord
+from birdxplorer_common.storage import RowNoteRecord, RowPostRecord, RowUserRecord
 import settings
 import time
 
@@ -13,6 +13,10 @@ import time
 def extract_data(db: Session):
     logger = get_run_logger()
     logger.info("Downloading community notes data")
+
+    # get columns of post table
+    columns = db.query(RowUserRecord).statement.columns.keys()
+    logger.info(columns)
 
     # Noteデータを取得してSQLiteに保存
     date = datetime.now()
@@ -65,14 +69,43 @@ def extract_data(db: Session):
     logger.info(len(postExtract_targetNotes))
     for note in postExtract_targetNotes:
         tweet_id = note.tweet_id
+
+        is_tweetExist = db.query(RowPostRecord).filter(RowPostRecord.post_id == tweet_id).first()
+        if is_tweetExist is not None:
+            note.row_post_id = tweet_id
+            continue
+
         logger.info(tweet_id)
         post = lookup(tweet_id)
         created_at = datetime.strptime(post["data"]["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ")
         created_at_millis = int(created_at.timestamp() * 1000)
+
+        is_userExist = db.query(RowUserRecord).filter(RowUserRecord.user_id == post["data"]["author_id"]).first()
+        logger.info(is_userExist)
+        if is_userExist is None:
+            db_user = RowUserRecord(
+                user_id=post["data"]["author_id"],
+                name=post["includes"]["users"][0]["name"],
+                user_name=post["includes"]["users"][0]["username"],
+                description=post["includes"]["users"][0]["description"],
+                profile_image_url=post["includes"]["users"][0]["profile_image_url"],
+                followers_count=post["includes"]["users"][0]["public_metrics"]["followers_count"],
+                following_count=post["includes"]["users"][0]["public_metrics"]["following_count"],
+                tweet_count=post["includes"]["users"][0]["public_metrics"]["tweet_count"],
+                verified=post["includes"]["users"][0]["verified"],
+                verified_type=post["includes"]["users"][0]["verified_type"],
+                location=post["includes"]["users"][0]["location"],
+                url=post["includes"]["users"][0]["url"],
+            )
+            db.add(db_user)
+
+        media_url = post["includes"]["media"][0]["url"]
         db_post = RowPostRecord(
             post_id=post["data"]["id"],
             author_id=post["data"]["author_id"],
             text=post["data"]["text"],
+            media_type=post["includes"]["media"][0]["type"],
+            media_url=media_url,
             created_at=created_at_millis,
             like_count=post["data"]["public_metrics"]["like_count"],
             repost_count=post["data"]["public_metrics"]["retweet_count"],
@@ -83,7 +116,12 @@ def extract_data(db: Session):
             lang=post["data"]["lang"],
         )
         db.add(db_post)
-        time.sleep(60)
+        note.row_post_id = tweet_id
+        time.sleep(1)
         continue
-    # db.commit()
+    db.commit()
+
+    # select note from db, get relation tweet and user data
+    note = db.query(RowNoteRecord).filter(RowNoteRecord.tweet_id == "1797617478950170784").first()
+
     return

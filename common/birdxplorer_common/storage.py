@@ -129,6 +129,8 @@ class RowNoteRecord(Base):
     harmful: Mapped[NotesHarmful] = mapped_column(nullable=False)
     validation_difficulty: Mapped[SummaryString] = mapped_column(nullable=False)
     summary: Mapped[SummaryString] = mapped_column(nullable=False)
+    row_post_id: Mapped[TweetId] = mapped_column(ForeignKey("row_posts.post_id"), nullable=True)
+    row_post: Mapped["RowPostRecord"] = relationship("RowPostRecord", back_populates="row_notes")
 
 
 class RowPostRecord(Base):
@@ -147,6 +149,8 @@ class RowPostRecord(Base):
     quote_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
     reply_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
     lang: Mapped[String] = mapped_column()
+    row_notes: Mapped["RowNoteRecord"] = relationship("RowNoteRecord", back_populates="row_post")
+    user: Mapped["RowUserRecord"] = relationship("RowUserRecord", back_populates="row_post")
 
 
 class RowUserRecord(Base):
@@ -164,6 +168,7 @@ class RowUserRecord(Base):
     verified_type: Mapped[String] = mapped_column(nullable=False)
     location: Mapped[String] = mapped_column(nullable=False)
     url: Mapped[String] = mapped_column(nullable=False)
+    row_post: Mapped["RowPostRecord"] = relationship("RowPostRecord", back_populates="user")
 
 
 class Storage:

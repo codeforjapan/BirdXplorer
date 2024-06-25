@@ -24,7 +24,6 @@ classifiers = [
 ]
 
 dependencies = [
-    "birdxplorer_common[dev] @ file:///home/yu23ki14/cfj/BirdXplorer/common",
     "pandas",
     "sqlalchemy",
     "requests",
@@ -44,6 +43,7 @@ package-dir = {"" = "src"}
 
 [project.optional-dependencies]
 dev=[
+    "birdxplorer_common @ file:///home/yu23ki14/cfj/BirdXplorer/common",
     "black",
     "flake8",
     "pyproject-flake8",
