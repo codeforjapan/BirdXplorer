@@ -1,4 +1,6 @@
-from pydantic import Field, PostgresDsn, computed_field
+from typing import Literal
+
+from pydantic import Field, HttpUrl, PostgresDsn, computed_field
 from pydantic_settings import BaseSettings as PydanticBaseSettings
 from pydantic_settings import SettingsConfigDict
 
@@ -27,7 +29,17 @@ class PostgresStorageSettings(BaseSettings):
         ).unicode_string()
 
 
+class CORSSettings(BaseSettings):
+    allow_credentials: bool = True
+    allow_methods: list[str] = ["GET"]
+    allow_headers: list[str] = ["*"]
+
+    # TBD: use allow_origin_regex instead of allow_origins ?
+    allow_origins: list[HttpUrl | Literal["*"]] = ["*"]  # type: ignore[misc] pyright reports type error here
+
+
 class GlobalSettings(BaseSettings):
+    cors_settings: CORSSettings = Field(default_factory=CORSSettings)
     model_config = SettingsConfigDict(env_file=".env")
     logger_settings: LoggerSettings = Field(default_factory=LoggerSettings)
     storage_settings: PostgresStorageSettings

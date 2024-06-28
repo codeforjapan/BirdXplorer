@@ -4,6 +4,7 @@ from urllib.parse import parse_qs as parse_query_string
 from urllib.parse import urlencode as encode_query_string
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic.alias_generators import to_snake
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -41,6 +42,7 @@ def gen_app(settings: GlobalSettings) -> FastAPI:
     _ = get_logger(level=settings.logger_settings.level)
     storage = gen_storage(settings=settings)
     app = FastAPI()
+    app.add_middleware(CORSMiddleware, **settings.cors_settings.model_dump())
     app.add_middleware(QueryStringFlatteningMiddleware)
     app.include_router(gen_system_router(), prefix="/api/v1/system")
     app.include_router(gen_data_router(storage=storage), prefix="/api/v1/data")
