@@ -306,7 +306,7 @@ def cors_settings_factory(load_dotenv_fixture: None) -> Type[ModelFactory[CORSSe
         allow_credentials = True
         allow_methods = ["GET"]
         allow_headers = ["*"]
-        allow_origins = ["http://allowed.example"]
+        allow_origins = ["*"]
 
     return CORSSettingsFactory
 
@@ -348,7 +348,7 @@ def settings_for_test(
     postgres_storage_settings_factory: Type[ModelFactory[PostgresStorageSettings]],
 ) -> Generator[GlobalSettings, None, None]:
     yield global_settings_factory.build(
-        cors_settings=cors_settings_factory.build(),
+        cors_settings=cors_settings_factory.build(allow_origins=["http://allowed.example.com"]),
         storage_settings=postgres_storage_settings_factory.build(database=TEST_DATABASE_NAME),
     )
 
