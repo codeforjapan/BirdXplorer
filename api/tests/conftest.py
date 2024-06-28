@@ -26,7 +26,11 @@ from birdxplorer_common.models import (
     UserEnrollment,
     XUser,
 )
-from birdxplorer_common.settings import GlobalSettings, PostgresStorageSettings
+from birdxplorer_common.settings import (
+    CORSSettings,
+    GlobalSettings,
+    PostgresStorageSettings,
+)
 from birdxplorer_common.storage import Storage
 
 
@@ -295,6 +299,19 @@ def load_dotenv_fixture() -> None:
 
 
 @fixture
+def cors_settings_factory(load_dotenv_fixture: None) -> Type[ModelFactory[CORSSettings]]:
+    class CORSSettingsFactory(ModelFactory[CORSSettings]):
+        __model__ = CORSSettings
+
+        allow_credentials = True
+        allow_methods = ["GET"]
+        allow_headers = ["*"]
+        allow_origins = ["http://allowed.example"]
+
+    return CORSSettingsFactory
+
+
+@fixture
 def postgres_storage_settings_factory(
     load_dotenv_fixture: None,
 ) -> Type[ModelFactory[PostgresStorageSettings]]:
@@ -312,11 +329,13 @@ def postgres_storage_settings_factory(
 
 @fixture
 def global_settings_factory(
+    cors_settings_factory: Type[ModelFactory[CORSSettings]],
     postgres_storage_settings_factory: Type[ModelFactory[PostgresStorageSettings]],
 ) -> Type[ModelFactory[GlobalSettings]]:
     class GlobalSettingsFactory(ModelFactory[GlobalSettings]):
         __model__ = GlobalSettings
 
+        cors_settings = cors_settings_factory.build()
         storage_settings = postgres_storage_settings_factory.build()
 
     return GlobalSettingsFactory
@@ -325,10 +344,12 @@ def global_settings_factory(
 @fixture
 def settings_for_test(
     global_settings_factory: Type[ModelFactory[GlobalSettings]],
+    cors_settings_factory: Type[ModelFactory[CORSSettings]],
     postgres_storage_settings_factory: Type[ModelFactory[PostgresStorageSettings]],
 ) -> Generator[GlobalSettings, None, None]:
     yield global_settings_factory.build(
-        storage_settings=postgres_storage_settings_factory.build(database=TEST_DATABASE_NAME)
+        cors_settings=cors_settings_factory.build(),
+        storage_settings=postgres_storage_settings_factory.build(database=TEST_DATABASE_NAME),
     )
 
 
