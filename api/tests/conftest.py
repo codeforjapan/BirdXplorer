@@ -304,7 +304,7 @@ def cors_settings_factory(load_dotenv_fixture: None) -> Type[ModelFactory[CORSSe
         __model__ = CORSSettings
 
         allow_credentials = True
-        allow_methods = ["GET"]
+        allow_methods = ["*"]
         allow_headers = ["*"]
         allow_origins = ["*"]
 
