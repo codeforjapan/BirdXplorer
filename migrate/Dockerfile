@@ -20,7 +20,8 @@ RUN if [ "${ENVIRONMENT}" = "prod" ]; then \
     && rm -rf /var/lib/apt/lists/*; \
     fi
 
-RUN pip install --no-cache-dir -e ".[${ENVIRONMENT}]"
+RUN python -m pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -e ".[${ENVIRONMENT}]"
 
 FROM python:${PYTHON_VERSION_CODE}-slim-bookworm as runner
 ARG PYTHON_VERSION_CODE
