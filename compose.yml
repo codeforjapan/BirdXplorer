@@ -22,8 +22,6 @@ services:
       db:
         condition: service_healthy
     build:
-      args:
-        - ENVIRONMENT=dev
       context: ./api
       dockerfile: Dockerfile
     env_file:
