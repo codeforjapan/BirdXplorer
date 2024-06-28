@@ -31,6 +31,7 @@ dependencies = [
     "pydantic",
     "starlette",
     "python-dotenv",
+    "uvicorn[standard]",
 ]
 
 [project.urls]
@@ -57,11 +58,11 @@ dev=[
     "types-python-dateutil",
     "psycopg2-binary",
     "factory_boy",
-    "uvicorn",
     "polyfactory",
     "httpx",
 ]
 prod=[
+    "gunicorn",
     "psycopg2",
 ]
 
