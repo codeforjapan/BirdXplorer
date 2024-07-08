@@ -1,6 +1,4 @@
-from typing import Literal
-
-from pydantic import Field, HttpUrl, PostgresDsn, computed_field
+from pydantic import Field, PostgresDsn, computed_field
 from pydantic_settings import BaseSettings as PydanticBaseSettings
 from pydantic_settings import SettingsConfigDict
 
