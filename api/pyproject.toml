@@ -37,10 +37,10 @@ dependencies = [
 Source = "https://github.com/codeforjapan/BirdXplorer"
 
 [tool.setuptools]
-packages=["birdxplorer"]
+packages=["birdxplorer_api"]
 
 [tool.setuptools.package-data]
-birdxplorer = ["py.typed"]
+birdxplorer_api = ["py.typed"]
 
 [project.optional-dependencies]
 dev=[
