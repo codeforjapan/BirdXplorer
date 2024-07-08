@@ -34,8 +34,7 @@ class CORSSettings(BaseSettings):
     allow_methods: list[str] = ["GET"]
     allow_headers: list[str] = ["*"]
 
-    # TBD: use allow_origin_regex instead of allow_origins ?
-    allow_origins: list[HttpUrl | Literal["*"]] = ["*"]  # type: ignore[misc] pyright reports type error here
+    allow_origins: list[str] = []
 
 
 class GlobalSettings(BaseSettings):
