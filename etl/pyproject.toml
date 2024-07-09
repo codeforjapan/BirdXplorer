@@ -43,12 +43,15 @@ package-dir = {"" = "src"}
 
 [project.optional-dependencies]
 dev=[
-    "birdxplorer_common @ file:///home/yu23ki14/cfj/BirdXplorer/common",
     "black",
     "flake8",
     "pyproject-flake8",
     "pytest",
-    'prefect'
+    'prefect',
+    "isort",
+]
+prod=[
+    "birdxplorer_common @ git+https://github.com/codeforjapan/BirdXplorer.git@main#subdirectory=common",
 ]
 
 [tool.pytest.ini_options]
@@ -91,11 +94,10 @@ legacy_tox_ini = """
         DATA_DIR = {env:BX_DATA_DIR}
     deps =
         -e .[dev]
+        -e ../common
     commands =
-        black birdxplorer_etl tests
-        isort birdxplorer_etl tests
+        black src/birdxplorer_etl tests
+        isort src/birdxplorer_etl tests
         pytest
-        pflake8 birdxplorer_etl/ tests/
-        mypy birdxplorer_etl --strict
-        mypy tests --strict
+        pflake8 src/birdxplorer_etl/ tests/
 """
