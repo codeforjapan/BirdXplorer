@@ -27,7 +27,16 @@ class PostgresStorageSettings(BaseSettings):
         ).unicode_string()
 
 
+class CORSSettings(BaseSettings):
+    allow_credentials: bool = True
+    allow_methods: list[str] = ["GET"]
+    allow_headers: list[str] = ["*"]
+
+    allow_origins: list[str] = []
+
+
 class GlobalSettings(BaseSettings):
+    cors_settings: CORSSettings = Field(default_factory=CORSSettings)
     model_config = SettingsConfigDict(env_file=".env")
     logger_settings: LoggerSettings = Field(default_factory=LoggerSettings)
     storage_settings: PostgresStorageSettings
