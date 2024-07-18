@@ -2,6 +2,7 @@ import logging
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from birdxplorer_common.storage import RowNoteRecord, RowPostRecord, RowUserRecord
+from birdxplorer_etl.lib.ai_model.ai_model_interface import get_ai_service
 import csv
 import os
 
@@ -106,5 +107,33 @@ def transform_data(db: Session):
             for user in users:
                 writer.writerow(user)
         offset += limit
+
+    csv_seed_file_path = './seed/topic_seed.csv'
+    output_csv_file_path = "./data/transformed/topic.csv"
+    records = []
+    ai_service = get_ai_service()
+
+    if os.path.exists(output_csv_file_path):
+        return
+
+    with open(csv_seed_file_path, newline='', encoding='utf-8') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for index, row in enumerate(reader):
+            if 'topic' in row and row['topic']:
+                topic_id = index + 1
+                language_identifier = ai_service.detect_language(row['topic'])
+                label = {language_identifier: row['topic']}  # Assuming the label is in Japanese
+                record = {"topic_id": topic_id, "label": label}
+                records.append(record)
+
+    with open(output_csv_file_path, "w", newline='', encoding='utf-8') as file:
+        fieldnames = ['topic_id', 'label']
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        for record in records:
+            writer.writerow({
+                'topic_id': record["topic_id"],
+                'label': {k.value: v for k, v in record["label"].items()}
+            })
 
     return
