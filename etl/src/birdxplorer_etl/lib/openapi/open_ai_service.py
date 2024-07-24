@@ -24,14 +24,19 @@ class OpenAIService(AIModelInterface):
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": prompt}
             ],
+            temperature=0.0,
+            seed=1,
             max_tokens=30
         )
+
         message_content = response.choices[0].message.content.strip()
 
-        if message_content not in LanguageIdentifier._value2member_map_:
-            for code in LanguageIdentifier._value2member_map_:
-                if code in message_content:
-                    return LanguageIdentifier(code)
-            raise ValueError(f"Invalid language code received: {message_content}")
-        else:
+        if message_content in LanguageIdentifier._value2member_map_:
             return LanguageIdentifier(message_content)
+
+        valid_code = next((code for code in LanguageIdentifier._value2member_map_ if code in message_content), None)
+
+        if valid_code:
+            return LanguageIdentifier(valid_code)
+
+        raise ValueError(f"Invali　３d language code received: {message_content}")
