@@ -137,3 +137,41 @@ def transform_data(db: Session):
             })
 
     return
+
+def generate_note_topic():
+    note_csv_file_path = './data/transformed/note.csv'
+    output_csv_file_path = './data/transformed/note_topic_association.csv'
+    ai_service = get_ai_service()
+
+    records = []
+    with open(output_csv_file_path, "w", newline='', encoding='utf-8', buffering=1) as file:
+        fieldnames = ['note_id', 'topic_id']
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+
+        with open(note_csv_file_path, newline='', encoding='utf-8') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for index, row in enumerate(reader):
+                note_id = row['note_id']
+                summary = row['summary']
+                topics_info = ai_service.detect_topic(note_id, summary)
+                if topics_info:
+                    for topic in topics_info.get('topics', []):
+                        record = {"note_id": note_id, "topic_id": topic}
+                        records.append(record)
+
+                if index % 100 == 0:
+                    for record in records:
+                        writer.writerow({
+                            'note_id': record["note_id"],
+                            'topic_id': record["topic_id"],
+                        })
+                    records = []
+
+        for record in records:
+            writer.writerow({
+                'note_id': record["note_id"],
+                'topic_id': record["topic_id"],
+            })
+
+    print(f"New CSV file has been created at {output_csv_file_path}")
