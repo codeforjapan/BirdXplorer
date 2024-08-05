@@ -83,28 +83,34 @@ def extract_data(db: Session):
         is_userExist = db.query(RowUserRecord).filter(RowUserRecord.user_id == post["data"]["author_id"]).first()
         logger.info(is_userExist)
         if is_userExist is None:
+            user_data = (
+                post["includes"]["users"][0]
+                if "includes" in post and "users" in post["includes"] and len(post["includes"]["users"]) > 0
+                else {}
+            )
             db_user = RowUserRecord(
                 user_id=post["data"]["author_id"],
-                name=post["includes"]["users"][0]["name"],
-                user_name=post["includes"]["users"][0]["username"],
-                description=post["includes"]["users"][0]["description"],
-                profile_image_url=post["includes"]["users"][0]["profile_image_url"],
-                followers_count=post["includes"]["users"][0]["public_metrics"]["followers_count"],
-                following_count=post["includes"]["users"][0]["public_metrics"]["following_count"],
-                tweet_count=post["includes"]["users"][0]["public_metrics"]["tweet_count"],
-                verified=post["includes"]["users"][0]["verified"],
-                verified_type=post["includes"]["users"][0]["verified_type"],
-                location=post["includes"]["users"][0]["location"],
-                url=post["includes"]["users"][0]["url"],
+                name=user_data.get("name"),
+                user_name=user_data.get("username"),
+                description=user_data.get("description"),
+                profile_image_url=user_data.get("profile_image_url"),
+                followers_count=user_data.get("public_metrics", {}).get("followers_count"),
+                following_count=user_data.get("public_metrics", {}).get("following_count"),
+                tweet_count=user_data.get("public_metrics", {}).get("tweet_count"),
+                verified=user_data.get("verified"),
+                verified_type=user_data.get("verified_type"),
+                location=user_data.get("location"),
+                url=user_data.get("url", ""),
             )
             db.add(db_user)
 
-        media_url = post["includes"]["media"][0]["url"]
+        media_url = post["includes"]["media"][0]["url"] if "media" in post["includes"] else ""
+        media_type = post["includes"]["media"][0]["type"] if "media" in post["includes"] else ""
         db_post = RowPostRecord(
             post_id=post["data"]["id"],
             author_id=post["data"]["author_id"],
             text=post["data"]["text"],
-            media_type=post["includes"]["media"][0]["type"],
+            media_type=media_type,
             media_url=media_url,
             created_at=created_at_millis,
             like_count=post["data"]["public_metrics"]["like_count"],
