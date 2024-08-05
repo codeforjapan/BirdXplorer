@@ -117,7 +117,7 @@ def extract_data(db: Session):
         )
         db.add(db_post)
         note.row_post_id = tweet_id
-        time.sleep(1)
+        time.sleep(60)
         continue
     db.commit()
 
