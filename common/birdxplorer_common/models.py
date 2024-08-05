@@ -565,9 +565,6 @@ class NotesValidationDifficulty(str, Enum):
     empty = ""
 
 
-class TweetId(UpToNineteenDigitsDecimalString): ...
-
-
 class PostId(UpToNineteenDigitsDecimalString): ...
 
 
