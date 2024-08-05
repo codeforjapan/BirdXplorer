@@ -16,7 +16,6 @@ from .models import Topic as TopicModel
 from .models import (
     TopicId,
     TopicLabel,
-    TweetId,
     TwitterTimestamp,
     UserEnrollment,
     UserId,
@@ -39,7 +38,6 @@ class Base(DeclarativeBase):
         TopicLabel: JSON,
         NoteId: String,
         ParticipantId: String,
-        TweetId: String,
         PostId: String,
         LanguageIdentifier: String,
         TwitterTimestamp: DECIMAL,
