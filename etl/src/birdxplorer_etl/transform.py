@@ -2,6 +2,7 @@ import logging
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from birdxplorer_common.storage import RowNoteRecord, RowPostRecord, RowUserRecord
+from birdxplorer_etl.lib.ai_model.ai_model_interface import get_ai_service
 import csv
 import os
 
@@ -107,4 +108,70 @@ def transform_data(db: Session):
                 writer.writerow(user)
         offset += limit
 
+    csv_seed_file_path = './seed/topic_seed.csv'
+    output_csv_file_path = "./data/transformed/topic.csv"
+    records = []
+    ai_service = get_ai_service()
+
+    if os.path.exists(output_csv_file_path):
+        return
+
+    with open(csv_seed_file_path, newline='', encoding='utf-8') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for index, row in enumerate(reader):
+            if 'topic' in row and row['topic']:
+                topic_id = index + 1
+                language_identifier = ai_service.detect_language(row['topic'])
+                label = {language_identifier: row['topic']}  # Assuming the label is in Japanese
+                record = {"topic_id": topic_id, "label": label}
+                records.append(record)
+
+    with open(output_csv_file_path, "w", newline='', encoding='utf-8') as file:
+        fieldnames = ['topic_id', 'label']
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        for record in records:
+            writer.writerow({
+                'topic_id': record["topic_id"],
+                'label': {k.value: v for k, v in record["label"].items()}
+            })
+
     return
+
+def generate_note_topic():
+    note_csv_file_path = './data/transformed/note.csv'
+    output_csv_file_path = './data/transformed/note_topic_association.csv'
+    ai_service = get_ai_service()
+
+    records = []
+    with open(output_csv_file_path, "w", newline='', encoding='utf-8', buffering=1) as file:
+        fieldnames = ['note_id', 'topic_id']
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+
+        with open(note_csv_file_path, newline='', encoding='utf-8') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for index, row in enumerate(reader):
+                note_id = row['note_id']
+                summary = row['summary']
+                topics_info = ai_service.detect_topic(note_id, summary)
+                if topics_info:
+                    for topic in topics_info.get('topics', []):
+                        record = {"note_id": note_id, "topic_id": topic}
+                        records.append(record)
+
+                if index % 100 == 0:
+                    for record in records:
+                        writer.writerow({
+                            'note_id': record["note_id"],
+                            'topic_id': record["topic_id"],
+                        })
+                    records = []
+
+        for record in records:
+            writer.writerow({
+                'note_id': record["note_id"],
+                'topic_id': record["topic_id"],
+            })
+
+    print(f"New CSV file has been created at {output_csv_file_path}")
