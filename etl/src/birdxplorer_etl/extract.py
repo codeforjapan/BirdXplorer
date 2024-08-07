@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 from lib.x.postlookup import lookup
 from birdxplorer_common.storage import RowNoteRecord, RowPostRecord, RowUserRecord
 import settings
-import time
 
 
 def extract_data(db: Session):
@@ -51,13 +50,6 @@ def extract_data(db: Session):
 
     db.commit()
 
-    # post = lookup()
-    # created_at = datetime.strptime(post["data"]["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ")
-    # created_at_millis = int(created_at.timestamp() * 1000)
-    # db_post = RowPostRecord(post_id=post["data"]["id"], author_id=post["data"]["author_id"], text=post["data"]["text"], created_at=created_at_millis,like_count=post["data"]["public_metrics"]["like_count"],repost_count=post["data"]["public_metrics"]["retweet_count"],bookmark_count=post["data"]["public_metrics"]["bookmark_count"],impression_count=post["data"]["public_metrics"]["impression_count"],quote_count=post["data"]["public_metrics"]["quote_count"],reply_count=post["data"]["public_metrics"]["reply_count"],lang=post["data"]["lang"])
-    # db.add(db_post)
-    # db.commit()
-
     # Noteに紐づくtweetデータを取得
     postExtract_targetNotes = (
         db.query(RowNoteRecord)
@@ -79,7 +71,7 @@ def extract_data(db: Session):
         logger.info(tweet_id)
         post = lookup(tweet_id)
 
-        if "data" not in post:
+        if post == None or "data" not in post:
             continue
 
         created_at = datetime.strptime(post["data"]["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ")
@@ -131,7 +123,6 @@ def extract_data(db: Session):
         )
         db.add(db_post)
         note.row_post_id = tweet_id
-        time.sleep(90)
         db.commit()
         continue
 
