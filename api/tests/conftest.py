@@ -21,7 +21,6 @@ from birdxplorer_common.models import (
     PostId,
     Topic,
     TopicId,
-    TweetId,
     TwitterTimestamp,
     UserEnrollment,
     XUser,
@@ -227,7 +226,7 @@ def mock_storage(
         created_at_from: Union[None, TwitterTimestamp] = None,
         created_at_to: Union[None, TwitterTimestamp] = None,
         topic_ids: Union[List[TopicId], None] = None,
-        post_ids: Union[List[TweetId], None] = None,
+        post_ids: Union[List[PostId], None] = None,
         language: Union[LanguageIdentifier, None] = None,
     ) -> Generator[Note, None, None]:
         for note in note_samples:
