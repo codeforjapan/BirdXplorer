@@ -262,6 +262,15 @@ def mock_storage(
 
     mock.get_posts_by_ids.side_effect = _get_posts_by_ids
 
+    def _get_posts_by_note_ids(note_ids: List[NoteId]) -> Generator[Post, None, None]:
+        for post in post_samples:
+            for note in note_samples:
+                if note.note_id in note_ids and post.post_id == note.post_id:
+                    yield post
+                    break
+
+    mock.get_posts_by_note_ids.side_effect = _get_posts_by_note_ids
+
     def _get_posts_by_created_at_range(start: TwitterTimestamp, end: TwitterTimestamp) -> Generator[Post, None, None]:
         for post in post_samples:
             if start <= post.created_at < end:
