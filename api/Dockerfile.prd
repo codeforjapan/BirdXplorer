@@ -43,4 +43,4 @@ USER app
 COPY --from=builder /usr/local/lib/python${PYTHON_VERSION_CODE}/site-packages /usr/local/lib/python${PYTHON_VERSION_CODE}/site-packages
 COPY --chown=app:app . ./
 
-ENTRYPOINT ["python", "-m", "gunicorn", "birdxplorer_api.main:app", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0", "--port", "10000"]
+ENTRYPOINT ["python", "-m", "gunicorn", "birdxplorer_api.main:app", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:10000"]
