@@ -608,6 +608,15 @@ class LanguageIdentifier(str, Enum):
     PT = "pt"
     DE = "de"
     FR = "fr"
+    OTHER = "other"
+
+    @classmethod
+    def normalize(cls, value: str, default: str = "other") -> str:
+        try:
+            cls(value)
+            return value
+        except ValueError:
+            return default
 
 
 class TopicLabelString(NonEmptyTrimmedString): ...
