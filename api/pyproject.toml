@@ -25,7 +25,6 @@ classifiers = [
 ]
 
 dependencies = [
-    "birdxplorer_common @ git+https://github.com/codeforjapan/BirdXplorer.git@main#subdirectory=common",
     "fastapi",
     "python-dateutil",
     "pydantic",
@@ -37,10 +36,10 @@ dependencies = [
 Source = "https://github.com/codeforjapan/BirdXplorer"
 
 [tool.setuptools]
-packages=["birdxplorer"]
+packages=["birdxplorer_api"]
 
 [tool.setuptools.package-data]
-birdxplorer = ["py.typed"]
+birdxplorer_api = ["py.typed"]
 
 [project.optional-dependencies]
 dev=[
@@ -62,6 +61,7 @@ dev=[
     "httpx",
 ]
 prod=[
+    "birdxplorer_common @ git+https://github.com/codeforjapan/BirdXplorer.git@main#subdirectory=common",
     "psycopg2",
     "gunicorn",
 ]
@@ -106,6 +106,7 @@ legacy_tox_ini = """
         VIRTUALENV_PIP = 24.0
     deps =
         -e .[dev]
+        -e ../common
     commands =
         black birdxplorer_api tests
         isort birdxplorer_api tests

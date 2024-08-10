@@ -19,8 +19,8 @@ def extract(db: Session):
 
 
 @task
-def transform():
-    return transform_data()
+def transform(db: Session):
+    transform_data(db)
 
 
 @task
@@ -32,8 +32,9 @@ def load():
 def run_etl():
     i = initialize()
     _ = extract(i["db"])
-    _ = transform()
+    _ = transform(i["db"])
     _ = load()
+
 
 if __name__ == "__main__":
     run_etl()
