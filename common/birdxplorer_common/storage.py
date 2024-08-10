@@ -240,7 +240,7 @@ class Storage:
                 subq = (
                     select(NoteTopicAssociation.note_id)
                     .group_by(NoteTopicAssociation.note_id)
-                    .having(func.array_agg(NoteTopicAssociation.topic_id) == topic_ids)
+                    .having(func.bool_or(NoteTopicAssociation.topic_id.in_(topic_ids)))
                     .subquery()
                 )
                 query = query.join(subq, NoteRecord.note_id == subq.c.note_id)
@@ -263,7 +263,7 @@ class Storage:
                         )
                         for topic in note_record.topics
                     ],
-                    language=note_record.language,
+                    language=LanguageIdentifier.normalize(note_record.language),
                     summary=note_record.summary,
                     created_at=note_record.created_at,
                 )
