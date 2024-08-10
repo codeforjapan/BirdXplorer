@@ -18,7 +18,7 @@ class PostgresStorageSettings(BaseSettings):
     port: int = 5432
     database: str = "postgres"
 
-    @computed_field  # type: ignore[misc]
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def sqlalchemy_database_url(self) -> str:
         return PostgresDsn(
@@ -27,7 +27,16 @@ class PostgresStorageSettings(BaseSettings):
         ).unicode_string()
 
 
+class CORSSettings(BaseSettings):
+    allow_credentials: bool = True
+    allow_methods: list[str] = ["GET"]
+    allow_headers: list[str] = ["*"]
+
+    allow_origins: list[str] = []
+
+
 class GlobalSettings(BaseSettings):
+    cors_settings: CORSSettings = Field(default_factory=CORSSettings)
     model_config = SettingsConfigDict(env_file=".env")
     logger_settings: LoggerSettings = Field(default_factory=LoggerSettings)
     storage_settings: PostgresStorageSettings
