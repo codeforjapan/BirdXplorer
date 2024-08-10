@@ -131,3 +131,13 @@ def test_notes_get_has_created_at_filter_to(client: TestClient, note_samples: Li
     assert response.status_code == 200
     res_json = response.json()
     assert res_json == {"data": [json.loads(note_samples[i].model_dump_json()) for i in (0, 1, 2, 3)]}
+
+
+def test_notes_get_has_topic_id_filter(client: TestClient, note_samples: List[Note]) -> None:
+    correct_notes = [note for note in note_samples if note_samples[0].topics[0] in note.topics]
+    response = client.get(f"/api/v1/data/notes/?topicIds={note_samples[0].topics[0].topic_id.serialize()}")
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json == {
+        "data": [json.loads(correct_notes[i].model_dump_json()) for i in range(correct_notes.__len__())]
+    }
