@@ -10,7 +10,6 @@ from birdxplorer_common.models import (
     PostId,
     Topic,
     TopicId,
-    TweetId,
     TwitterTimestamp,
 )
 from birdxplorer_common.storage import NoteRecord, PostRecord, Storage, TopicRecord
@@ -208,8 +207,8 @@ def test_get_notes_by_post_ids(
 ) -> None:
     storage = Storage(engine=engine_for_test)
     post_ids = [
-        TweetId.from_str("2234567890123456781"),
-        TweetId.from_str("2234567890123456782"),
+        PostId.from_str("2234567890123456781"),
+        PostId.from_str("2234567890123456782"),
     ]
     expected = [note for note in note_samples if note.post_id in post_ids]
     actual = list(storage.get_notes(post_ids=post_ids))
@@ -222,7 +221,7 @@ def test_get_notes_by_post_ids_empty(
     note_records_sample: List[NoteRecord],
 ) -> None:
     storage = Storage(engine=engine_for_test)
-    post_ids: List[TweetId] = []
+    post_ids: List[PostId] = []
     expected: List[Note] = []
     actual = list(storage.get_notes(post_ids=post_ids))
     assert expected == actual

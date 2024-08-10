@@ -14,7 +14,6 @@ from birdxplorer_common.models import (
     PostId,
     Topic,
     TopicId,
-    TweetId,
     TwitterTimestamp,
     UserEnrollment,
 )
@@ -73,7 +72,7 @@ def gen_router(storage: Storage) -> APIRouter:
         created_at_from: Union[None, TwitterTimestamp] = Query(default=None),
         created_at_to: Union[None, TwitterTimestamp] = Query(default=None),
         topic_ids: Union[List[TopicId], None] = Query(default=None),
-        post_ids: Union[List[TweetId], None] = Query(default=None),
+        post_ids: Union[List[PostId], None] = Query(default=None),
         language: Union[LanguageIdentifier, None] = Query(default=None),
     ) -> NoteListResponse:
         return NoteListResponse(
