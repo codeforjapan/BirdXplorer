@@ -1,6 +1,6 @@
 from birdxplorer_etl.settings import OPENAPI_TOKEN
 from birdxplorer_etl.lib.ai_model.ai_model_interface_base import AIModelInterface
-from birdxplorer_common.storage import LanguageIdentifier
+from birdxplorer_common.models import LanguageIdentifier
 from openai import OpenAI
 from typing import Dict, List
 import csv
@@ -58,7 +58,7 @@ class OpenAIService(AIModelInterface):
 
         print(f"Invalid language code received: {message_content}")
         # raise ValueError(f"Invalid language code received: {message_content}")
-        return message_content
+        return LanguageIdentifier.normalize(message_content)
 
     def detect_topic(self, note_id: int, note: str) -> Dict[str, List[int]]:
         topic_examples = "\n".join([f"{key}: {value}" for key, value in self.topics.items()])
