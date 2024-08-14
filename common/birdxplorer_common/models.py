@@ -608,6 +608,19 @@ class LanguageIdentifier(str, Enum):
     PT = "pt"
     DE = "de"
     FR = "fr"
+    FI = "fi"
+    TR = "tr"
+    NL = "nl"
+    HE = "he"
+    IT = "it"
+    FA = "fa"
+    CA = "ca"
+    AR = "ar"
+    EL = "el"
+    SV = "sv"
+    DA = "da"
+    RU = "ru"
+    PL = "pl"
 
 
 class TopicLabelString(NonEmptyTrimmedString): ...

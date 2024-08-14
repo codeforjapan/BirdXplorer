@@ -41,7 +41,6 @@ class OpenAIService(AIModelInterface):
             ],
             temperature=0.0,
             seed=1,
-            max_tokens=30
         )
 
         message_content = response.choices[0].message.content.strip()
@@ -54,7 +53,9 @@ class OpenAIService(AIModelInterface):
         if valid_code:
             return LanguageIdentifier(valid_code)
 
-        raise ValueError(f"Invalid language code received: {message_content}")
+        print(f"Invalid language code received: {message_content}")
+        # raise ValueError(f"Invalid language code received: {message_content}")
+        return message_content
 
     def detect_topic(self, note_id: int, note: str) -> Dict[str, List[int]]:
         topic_examples = "\n".join([f"{key}: {value}" for key, value in self.topics.items()])
