@@ -22,8 +22,11 @@ class OpenAIService(AIModelInterface):
             for row in reader:
                 topic_id = int(row['topic_id'])
                 labels = json.loads(row['label'].replace("'", '"'))
-                for label in labels.values():
-                    topics[label] = topic_id
+                # 日本語のラベルのみを使用するように
+                if 'ja' in labels:
+                    topics[labels['ja']] = topic_id
+                # for label in labels.values():
+                #         topics[label] = topic_id
         return topics
 
     def detect_language(self, text: str) -> str:
@@ -34,7 +37,7 @@ class OpenAIService(AIModelInterface):
         )
 
         response = self.client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": prompt}
@@ -81,12 +84,12 @@ class OpenAIService(AIModelInterface):
         の形で構成されています。
         こちらを使用して関連するものを推測してください。形式はJSONで、キーをtopicsとして値に必ず数字のtopic_idを配列で格納してください。
         また指定された情報以外は含めないでください。
-            
+
         トピックの例:
         {topic_examples}
         """
         response = self.client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": prompt}

@@ -148,6 +148,7 @@ def transform_data(db: Session):
 
     return
 
+
 def generate_note_topic():
     note_csv_file_path = './data/transformed/note.csv'
     output_csv_file_path = './data/transformed/note_topic_association.csv'
@@ -177,6 +178,7 @@ def generate_note_topic():
                             'topic_id': record["topic_id"],
                         })
                     records = []
+                print(index)
 
         for record in records:
             writer.writerow({
@@ -185,3 +187,7 @@ def generate_note_topic():
             })
 
     print(f"New CSV file has been created at {output_csv_file_path}")
+
+
+if __name__ == "__main__":
+    generate_note_topic()
