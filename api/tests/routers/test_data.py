@@ -39,6 +39,13 @@ def test_posts_get_has_post_id_filter(client: TestClient, post_samples: List[Pos
     }
 
 
+def test_posts_get_has_note_id_filter(client: TestClient, post_samples: List[Post], note_samples: List[Note]) -> None:
+    response = client.get(f"/api/v1/data/posts/?noteId={','.join([n.note_id for n in note_samples])}")
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json == {"data": [json.loads(post_samples[0].model_dump_json())]}
+
+
 def test_posts_get_has_created_at_filter_start_and_end(client: TestClient, post_samples: List[Post]) -> None:
     response = client.get("/api/v1/data/posts/?createdAtStart=2006-7-25 00:00:00&createdAtEnd=2006-7-30 23:59:59")
     assert response.status_code == 200
@@ -124,3 +131,13 @@ def test_notes_get_has_created_at_filter_to(client: TestClient, note_samples: Li
     assert response.status_code == 200
     res_json = response.json()
     assert res_json == {"data": [json.loads(note_samples[i].model_dump_json()) for i in (0, 1, 2, 3)]}
+
+
+def test_notes_get_has_topic_id_filter(client: TestClient, note_samples: List[Note]) -> None:
+    correct_notes = [note for note in note_samples if note_samples[0].topics[0] in note.topics]
+    response = client.get(f"/api/v1/data/notes/?topicIds={note_samples[0].topics[0].topic_id.serialize()}")
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json == {
+        "data": [json.loads(correct_notes[i].model_dump_json()) for i in range(correct_notes.__len__())]
+    }

@@ -565,7 +565,7 @@ class NotesValidationDifficulty(str, Enum):
     empty = ""
 
 
-class TweetId(UpToNineteenDigitsDecimalString): ...
+class PostId(UpToNineteenDigitsDecimalString): ...
 
 
 class NoteData(BaseModel):
@@ -576,7 +576,7 @@ class NoteData(BaseModel):
     note_id: NoteId
     note_author_participant_id: ParticipantId
     created_at_millis: TwitterTimestamp
-    tweet_id: TweetId
+    tweet_id: PostId
     believable: NotesBelievable
     misleading_other: BinaryBool
     misleading_factual_error: BinaryBool
@@ -621,6 +621,15 @@ class LanguageIdentifier(str, Enum):
     DA = "da"
     RU = "ru"
     PL = "pl"
+    OTHER = "other"
+
+    @classmethod
+    def normalize(cls, value: str, default: str = "other") -> str:
+        try:
+            cls(value)
+            return value
+        except ValueError:
+            return default
 
 
 class TopicLabelString(NonEmptyTrimmedString): ...
@@ -642,7 +651,7 @@ class SummaryString(NonEmptyTrimmedString): ...
 
 class Note(BaseModel):
     note_id: NoteId
-    post_id: TweetId
+    post_id: PostId
     language: LanguageIdentifier
     topics: List[Topic]
     summary: SummaryString
@@ -661,9 +670,6 @@ class XUser(BaseModel):
     profile_image: HttpUrl
     followers_count: NonNegativeInt
     following_count: NonNegativeInt
-
-
-class PostId(UpToNineteenDigitsDecimalString): ...
 
 
 MediaDetails: TypeAlias = List[HttpUrl] | None
