@@ -16,7 +16,6 @@ from .models import Topic as TopicModel
 from .models import (
     TopicId,
     TopicLabel,
-    TweetId,
     TwitterTimestamp,
     UserEnrollment,
     UserId,
@@ -39,7 +38,7 @@ class Base(DeclarativeBase):
         TopicLabel: JSON,
         NoteId: String,
         ParticipantId: String,
-        TweetId: String,
+        PostId: String,
         LanguageIdentifier: String,
         TwitterTimestamp: DECIMAL,
         SummaryString: String,
@@ -65,7 +64,7 @@ class NoteRecord(Base):
     __tablename__ = "notes"
 
     note_id: Mapped[NoteId] = mapped_column(primary_key=True)
-    post_id: Mapped[TweetId] = mapped_column(nullable=False)
+    post_id: Mapped[PostId] = mapped_column(nullable=False)
     topics: Mapped[List[NoteTopicAssociation]] = relationship()
     language: Mapped[LanguageIdentifier] = mapped_column(nullable=False)
     summary: Mapped[SummaryString] = mapped_column(nullable=False)
@@ -92,7 +91,7 @@ class XUserRecord(Base):
 class PostRecord(Base):
     __tablename__ = "posts"
 
-    post_id: Mapped[TweetId] = mapped_column(primary_key=True)
+    post_id: Mapped[PostId] = mapped_column(primary_key=True)
     user_id: Mapped[UserId] = mapped_column(ForeignKey("x_users.user_id"), nullable=False)
     user: Mapped[XUserRecord] = relationship()
     text: Mapped[SummaryString] = mapped_column(nullable=False)
@@ -109,7 +108,7 @@ class RowNoteRecord(Base):
     note_id: Mapped[NoteId] = mapped_column(primary_key=True)
     note_author_participant_id: Mapped[ParticipantId] = mapped_column(nullable=False)
     created_at_millis: Mapped[TwitterTimestamp] = mapped_column(nullable=False)
-    tweet_id: Mapped[TweetId] = mapped_column(nullable=False)
+    tweet_id: Mapped[PostId] = mapped_column(nullable=False)
     believable: Mapped[BinaryBool] = mapped_column(nullable=False)
     misleading_other: Mapped[BinaryBool] = mapped_column(nullable=False)
     misleading_factual_error: Mapped[BinaryBool] = mapped_column(nullable=False)
@@ -129,14 +128,14 @@ class RowNoteRecord(Base):
     harmful: Mapped[NotesHarmful] = mapped_column(nullable=False)
     validation_difficulty: Mapped[SummaryString] = mapped_column(nullable=False)
     summary: Mapped[SummaryString] = mapped_column(nullable=False)
-    row_post_id: Mapped[TweetId] = mapped_column(ForeignKey("row_posts.post_id"), nullable=True)
+    row_post_id: Mapped[PostId] = mapped_column(ForeignKey("row_posts.post_id"), nullable=True)
     row_post: Mapped["RowPostRecord"] = relationship("RowPostRecord", back_populates="row_notes")
 
 
 class RowPostRecord(Base):
     __tablename__ = "row_posts"
 
-    post_id: Mapped[TweetId] = mapped_column(primary_key=True)
+    post_id: Mapped[PostId] = mapped_column(primary_key=True)
     author_id: Mapped[UserId] = mapped_column(ForeignKey("row_users.user_id"), nullable=False)
     text: Mapped[SummaryString] = mapped_column(nullable=False)
     media_type: Mapped[String] = mapped_column(nullable=True)
@@ -224,7 +223,7 @@ class Storage:
         created_at_from: Union[None, TwitterTimestamp] = None,
         created_at_to: Union[None, TwitterTimestamp] = None,
         topic_ids: Union[List[TopicId], None] = None,
-        post_ids: Union[List[TweetId], None] = None,
+        post_ids: Union[List[PostId], None] = None,
         language: Union[LanguageIdentifier, None] = None,
     ) -> Generator[NoteModel, None, None]:
         with Session(self.engine) as sess:
@@ -241,7 +240,7 @@ class Storage:
                 subq = (
                     select(NoteTopicAssociation.note_id)
                     .group_by(NoteTopicAssociation.note_id)
-                    .having(func.array_agg(NoteTopicAssociation.topic_id) == topic_ids)
+                    .having(func.bool_or(NoteTopicAssociation.topic_id.in_(topic_ids)))
                     .subquery()
                 )
                 query = query.join(subq, NoteRecord.note_id == subq.c.note_id)
@@ -264,7 +263,7 @@ class Storage:
                         )
                         for topic in note_record.topics
                     ],
-                    language=note_record.language,
+                    language=LanguageIdentifier.normalize(note_record.language),
                     summary=note_record.summary,
                     created_at=note_record.created_at,
                 )
@@ -294,6 +293,16 @@ class Storage:
     def get_posts_by_created_at_end(self, end: TwitterTimestamp) -> Generator[PostModel, None, None]:
         with Session(self.engine) as sess:
             for post_record in sess.query(PostRecord).filter(PostRecord.created_at < end).all():
+                yield self._post_record_to_model(post_record)
+
+    def get_posts_by_note_ids(self, note_ids: List[NoteId]) -> Generator[PostModel, None, None]:
+        query = (
+            select(PostRecord)
+            .join(NoteRecord, NoteRecord.post_id == PostRecord.post_id)
+            .where(NoteRecord.note_id.in_(note_ids))
+        )
+        with Session(self.engine) as sess:
+            for post_record in sess.execute(query).scalars().all():
                 yield self._post_record_to_model(post_record)
 
 
