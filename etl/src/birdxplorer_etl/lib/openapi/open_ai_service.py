@@ -1,6 +1,6 @@
 from birdxplorer_etl.settings import OPENAPI_TOKEN
 from birdxplorer_etl.lib.ai_model.ai_model_interface_base import AIModelInterface
-from birdxplorer_common.storage import LanguageIdentifier
+from birdxplorer_common.models import LanguageIdentifier
 from openai import OpenAI
 from typing import Dict, List
 import csv
@@ -22,8 +22,11 @@ class OpenAIService(AIModelInterface):
             for row in reader:
                 topic_id = int(row['topic_id'])
                 labels = json.loads(row['label'].replace("'", '"'))
-                for label in labels.values():
-                    topics[label] = topic_id
+                # 日本語のラベルのみを使用するように
+                if 'ja' in labels:
+                    topics[labels['ja']] = topic_id
+                # for label in labels.values():
+                #         topics[label] = topic_id
         return topics
 
     def detect_language(self, text: str) -> str:
@@ -34,14 +37,13 @@ class OpenAIService(AIModelInterface):
         )
 
         response = self.client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.0,
             seed=1,
-            max_tokens=30
         )
 
         message_content = response.choices[0].message.content.strip()
@@ -54,7 +56,9 @@ class OpenAIService(AIModelInterface):
         if valid_code:
             return LanguageIdentifier(valid_code)
 
-        raise ValueError(f"Invalid language code received: {message_content}")
+        print(f"Invalid language code received: {message_content}")
+        # raise ValueError(f"Invalid language code received: {message_content}")
+        return LanguageIdentifier.normalize(message_content)
 
     def detect_topic(self, note_id: int, note: str) -> Dict[str, List[int]]:
         topic_examples = "\n".join([f"{key}: {value}" for key, value in self.topics.items()])
@@ -80,12 +84,12 @@ class OpenAIService(AIModelInterface):
         の形で構成されています。
         こちらを使用して関連するものを推測してください。形式はJSONで、キーをtopicsとして値に必ず数字のtopic_idを配列で格納してください。
         また指定された情報以外は含めないでください。
-            
+
         トピックの例:
         {topic_examples}
         """
         response = self.client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": prompt}

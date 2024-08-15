@@ -1,8 +1,10 @@
 import logging
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_
 from sqlalchemy.orm import Session
 from birdxplorer_common.storage import RowNoteRecord, RowPostRecord, RowUserRecord
 from birdxplorer_etl.lib.ai_model.ai_model_interface import get_ai_service
+from birdxplorer_etl.settings import (TARGET_NOTE_ESTIMATE_TOPIC_START_UNIX_MILLISECOND,
+                                      TARGET_NOTE_ESTIMATE_TOPIC_END_UNIX_MILLISECOND)
 import csv
 import os
 
@@ -19,24 +21,34 @@ def transform_data(db: Session):
 
     offset = 0
     limit = 1000
+    ai_service = get_ai_service()
 
-    num_of_notes = db.query(func.count(RowNoteRecord.note_id)).scalar()
+    num_of_notes = (db.query(func.count(RowNoteRecord.note_id))
+                    .filter(and_(RowNoteRecord.created_at_millis <= TARGET_NOTE_ESTIMATE_TOPIC_END_UNIX_MILLISECOND,
+                                 RowNoteRecord.created_at_millis >= TARGET_NOTE_ESTIMATE_TOPIC_START_UNIX_MILLISECOND))
+                    .scalar())
 
-    while offset < num_of_notes:
-        notes = db.execute(
-            select(
-                RowNoteRecord.note_id, RowNoteRecord.row_post_id, RowNoteRecord.summary, RowNoteRecord.created_at_millis
+    with open("./data/transformed/note.csv", "a") as file:
+        writer = csv.writer(file)
+        writer.writerow(["note_id", "post_id", "summary", "created_at", "language"])
+
+        while offset < num_of_notes:
+            notes = db.execute(
+                select(
+                    RowNoteRecord.note_id, RowNoteRecord.row_post_id,
+                    RowNoteRecord.summary, RowNoteRecord.created_at_millis
+                )
+                .filter(and_(RowNoteRecord.created_at_millis <= TARGET_NOTE_ESTIMATE_TOPIC_END_UNIX_MILLISECOND,
+                             RowNoteRecord.created_at_millis >= TARGET_NOTE_ESTIMATE_TOPIC_START_UNIX_MILLISECOND))
+                .limit(limit)
+                .offset(offset)
             )
-            .limit(limit)
-            .offset(offset)
-        )
 
-        with open("./data/transformed/note.csv", "a") as file:
-            writer = csv.writer(file)
-            writer.writerow(["note_id", "post_id", "summary", "created_at"])
             for note in notes:
-                writer.writerow(note)
-        offset += limit
+                note_as_list = list(note)
+                note_as_list.append(ai_service.detect_language(note[2]))
+                writer.writerow(note_as_list)
+            offset += limit
 
     # Transform row post data and generate post.csv
     if os.path.exists("./data/transformed/post.csv"):
@@ -111,7 +123,6 @@ def transform_data(db: Session):
     csv_seed_file_path = './seed/topic_seed.csv'
     output_csv_file_path = "./data/transformed/topic.csv"
     records = []
-    ai_service = get_ai_service()
 
     if os.path.exists(output_csv_file_path):
         return
@@ -119,10 +130,9 @@ def transform_data(db: Session):
     with open(csv_seed_file_path, newline='', encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile)
         for index, row in enumerate(reader):
-            if 'topic' in row and row['topic']:
+            if 'ja' in row and row['ja']:
                 topic_id = index + 1
-                language_identifier = ai_service.detect_language(row['topic'])
-                label = {language_identifier: row['topic']}  # Assuming the label is in Japanese
+                label = {'ja': row['ja'], 'en': row['en']}  # Assuming the label is in Japanese
                 record = {"topic_id": topic_id, "label": label}
                 records.append(record)
 
@@ -133,10 +143,11 @@ def transform_data(db: Session):
         for record in records:
             writer.writerow({
                 'topic_id': record["topic_id"],
-                'label': {k.value: v for k, v in record["label"].items()}
+                'label': {k: v for k, v in record["label"].items()}
             })
 
     return
+
 
 def generate_note_topic():
     note_csv_file_path = './data/transformed/note.csv'
@@ -167,6 +178,7 @@ def generate_note_topic():
                             'topic_id': record["topic_id"],
                         })
                     records = []
+                print(index)
 
         for record in records:
             writer.writerow({
@@ -175,3 +187,7 @@ def generate_note_topic():
             })
 
     print(f"New CSV file has been created at {output_csv_file_path}")
+
+
+if __name__ == "__main__":
+    generate_note_topic()

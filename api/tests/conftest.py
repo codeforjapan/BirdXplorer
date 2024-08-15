@@ -21,7 +21,6 @@ from birdxplorer_common.models import (
     PostId,
     Topic,
     TopicId,
-    TweetId,
     TwitterTimestamp,
     UserEnrollment,
     XUser,
@@ -227,7 +226,7 @@ def mock_storage(
         created_at_from: Union[None, TwitterTimestamp] = None,
         created_at_to: Union[None, TwitterTimestamp] = None,
         topic_ids: Union[List[TopicId], None] = None,
-        post_ids: Union[List[TweetId], None] = None,
+        post_ids: Union[List[PostId], None] = None,
         language: Union[LanguageIdentifier, None] = None,
     ) -> Generator[Note, None, None]:
         for note in note_samples:
@@ -261,6 +260,15 @@ def mock_storage(
                     break
 
     mock.get_posts_by_ids.side_effect = _get_posts_by_ids
+
+    def _get_posts_by_note_ids(note_ids: List[NoteId]) -> Generator[Post, None, None]:
+        for post in post_samples:
+            for note in note_samples:
+                if note.note_id in note_ids and post.post_id == note.post_id:
+                    yield post
+                    break
+
+    mock.get_posts_by_note_ids.side_effect = _get_posts_by_note_ids
 
     def _get_posts_by_created_at_range(start: TwitterTimestamp, end: TwitterTimestamp) -> Generator[Post, None, None]:
         for post in post_samples:

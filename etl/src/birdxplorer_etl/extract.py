@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 from lib.x.postlookup import lookup
 from birdxplorer_common.storage import RowNoteRecord, RowPostRecord, RowUserRecord
 import settings
-import time
 
 
 def extract_data(db: Session):
@@ -51,13 +50,6 @@ def extract_data(db: Session):
 
     db.commit()
 
-    # post = lookup()
-    # created_at = datetime.strptime(post["data"]["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ")
-    # created_at_millis = int(created_at.timestamp() * 1000)
-    # db_post = RowPostRecord(post_id=post["data"]["id"], author_id=post["data"]["author_id"], text=post["data"]["text"], created_at=created_at_millis,like_count=post["data"]["public_metrics"]["like_count"],repost_count=post["data"]["public_metrics"]["retweet_count"],bookmark_count=post["data"]["public_metrics"]["bookmark_count"],impression_count=post["data"]["public_metrics"]["impression_count"],quote_count=post["data"]["public_metrics"]["quote_count"],reply_count=post["data"]["public_metrics"]["reply_count"],lang=post["data"]["lang"])
-    # db.add(db_post)
-    # db.commit()
-
     # Noteに紐づくtweetデータを取得
     postExtract_targetNotes = (
         db.query(RowNoteRecord)
@@ -70,42 +62,56 @@ def extract_data(db: Session):
     for note in postExtract_targetNotes:
         tweet_id = note.tweet_id
 
-        is_tweetExist = db.query(RowPostRecord).filter(RowPostRecord.post_id == tweet_id).first()
+        is_tweetExist = db.query(RowPostRecord).filter(RowPostRecord.post_id == str(tweet_id)).first()
         if is_tweetExist is not None:
+            logger.info(f"tweet_id {tweet_id} is already exist")
             note.row_post_id = tweet_id
             continue
 
         logger.info(tweet_id)
         post = lookup(tweet_id)
+
+        if post == None or "data" not in post:
+            continue
+
         created_at = datetime.strptime(post["data"]["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ")
         created_at_millis = int(created_at.timestamp() * 1000)
 
         is_userExist = db.query(RowUserRecord).filter(RowUserRecord.user_id == post["data"]["author_id"]).first()
         logger.info(is_userExist)
         if is_userExist is None:
+            user_data = (
+                post["includes"]["users"][0]
+                if "includes" in post and "users" in post["includes"] and len(post["includes"]["users"]) > 0
+                else {}
+            )
             db_user = RowUserRecord(
                 user_id=post["data"]["author_id"],
-                name=post["includes"]["users"][0]["name"],
-                user_name=post["includes"]["users"][0]["username"],
-                description=post["includes"]["users"][0]["description"],
-                profile_image_url=post["includes"]["users"][0]["profile_image_url"],
-                followers_count=post["includes"]["users"][0]["public_metrics"]["followers_count"],
-                following_count=post["includes"]["users"][0]["public_metrics"]["following_count"],
-                tweet_count=post["includes"]["users"][0]["public_metrics"]["tweet_count"],
-                verified=post["includes"]["users"][0]["verified"],
-                verified_type=post["includes"]["users"][0]["verified_type"],
-                location=post["includes"]["users"][0]["location"],
-                url=post["includes"]["users"][0]["url"],
+                name=user_data.get("name"),
+                user_name=user_data.get("username"),
+                description=user_data.get("description"),
+                profile_image_url=user_data.get("profile_image_url"),
+                followers_count=user_data.get("public_metrics", {}).get("followers_count"),
+                following_count=user_data.get("public_metrics", {}).get("following_count"),
+                tweet_count=user_data.get("public_metrics", {}).get("tweet_count"),
+                verified=user_data.get("verified", False),
+                verified_type=user_data.get("verified_type", ""),
+                location=user_data.get("location", ""),
+                url=user_data.get("url", ""),
             )
             db.add(db_user)
 
-        media_url = post["includes"]["media"][0]["url"]
+        media_data = (
+            post["includes"]["media"][0]
+            if "includes" in post and "media" in post["includes"] and len(post["includes"]["media"]) > 0
+            else {}
+        )
         db_post = RowPostRecord(
             post_id=post["data"]["id"],
             author_id=post["data"]["author_id"],
             text=post["data"]["text"],
-            media_type=post["includes"]["media"][0]["type"],
-            media_url=media_url,
+            media_type=media_data.get("type", ""),
+            media_url=media_data.get("url", ""),
             created_at=created_at_millis,
             like_count=post["data"]["public_metrics"]["like_count"],
             repost_count=post["data"]["public_metrics"]["retweet_count"],
@@ -117,9 +123,8 @@ def extract_data(db: Session):
         )
         db.add(db_post)
         note.row_post_id = tweet_id
-        time.sleep(1)
+        db.commit()
         continue
-    db.commit()
 
     # select note from db, get relation tweet and user data
     note = db.query(RowNoteRecord).filter(RowNoteRecord.tweet_id == "1797617478950170784").first()

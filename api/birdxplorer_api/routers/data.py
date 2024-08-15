@@ -14,7 +14,6 @@ from birdxplorer_common.models import (
     PostId,
     Topic,
     TopicId,
-    TweetId,
     TwitterTimestamp,
     UserEnrollment,
 )
@@ -73,7 +72,7 @@ def gen_router(storage: Storage) -> APIRouter:
         created_at_from: Union[None, TwitterTimestamp] = Query(default=None),
         created_at_to: Union[None, TwitterTimestamp] = Query(default=None),
         topic_ids: Union[List[TopicId], None] = Query(default=None),
-        post_ids: Union[List[TweetId], None] = Query(default=None),
+        post_ids: Union[List[PostId], None] = Query(default=None),
         language: Union[LanguageIdentifier, None] = Query(default=None),
     ) -> NoteListResponse:
         return NoteListResponse(
@@ -92,11 +91,14 @@ def gen_router(storage: Storage) -> APIRouter:
     @router.get("/posts", response_model=PostListResponse)
     def get_posts(
         post_id: Union[List[PostId], None] = Query(default=None),
+        note_id: Union[List[NoteId], None] = Query(default=None),
         created_at_start: Union[None, TwitterTimestamp, str] = Query(default=None),
         created_at_end: Union[None, TwitterTimestamp, str] = Query(default=None),
     ) -> PostListResponse:
         if post_id is not None:
             return PostListResponse(data=list(storage.get_posts_by_ids(post_ids=post_id)))
+        if note_id is not None:
+            return PostListResponse(data=list(storage.get_posts_by_note_ids(note_ids=note_id)))
         if created_at_start is not None:
             if created_at_end is not None:
                 return PostListResponse(
