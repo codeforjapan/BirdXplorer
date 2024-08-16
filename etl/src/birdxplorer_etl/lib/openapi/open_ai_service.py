@@ -5,26 +5,26 @@ from openai import OpenAI
 from typing import Dict, List
 import csv
 import json
+import os
 
 
 class OpenAIService(AIModelInterface):
     def __init__(self):
         self.api_key = OPENAPI_TOKEN
-        self.client = OpenAI(
-            api_key=self.api_key
-        )
-        self.topics = self.load_topics('./data/transformed/topic.csv')
+        self.client = OpenAI(api_key=self.api_key)
+        if os.path.exists("./data/transformed/topic.csv"):
+            self.topics = self.load_topics("./data/transformed/topic.csv")
 
     def load_topics(self, topic_csv_file_path: str) -> Dict[str, int]:
         topics = {}
-        with open(topic_csv_file_path, newline='', encoding='utf-8') as csvfile:
+        with open(topic_csv_file_path, newline="", encoding="utf-8") as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
-                topic_id = int(row['topic_id'])
-                labels = json.loads(row['label'].replace("'", '"'))
+                topic_id = int(row["topic_id"])
+                labels = json.loads(row["label"].replace("'", '"'))
                 # 日本語のラベルのみを使用するように
-                if 'ja' in labels:
-                    topics[labels['ja']] = topic_id
+                if "ja" in labels:
+                    topics[labels["ja"]] = topic_id
                 # for label in labels.values():
                 #         topics[label] = topic_id
         return topics
@@ -40,7 +40,7 @@ class OpenAIService(AIModelInterface):
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": prompt},
             ],
             temperature=0.0,
             seed=1,
@@ -62,7 +62,7 @@ class OpenAIService(AIModelInterface):
 
     def detect_topic(self, note_id: int, note: str) -> Dict[str, List[int]]:
         topic_examples = "\n".join([f"{key}: {value}" for key, value in self.topics.items()])
-        with open('./seed/fewshot_sample.json', newline='', encoding='utf-8') as f:
+        with open("./seed/fewshot_sample.json", newline="", encoding="utf-8") as f:
             fewshot_sample = json.load(f)
 
         prompt = f"""
@@ -92,14 +92,14 @@ class OpenAIService(AIModelInterface):
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": prompt},
             ],
             temperature=0.0,
         )
         response_text = response.choices[0].message.content.strip()
-        response_text = response_text.replace('```json', '').replace('```', '').strip()
+        response_text = response_text.replace("```json", "").replace("```", "").strip()
         try:
             return json.loads(response_text)
         except json.JSONDecodeError as e:
-            print(f'Error decoding JSON: {e}')
+            print(f"Error decoding JSON: {e}")
             return {}
