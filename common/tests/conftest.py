@@ -109,7 +109,7 @@ def user_enrollment_samples(
 @fixture
 def topic_samples(topic_factory: TopicFactory) -> Generator[List[Topic], None, None]:
     topics = [
-        topic_factory.build(topic_id=0, label={"en": "topic0", "ja": "トピック0"}, reference_count=3),
+        topic_factory.build(topic_id=0, label={"en": "topic0", "ja": "トピック0"}, reference_count=4),
         topic_factory.build(topic_id=1, label={"en": "topic1", "ja": "トピック1"}, reference_count=2),
         topic_factory.build(topic_id=2, label={"en": "topic2", "ja": "トピック2"}, reference_count=1),
         topic_factory.build(topic_id=3, label={"en": "topic3", "ja": "トピック3"}, reference_count=0),
@@ -158,6 +158,14 @@ def note_samples(note_factory: NoteFactory, topic_samples: List[Topic]) -> Gener
             topics=[topic_samples[0]],
             language="en",
             summary="summary5",
+            created_at=1152921604000,
+        ),
+        note_factory.build(
+            note_id="1234567890123456786",
+            post_id="",
+            topics=[topic_samples[0]],
+            language="en",
+            summary="summary6_empty_post_id",
             created_at=1152921604000,
         ),
     ]
