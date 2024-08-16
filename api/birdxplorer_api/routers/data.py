@@ -2,7 +2,7 @@ from datetime import timezone
 from typing import List, Union
 
 from dateutil.parser import parse as dateutil_parse
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from birdxplorer_common.models import (
     BaseModel,
@@ -95,11 +95,10 @@ def gen_router(storage: Storage) -> APIRouter:
         note_id: Union[List[NoteId], None] = Query(default=None),
         created_at_start: Union[None, TwitterTimestamp, str] = Query(default=None),
         created_at_end: Union[None, TwitterTimestamp, str] = Query(default=None),
-        offset: int = 0,
-        limit: int = 100,
+        offset: int = Query(default=0, ge=0),  # 確保 offset 是非負的
+        limit: int = Query(default=100, gt=0, le=1000)  # 確保 limit 在合理範圍內
     ) -> PostListResponse:
-        posts = []
-        total_count = 0
+        posts = None
 
         if post_id is not None:
             posts = list(storage.get_posts_by_ids(post_ids=post_id))
@@ -121,16 +120,13 @@ def gen_router(storage: Storage) -> APIRouter:
             posts = list(storage.get_posts())
 
         total_count = len(posts)
-
         paginated_posts = posts[offset:offset + limit]
         base_url = str(request.url).split('?')[0]
         next_offset = offset + limit
         prev_offset = max(offset - limit, 0)
-
         next_url = None
         if next_offset < total_count:
             next_url = f"{base_url}?offset={next_offset}&limit={limit}"
-
         prev_url = None
         if offset > 0:
             prev_url = f"{base_url}?offset={prev_offset}&limit={limit}"
