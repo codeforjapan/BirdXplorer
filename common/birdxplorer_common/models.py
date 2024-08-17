@@ -678,6 +678,7 @@ MediaDetails: TypeAlias = List[HttpUrl] | None
 
 
 class Post(BaseModel):
+    link: HttpUrl
     post_id: PostId
     x_user_id: UserId
     x_user: XUser
