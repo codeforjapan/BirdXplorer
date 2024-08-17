@@ -9,6 +9,7 @@ from birdxplorer_common.models import (
     LanguageIdentifier,
     Note,
     NoteId,
+    PaginationMeta,
     ParticipantId,
     Post,
     PostId,
@@ -30,6 +31,7 @@ class NoteListResponse(BaseModel):
 
 class PostListResponse(BaseModel):
     data: List[Post]
+    meta: PaginationMeta
 
 
 def str_to_twitter_timestamp(s: str) -> TwitterTimestamp:
@@ -95,8 +97,8 @@ def gen_router(storage: Storage) -> APIRouter:
         note_id: Union[List[NoteId], None] = Query(default=None),
         created_at_start: Union[None, TwitterTimestamp, str] = Query(default=None),
         created_at_end: Union[None, TwitterTimestamp, str] = Query(default=None),
-        offset: int = Query(default=0, ge=0),  # 確保 offset 是非負的
-        limit: int = Query(default=100, gt=0, le=1000),  # 確保 limit 在合理範圍內
+        offset: int = Query(default=0, ge=0),
+        limit: int = Query(default=100, gt=0, le=1000),
         search_text: Union[None, str] = Query(default=None),
     ) -> PostListResponse:
         posts = None
@@ -135,6 +137,6 @@ def gen_router(storage: Storage) -> APIRouter:
         if offset > 0:
             prev_url = f"{base_url}?offset={prev_offset}&limit={limit}"
 
-        return PostListResponse(data=paginated_posts, meta={"next": next_url, "prev": prev_url})
+        return PostListResponse(data=paginated_posts, meta=PaginationMeta(next=next_url, prev=prev_url))
 
     return router
