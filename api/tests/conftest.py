@@ -166,7 +166,10 @@ def post_samples(post_factory: PostFactory, x_user_samples: List[XUser]) -> Gene
             post_id="2234567890123456781",
             x_user_id="1234567890123456781",
             x_user=x_user_samples[0],
-            text="text11",
+            text="""\
+新しいプロジェクトがついに公開されました！詳細はこちら👉
+
+https://t.co/xxxxxxxxxxx/ #プロジェクト #新発売 #Tech""",
             media_details=None,
             created_at=1152921600000,
             like_count=10,
@@ -177,7 +180,10 @@ def post_samples(post_factory: PostFactory, x_user_samples: List[XUser]) -> Gene
             post_id="2234567890123456791",
             x_user_id="1234567890123456781",
             x_user=x_user_samples[0],
-            text="text12",
+            text="""\
+このブログ記事、めちゃくちゃ参考になった！🔥 チェックしてみて！
+
+https://t.co/yyyyyyyyyyy/ #学び #自己啓発""",
             media_details=None,
             created_at=1153921700000,
             like_count=10,
@@ -188,7 +194,8 @@ def post_samples(post_factory: PostFactory, x_user_samples: List[XUser]) -> Gene
             post_id="2234567890123456801",
             x_user_id="1234567890123456782",
             x_user=x_user_samples[1],
-            text="text21",
+            text="""\
+次の休暇はここに決めた！🌴🏖️ 見てみて～ https://t.co/xxxxxxxxxxx/ #旅行 #バケーション""",
             media_details=None,
             created_at=1154921800000,
             like_count=10,
@@ -294,6 +301,13 @@ def mock_storage(
                 yield post
 
     mock.get_posts_by_created_at_end.side_effect = _get_posts_by_created_at_end
+
+    def _search_posts_by_text(search_text: str) -> Generator[Post, None, None]:
+        for post in post_samples:
+            if search_text in post.text:
+                yield post
+
+    mock.search_posts_by_text.side_effect = _search_posts_by_text
 
     yield mock
 

@@ -99,6 +99,7 @@ def gen_router(storage: Storage) -> APIRouter:
         created_at_end: Union[None, TwitterTimestamp, str] = Query(default=None),
         offset: int = Query(default=0, ge=0),
         limit: int = Query(default=100, gt=0, le=1000),
+        search_text: Union[None, str] = Query(default=None),
     ) -> PostListResponse:
         posts = None
 
@@ -118,6 +119,8 @@ def gen_router(storage: Storage) -> APIRouter:
                 posts = list(storage.get_posts_by_created_at_start(start=ensure_twitter_timestamp(created_at_start)))
         elif created_at_end is not None:
             posts = list(storage.get_posts_by_created_at_end(end=ensure_twitter_timestamp(created_at_end)))
+        elif search_text is not None and len(search_text) > 0:
+            posts = list(storage.search_posts_by_text(search_text))
         else:
             posts = list(storage.get_posts())
 
