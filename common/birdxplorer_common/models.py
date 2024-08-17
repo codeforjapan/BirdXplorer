@@ -673,6 +673,6 @@ class Post(BaseModel):
     repost_count: NonNegativeInt
     impression_count: NonNegativeInt
 
-class PagenationMeta(BaseModel):
+class PaginationMeta(BaseModel):
     next: Optional[HttpUrl] = None
     prev: Optional[HttpUrl] = None
