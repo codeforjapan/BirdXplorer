@@ -100,6 +100,13 @@ def test_posts_get_timestamp_out_of_range(client: TestClient, post_samples: List
     assert response.status_code == 422
 
 
+def test_posts_search_by_text(client: TestClient, post_samples: List[Post]) -> None:
+    response = client.get("/api/v1/data/posts/?searchText=https%3A%2F%2Ft.co%2Fxxxxxxxxxxx%2F")
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json == {"data": [json.loads(post_samples[i].model_dump_json()) for i in (0, 2)]}
+
+
 def test_notes_get(client: TestClient, note_samples: List[Note]) -> None:
     response = client.get("/api/v1/data/notes")
     assert response.status_code == 200
