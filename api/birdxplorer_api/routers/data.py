@@ -120,7 +120,6 @@ def gen_router(storage: Storage) -> APIRouter:
         elif created_at_end is not None:
             posts = list(storage.get_posts_by_created_at_end(end=ensure_twitter_timestamp(created_at_end)))
         elif search_text is not None and len(search_text) > 0:
-            print(search_text)
             posts = list(storage.search_posts_by_text(search_text))
         else:
             posts = list(storage.get_posts())
