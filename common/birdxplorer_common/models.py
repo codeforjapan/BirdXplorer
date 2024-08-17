@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Literal, Type, TypeAlias, TypeVar, Union, Optional
+from typing import Any, Dict, List, Literal, Optional, Type, TypeAlias, TypeVar, Union
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict, GetCoreSchemaHandler, HttpUrl, TypeAdapter
@@ -672,6 +672,7 @@ class Post(BaseModel):
     like_count: NonNegativeInt
     repost_count: NonNegativeInt
     impression_count: NonNegativeInt
+
 
 class PaginationMeta(BaseModel):
     next: Optional[HttpUrl] = None
