@@ -16,7 +16,7 @@ from birdxplorer_common.models import (
     TopicId,
     TwitterTimestamp,
     UserEnrollment,
-    PagenationMeta
+    PaginationMeta
 )
 from birdxplorer_common.storage import Storage
 
@@ -97,8 +97,8 @@ def gen_router(storage: Storage) -> APIRouter:
         note_id: Union[List[NoteId], None] = Query(default=None),
         created_at_start: Union[None, TwitterTimestamp, str] = Query(default=None),
         created_at_end: Union[None, TwitterTimestamp, str] = Query(default=None),
-        offset: int = Query(default=0, ge=0),  # 確保 offset 是非負的
-        limit: int = Query(default=100, gt=0, le=1000)  # 確保 limit 在合理範圍內
+        offset: int = Query(default=0, ge=0),
+        limit: int = Query(default=100, gt=0, le=1000)
     ) -> PostListResponse:
         posts = None
 
@@ -135,7 +135,7 @@ def gen_router(storage: Storage) -> APIRouter:
 
         return PostListResponse(
             data=paginated_posts,
-            meta=PagenationMeta(
+            meta=PaginationMeta(
                 next=next_url,
                 prev=prev_url
             )
