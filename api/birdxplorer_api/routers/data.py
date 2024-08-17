@@ -9,6 +9,7 @@ from birdxplorer_common.models import (
     LanguageIdentifier,
     Note,
     NoteId,
+    PaginationMeta,
     ParticipantId,
     Post,
     PostId,
@@ -16,7 +17,6 @@ from birdxplorer_common.models import (
     TopicId,
     TwitterTimestamp,
     UserEnrollment,
-    PaginationMeta
 )
 from birdxplorer_common.storage import Storage
 
@@ -98,7 +98,7 @@ def gen_router(storage: Storage) -> APIRouter:
         created_at_start: Union[None, TwitterTimestamp, str] = Query(default=None),
         created_at_end: Union[None, TwitterTimestamp, str] = Query(default=None),
         offset: int = Query(default=0, ge=0),
-        limit: int = Query(default=100, gt=0, le=1000)
+        limit: int = Query(default=100, gt=0, le=1000),
     ) -> PostListResponse:
         posts = None
 
@@ -122,8 +122,8 @@ def gen_router(storage: Storage) -> APIRouter:
             posts = list(storage.get_posts())
 
         total_count = len(posts)
-        paginated_posts = posts[offset:offset + limit]
-        base_url = str(request.url).split('?')[0]
+        paginated_posts = posts[offset : offset + limit]
+        base_url = str(request.url).split("?")[0]
         next_offset = offset + limit
         prev_offset = max(offset - limit, 0)
         next_url = None
@@ -133,12 +133,6 @@ def gen_router(storage: Storage) -> APIRouter:
         if offset > 0:
             prev_url = f"{base_url}?offset={prev_offset}&limit={limit}"
 
-        return PostListResponse(
-            data=paginated_posts,
-            meta=PaginationMeta(
-                next=next_url,
-                prev=prev_url
-            )
-        )
+        return PostListResponse(data=paginated_posts, meta=PaginationMeta(next=next_url, prev=prev_url))
 
     return router
