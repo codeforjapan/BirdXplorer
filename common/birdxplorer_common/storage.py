@@ -305,6 +305,11 @@ class Storage:
             for post_record in sess.execute(query).scalars().all():
                 yield self._post_record_to_model(post_record)
 
+    def search_posts_by_text(self, search_word: str) -> Generator[PostModel, None, None]:
+        with Session(self.engine) as sess:
+            for post_record in sess.query(PostRecord).filter(PostRecord.text.like(f"%{search_word}%")):
+                yield self._post_record_to_model(post_record)
+
 
 def gen_storage(settings: GlobalSettings) -> Storage:
     engine = create_engine(settings.storage_settings.sqlalchemy_database_url)
