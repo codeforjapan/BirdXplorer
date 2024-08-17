@@ -30,6 +30,16 @@ def test_posts_get(client: TestClient, post_samples: List[Post]) -> None:
     }
 
 
+def test_posts_get_limit_and_offset(client: TestClient, post_samples: List[Post]) -> None:
+    response = client.get("/api/v1/data/posts/?limit=2&offset=1")
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json == {
+        "data": [json.loads(d.model_dump_json()) for d in post_samples[1:3]],
+        "meta": {"next": None, "prev": "http://testserver/api/v1/data/posts?offset=0&limit=2"},
+    }
+
+
 def test_posts_get_has_post_id_filter(client: TestClient, post_samples: List[Post]) -> None:
     response = client.get(f"/api/v1/data/posts/?postId={post_samples[0].post_id},{post_samples[2].post_id}")
     assert response.status_code == 200
