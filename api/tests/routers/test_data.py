@@ -123,7 +123,10 @@ def test_posts_search_by_text(client: TestClient, post_samples: List[Post]) -> N
     response = client.get("/api/v1/data/posts/?searchText=https%3A%2F%2Ft.co%2Fxxxxxxxxxxx%2F")
     assert response.status_code == 200
     res_json = response.json()
-    assert res_json == {"data": [json.loads(post_samples[i].model_dump_json()) for i in (0, 2)]}
+    assert res_json == {
+        "data": [json.loads(post_samples[i].model_dump_json()) for i in (0, 2)],
+        "meta": {"next": None, "prev": None},
+    }
 
 
 def test_notes_get(client: TestClient, note_samples: List[Note]) -> None:
