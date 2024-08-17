@@ -31,7 +31,7 @@ class NoteListResponse(BaseModel):
 
 class PostListResponse(BaseModel):
     data: List[Post]
-    meta: PagenationMeta
+    meta: PaginationMeta
 
 
 def str_to_twitter_timestamp(s: str) -> TwitterTimestamp:
