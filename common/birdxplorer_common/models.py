@@ -134,7 +134,7 @@ class UpToNineteenDigitsDecimalString(BaseString):
     Traceback (most recent call last):
      ...
     pydantic_core._pydantic_core.ValidationError: 1 validation error for function-after[validate(), constrained-str]
-      String should match pattern '^([0-9]{18,19}|)$' [type=string_pattern_mismatch, input_value='test', input_type=str]
+      String should match pattern '^([0-9]{1,19}|)$' [type=string_pattern_mismatch, input_value='test', input_type=str]
      ...
     >>> UpToNineteenDigitsDecimalString.from_str("1234567890123456789")
     UpToNineteenDigitsDecimalString('1234567890123456789')
@@ -144,7 +144,7 @@ class UpToNineteenDigitsDecimalString(BaseString):
 
     @classmethod
     def __get_extra_constraint_dict__(cls) -> dict[str, Any]:
-        return dict(super().__get_extra_constraint_dict__(), pattern=r"^([0-9]{18,19}|)$")
+        return dict(super().__get_extra_constraint_dict__(), pattern=r"^([0-9]{1,19}|)$")
 
 
 class NonEmptyStringMixin(BaseString):
