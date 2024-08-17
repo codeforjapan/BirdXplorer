@@ -16,6 +16,7 @@ from birdxplorer_common.models import (
     TopicId,
     TwitterTimestamp,
     UserEnrollment,
+    PagenationMeta
 )
 from birdxplorer_common.storage import Storage
 
@@ -30,6 +31,7 @@ class NoteListResponse(BaseModel):
 
 class PostListResponse(BaseModel):
     data: List[Post]
+    meta: PagenationMeta
 
 
 def str_to_twitter_timestamp(s: str) -> TwitterTimestamp:
@@ -133,10 +135,10 @@ def gen_router(storage: Storage) -> APIRouter:
 
         return PostListResponse(
             data=paginated_posts,
-            meta={
-                "next": next_url,
-                "prev": prev_url
-            }
+            meta=PagenationMeta(
+                next=next_url,
+                prev=prev_url
+            )
         )
 
     return router
