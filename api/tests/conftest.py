@@ -304,7 +304,6 @@ def mock_storage(
 
     def _search_posts_by_text(search_text: str) -> Generator[Post, None, None]:
         for post in post_samples:
-            print(search_text in post.text, post.text)
             if search_text in post.text:
                 yield post
 
