@@ -2,7 +2,7 @@ from datetime import timezone
 from typing import List, Union
 
 from dateutil.parser import parse as dateutil_parse
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from birdxplorer_common.models import (
     BaseModel,
@@ -90,32 +90,47 @@ def gen_router(storage: Storage) -> APIRouter:
 
     @router.get("/posts", response_model=PostListResponse)
     def get_posts(
+        request: Request,
         post_id: Union[List[PostId], None] = Query(default=None),
         note_id: Union[List[NoteId], None] = Query(default=None),
         created_at_start: Union[None, TwitterTimestamp, str] = Query(default=None),
         created_at_end: Union[None, TwitterTimestamp, str] = Query(default=None),
+        offset: int = Query(default=0, ge=0),  # 確保 offset 是非負的
+        limit: int = Query(default=100, gt=0, le=1000),  # 確保 limit 在合理範圍內
     ) -> PostListResponse:
+        posts = None
+
         if post_id is not None:
-            return PostListResponse(data=list(storage.get_posts_by_ids(post_ids=post_id)))
-        if note_id is not None:
-            return PostListResponse(data=list(storage.get_posts_by_note_ids(note_ids=note_id)))
-        if created_at_start is not None:
+            posts = list(storage.get_posts_by_ids(post_ids=post_id))
+        elif note_id is not None:
+            posts = list(storage.get_posts_by_note_ids(note_ids=note_id))
+        elif created_at_start is not None:
             if created_at_end is not None:
-                return PostListResponse(
-                    data=list(
-                        storage.get_posts_by_created_at_range(
-                            start=ensure_twitter_timestamp(created_at_start),
-                            end=ensure_twitter_timestamp(created_at_end),
-                        )
+                posts = list(
+                    storage.get_posts_by_created_at_range(
+                        start=ensure_twitter_timestamp(created_at_start),
+                        end=ensure_twitter_timestamp(created_at_end),
                     )
                 )
-            return PostListResponse(
-                data=list(storage.get_posts_by_created_at_start(start=ensure_twitter_timestamp(created_at_start)))
-            )
-        if created_at_end is not None:
-            return PostListResponse(
-                data=list(storage.get_posts_by_created_at_end(end=ensure_twitter_timestamp(created_at_end)))
-            )
-        return PostListResponse(data=list(storage.get_posts()))
+            else:
+                posts = list(storage.get_posts_by_created_at_start(start=ensure_twitter_timestamp(created_at_start)))
+        elif created_at_end is not None:
+            posts = list(storage.get_posts_by_created_at_end(end=ensure_twitter_timestamp(created_at_end)))
+        else:
+            posts = list(storage.get_posts())
+
+        total_count = len(posts)
+        paginated_posts = posts[offset : offset + limit]
+        base_url = str(request.url).split("?")[0]
+        next_offset = offset + limit
+        prev_offset = max(offset - limit, 0)
+        next_url = None
+        if next_offset < total_count:
+            next_url = f"{base_url}?offset={next_offset}&limit={limit}"
+        prev_url = None
+        if offset > 0:
+            prev_url = f"{base_url}?offset={prev_offset}&limit={limit}"
+
+        return PostListResponse(data=paginated_posts, meta={"next": next_url, "prev": prev_url})
 
     return router
