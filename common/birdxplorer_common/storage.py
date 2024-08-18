@@ -225,6 +225,7 @@ class Storage:
         topic_ids: Union[List[TopicId], None] = None,
         post_ids: Union[List[PostId], None] = None,
         language: Union[LanguageIdentifier, None] = None,
+        search_text: Union[None, str] = None,
     ) -> Generator[NoteModel, None, None]:
         with Session(self.engine) as sess:
             query = sess.query(NoteRecord)
@@ -248,6 +249,8 @@ class Storage:
                 query = query.filter(NoteRecord.post_id.in_(post_ids))
             if language is not None:
                 query = query.filter(NoteRecord.language == language)
+            if search_text is not None and len(search_text) > 0:
+                query = query.filter(NoteRecord.text.like(f"%{search_text}%"))
             for note_record in query.all():
                 yield NoteModel(
                     note_id=note_record.note_id,
