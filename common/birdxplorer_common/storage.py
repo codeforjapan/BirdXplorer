@@ -268,7 +268,16 @@ class Storage:
                     created_at=note_record.created_at,
                 )
 
-    def get_posts(self) -> Generator[PostModel, None, None]:
+    def get_posts(
+        self,
+        post_ids: Union[List[PostId], None] = None,
+        note_ids: Union[List[NoteId], None] = None,
+        start: Union[TwitterTimestamp, None] = None,
+        end: Union[TwitterTimestamp, None] = None,
+        search_text: Union[str, None] = None,
+        offset: Union[int, None] = None,
+        limit: Union[int, None] = None,
+    ) -> Generator[PostModel, None, None]:
         with Session(self.engine) as sess:
             for post_record in sess.query(PostRecord).all():
                 yield self._post_record_to_model(post_record)
@@ -309,6 +318,16 @@ class Storage:
         with Session(self.engine) as sess:
             for post_record in sess.query(PostRecord).filter(PostRecord.text.like(f"%{search_word}%")):
                 yield self._post_record_to_model(post_record)
+
+    def get_number_of_posts(
+        self,
+        post_ids: Union[List[PostId], None] = None,
+        note_ids: Union[List[NoteId], None] = None,
+        start: Union[TwitterTimestamp, None] = None,
+        end: Union[TwitterTimestamp, None] = None,
+        search_text: Union[str, None] = None,
+    ) -> int:
+        raise NotImplementedError
 
 
 def gen_storage(settings: GlobalSettings) -> Storage:

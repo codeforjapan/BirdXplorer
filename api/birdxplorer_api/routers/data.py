@@ -112,11 +112,18 @@ def gen_router(storage: Storage) -> APIRouter:
                 start=created_at_start,
                 end=created_at_end,
                 search_text=search_text,
+                offset=offset,
+                limit=limit,
             )
         )
+        total_count = storage.get_number_of_posts(
+            post_ids=post_id,
+            note_ids=note_id,
+            start=created_at_start,
+            end=created_at_end,
+            search_text=search_text,
+        )
 
-        total_count = len(posts)
-        paginated_posts = posts[offset : offset + limit]
         base_url = str(request.url).split("?")[0]
         next_offset = offset + limit
         prev_offset = max(offset - limit, 0)
@@ -127,6 +134,6 @@ def gen_router(storage: Storage) -> APIRouter:
         if offset > 0:
             prev_url = f"{base_url}?offset={prev_offset}&limit={limit}"
 
-        return PostListResponse(data=paginated_posts, meta=PaginationMeta(next=next_url, prev=prev_url))
+        return PostListResponse(data=posts, meta=PaginationMeta(next=next_url, prev=prev_url))
 
     return router

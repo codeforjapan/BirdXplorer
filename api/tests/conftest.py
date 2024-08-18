@@ -260,8 +260,14 @@ def mock_storage(
         start: Union[TwitterTimestamp, None] = None,
         end: Union[TwitterTimestamp, None] = None,
         search_text: Union[str, None] = None,
+        offset: Union[int, None] = None,
+        limit: Union[int, None] = None,
     ) -> Generator[Post, None, None]:
-        for post in post_samples:
+        gen_count = 0
+        actual_gen_count = 0
+        for idx, post in enumerate(post_samples):
+            if limit is not None and actual_gen_count >= limit:
+                break
             if post_ids is not None and post.post_id not in post_ids:
                 continue
             if note_ids is not None and not any(
@@ -274,9 +280,24 @@ def mock_storage(
                 continue
             if search_text is not None and search_text not in post.text:
                 continue
+            gen_count += 1
+            if offset is not None and gen_count <= offset:
+                continue
+            actual_gen_count += 1
             yield post
 
     mock.get_posts.side_effect = _get_posts
+
+    def _get_number_of_posts(
+        post_ids: Union[List[PostId], None] = None,
+        note_ids: Union[List[NoteId], None] = None,
+        start: Union[TwitterTimestamp, None] = None,
+        end: Union[TwitterTimestamp, None] = None,
+        search_text: Union[str, None] = None,
+    ) -> int:
+        return len(list(_get_posts(post_ids, note_ids, start, end, search_text)))
+
+    mock.get_number_of_posts.side_effect = _get_number_of_posts
 
     yield mock
 
