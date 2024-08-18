@@ -50,7 +50,7 @@ def test_get_posts_by_ids(
     storage = Storage(engine=engine_for_test)
     post_ids = [post_samples[i].post_id for i in (0, 2)]
     expected = [post_samples[i] for i in (0, 2)]
-    actual = list(storage.get_posts_by_ids(post_ids))
+    actual = list(storage.get_posts(post_ids=post_ids))
     assert expected == actual
 
 
@@ -64,7 +64,7 @@ def test_get_posts_by_ids_empty(
     storage = Storage(engine=engine_for_test)
     post_ids: List[PostId] = []
     expected: List[Post] = []
-    actual = list(storage.get_posts_by_ids(post_ids))
+    actual = list(storage.get_posts(post_ids=post_ids))
     assert expected == actual
 
 

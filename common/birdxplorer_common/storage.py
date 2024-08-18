@@ -279,12 +279,10 @@ class Storage:
         limit: Union[int, None] = None,
     ) -> Generator[PostModel, None, None]:
         with Session(self.engine) as sess:
-            for post_record in sess.query(PostRecord).all():
-                yield self._post_record_to_model(post_record)
-
-    def get_posts_by_ids(self, post_ids: List[PostId]) -> Generator[PostModel, None, None]:
-        with Session(self.engine) as sess:
-            for post_record in sess.query(PostRecord).filter(PostRecord.post_id.in_(post_ids)).all():
+            query = sess.query(PostRecord)
+            if post_ids is not None:
+                query = query.filter(PostRecord.post_id.in_(post_ids))
+            for post_record in query.all():
                 yield self._post_record_to_model(post_record)
 
     def get_posts_by_created_at_range(
