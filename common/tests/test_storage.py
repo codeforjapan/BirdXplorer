@@ -136,6 +136,17 @@ def test_get_posts_by_note_ids(
     assert expected == actual
 
 
+def test_get_posts_offset(
+    engine_for_test: Engine,
+    post_samples: List[Post],
+    post_records_sample: List[PostRecord],
+) -> None:
+    storage = Storage(engine=engine_for_test)
+    expected = [post_samples[i] for i in (1, 2)]
+    actual = list(storage.get_posts(offset=1))
+    assert expected == actual
+
+
 def test_get_notes_by_ids(
     engine_for_test: Engine,
     note_samples: List[Note],
