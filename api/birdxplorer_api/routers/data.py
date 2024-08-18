@@ -3,6 +3,7 @@ from typing import List, Union
 
 from dateutil.parser import parse as dateutil_parse
 from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import HttpUrl
 
 from birdxplorer_common.models import (
     BaseModel,
@@ -124,8 +125,7 @@ def gen_router(storage: Storage) -> APIRouter:
         total_count = len(posts)
         paginated_posts = posts[offset : offset + limit]
         for post in paginated_posts:
-            post.link = f"https://x.com/{post.x_user.name}/status/{post.post_id}"
-
+            post.link = HttpUrl(f"https://x.com/{post.x_user.name}/status/{post.post_id}")
 
         base_url = str(request.url).split("?")[0]
         next_offset = offset + limit
