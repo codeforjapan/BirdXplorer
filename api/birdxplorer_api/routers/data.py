@@ -101,28 +101,19 @@ def gen_router(storage: Storage) -> APIRouter:
         limit: int = Query(default=100, gt=0, le=1000),
         search_text: Union[None, str] = Query(default=None),
     ) -> PostListResponse:
-        posts = None
-
-        if post_id is not None:
-            posts = list(storage.get_posts_by_ids(post_ids=post_id))
-        elif note_id is not None:
-            posts = list(storage.get_posts_by_note_ids(note_ids=note_id))
-        elif created_at_start is not None:
-            if created_at_end is not None:
-                posts = list(
-                    storage.get_posts_by_created_at_range(
-                        start=ensure_twitter_timestamp(created_at_start),
-                        end=ensure_twitter_timestamp(created_at_end),
-                    )
-                )
-            else:
-                posts = list(storage.get_posts_by_created_at_start(start=ensure_twitter_timestamp(created_at_start)))
-        elif created_at_end is not None:
-            posts = list(storage.get_posts_by_created_at_end(end=ensure_twitter_timestamp(created_at_end)))
-        elif search_text is not None and len(search_text) > 0:
-            posts = list(storage.search_posts_by_text(search_text))
-        else:
-            posts = list(storage.get_posts())
+        if created_at_start is not None and isinstance(created_at_start, str):
+            created_at_start = ensure_twitter_timestamp(created_at_start)
+        if created_at_end is not None and isinstance(created_at_end, str):
+            created_at_end = ensure_twitter_timestamp(created_at_end)
+        posts = list(
+            storage.get_posts(
+                post_ids=post_id,
+                note_ids=note_id,
+                start=created_at_start,
+                end=created_at_end,
+                search_text=search_text,
+            )
+        )
 
         total_count = len(posts)
         paginated_posts = posts[offset : offset + limit]
