@@ -125,9 +125,7 @@ def gen_router(storage: Storage) -> APIRouter:
             search_text=search_text,
         )
 
-        total_count = len(posts)
-        paginated_posts = posts[offset : offset + limit]
-        for post in paginated_posts:
+        for post in posts:
             post.link = HttpUrl(f"https://x.com/{post.x_user.name}/status/{post.post_id}")
 
         base_url = str(request.url).split("?")[0]
