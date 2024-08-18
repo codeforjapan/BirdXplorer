@@ -79,7 +79,7 @@ def test_get_posts_by_created_at_range(
     start = TwitterTimestamp.from_int(1153921700000)
     end = TwitterTimestamp.from_int(1153921800000)
     expected = [post_samples[i] for i in (1,)]
-    actual = list(storage.get_posts_by_created_at_range(start, end))
+    actual = list(storage.get_posts(start=start, end=end))
     assert expected == actual
 
 
@@ -93,7 +93,7 @@ def test_get_posts_by_created_at_start(
     storage = Storage(engine=engine_for_test)
     start = TwitterTimestamp.from_int(1153921700000)
     expected = [post_samples[i] for i in (1, 2)]
-    actual = list(storage.get_posts_by_created_at_start(start))
+    actual = list(storage.get_posts(start=start))
     assert expected == actual
 
 
@@ -107,7 +107,7 @@ def test_get_posts_by_created_at_end(
     storage = Storage(engine=engine_for_test)
     end = TwitterTimestamp.from_int(1153921700000)
     expected = [post_samples[i] for i in (0,)]
-    actual = list(storage.get_posts_by_created_at_end(end))
+    actual = list(storage.get_posts(end=end))
     assert expected == actual
 
 

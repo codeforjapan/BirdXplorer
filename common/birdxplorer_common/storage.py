@@ -282,24 +282,11 @@ class Storage:
             query = sess.query(PostRecord)
             if post_ids is not None:
                 query = query.filter(PostRecord.post_id.in_(post_ids))
+            if start is not None:
+                query = query.filter(PostRecord.created_at >= start)
+            if end is not None:
+                query = query.filter(PostRecord.created_at < end)
             for post_record in query.all():
-                yield self._post_record_to_model(post_record)
-
-    def get_posts_by_created_at_range(
-        self, start: TwitterTimestamp, end: TwitterTimestamp
-    ) -> Generator[PostModel, None, None]:
-        with Session(self.engine) as sess:
-            for post_record in sess.query(PostRecord).filter(PostRecord.created_at.between(start, end)).all():
-                yield self._post_record_to_model(post_record)
-
-    def get_posts_by_created_at_start(self, start: TwitterTimestamp) -> Generator[PostModel, None, None]:
-        with Session(self.engine) as sess:
-            for post_record in sess.query(PostRecord).filter(PostRecord.created_at >= start).all():
-                yield self._post_record_to_model(post_record)
-
-    def get_posts_by_created_at_end(self, end: TwitterTimestamp) -> Generator[PostModel, None, None]:
-        with Session(self.engine) as sess:
-            for post_record in sess.query(PostRecord).filter(PostRecord.created_at < end).all():
                 yield self._post_record_to_model(post_record)
 
     def get_posts_by_note_ids(self, note_ids: List[NoteId]) -> Generator[PostModel, None, None]:
