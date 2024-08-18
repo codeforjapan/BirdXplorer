@@ -76,6 +76,7 @@ def gen_router(storage: Storage) -> APIRouter:
         topic_ids: Union[List[TopicId], None] = Query(default=None),
         post_ids: Union[List[PostId], None] = Query(default=None),
         language: Union[LanguageIdentifier, None] = Query(default=None),
+        search_text: Union[None, str] = Query(default=None),
     ) -> NoteListResponse:
         return NoteListResponse(
             data=list(
@@ -86,6 +87,7 @@ def gen_router(storage: Storage) -> APIRouter:
                     topic_ids=topic_ids,
                     post_ids=post_ids,
                     language=language,
+                    search_text=search_text,
                 )
             )
         )
