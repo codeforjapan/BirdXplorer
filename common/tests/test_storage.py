@@ -132,7 +132,7 @@ def test_get_posts_by_note_ids(
     storage = Storage(engine=engine_for_test)
     note_ids = [NoteId.from_str("1234567890123456781")]
     expected = [post_samples[i] for i in (0,)]
-    actual = list(storage.get_posts_by_note_ids(note_ids=note_ids))
+    actual = list(storage.get_posts(note_ids=note_ids))
     assert expected == actual
 
 
