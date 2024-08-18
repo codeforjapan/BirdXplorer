@@ -282,6 +282,10 @@ class Storage:
             query = sess.query(PostRecord)
             if post_ids is not None:
                 query = query.filter(PostRecord.post_id.in_(post_ids))
+            if note_ids is not None:
+                query = query.join(NoteRecord, NoteRecord.post_id == PostRecord.post_id).filter(
+                    NoteRecord.note_id.in_(note_ids)
+                )
             if start is not None:
                 query = query.filter(PostRecord.created_at >= start)
             if end is not None:
@@ -289,16 +293,6 @@ class Storage:
             if search_text is not None:
                 query = query.filter(PostRecord.text.like(f"%{search_text}%"))
             for post_record in query.all():
-                yield self._post_record_to_model(post_record)
-
-    def get_posts_by_note_ids(self, note_ids: List[NoteId]) -> Generator[PostModel, None, None]:
-        query = (
-            select(PostRecord)
-            .join(NoteRecord, NoteRecord.post_id == PostRecord.post_id)
-            .where(NoteRecord.note_id.in_(note_ids))
-        )
-        with Session(self.engine) as sess:
-            for post_record in sess.execute(query).scalars().all():
                 yield self._post_record_to_model(post_record)
 
     def get_number_of_posts(
