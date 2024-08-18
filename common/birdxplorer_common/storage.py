@@ -306,7 +306,21 @@ class Storage:
         end: Union[TwitterTimestamp, None] = None,
         search_text: Union[str, None] = None,
     ) -> int:
-        raise NotImplementedError
+        with Session(self.engine) as sess:
+            query = sess.query(PostRecord)
+            if post_ids is not None:
+                query = query.filter(PostRecord.post_id.in_(post_ids))
+            if note_ids is not None:
+                query = query.join(NoteRecord, NoteRecord.post_id == PostRecord.post_id).filter(
+                    NoteRecord.note_id.in_(note_ids)
+                )
+            if start is not None:
+                query = query.filter(PostRecord.created_at >= start)
+            if end is not None:
+                query = query.filter(PostRecord.created_at < end)
+            if search_text is not None:
+                query = query.filter(PostRecord.text.like(f"%{search_text}%"))
+            return query.count()
 
 
 def gen_storage(settings: GlobalSettings) -> Storage:
