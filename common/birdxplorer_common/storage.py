@@ -292,6 +292,8 @@ class Storage:
                 query = query.filter(PostRecord.created_at < end)
             if search_text is not None:
                 query = query.filter(PostRecord.text.like(f"%{search_text}%"))
+            if offset is not None:
+                query = query.offset(offset)
             for post_record in query.all():
                 yield self._post_record_to_model(post_record)
 
