@@ -286,6 +286,8 @@ class Storage:
                 query = query.filter(PostRecord.created_at >= start)
             if end is not None:
                 query = query.filter(PostRecord.created_at < end)
+            if search_text is not None:
+                query = query.filter(PostRecord.text.like(f"%{search_text}%"))
             for post_record in query.all():
                 yield self._post_record_to_model(post_record)
 
@@ -297,11 +299,6 @@ class Storage:
         )
         with Session(self.engine) as sess:
             for post_record in sess.execute(query).scalars().all():
-                yield self._post_record_to_model(post_record)
-
-    def search_posts_by_text(self, search_word: str) -> Generator[PostModel, None, None]:
-        with Session(self.engine) as sess:
-            for post_record in sess.query(PostRecord).filter(PostRecord.text.like(f"%{search_word}%")):
                 yield self._post_record_to_model(post_record)
 
     def get_number_of_posts(

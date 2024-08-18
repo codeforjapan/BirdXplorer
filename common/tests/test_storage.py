@@ -119,7 +119,7 @@ def test_search_posts_by_text(
     storage = Storage(engine=engine_for_test)
     search_word = "https://t.co/xxxxxxxxxxx/"
     expected = [post_samples[i] for i in (0, 2)]
-    actual = list(storage.search_posts_by_text(search_word))
+    actual = list(storage.get_posts(search_text=search_word))
     assert actual == expected
 
 
