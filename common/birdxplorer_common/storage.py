@@ -276,7 +276,7 @@ class Storage:
         end: Union[TwitterTimestamp, None] = None,
         search_text: Union[str, None] = None,
         offset: Union[int, None] = None,
-        limit: Union[int, None] = None,
+        limit: int = 100,
     ) -> Generator[PostModel, None, None]:
         with Session(self.engine) as sess:
             query = sess.query(PostRecord)
@@ -294,6 +294,7 @@ class Storage:
                 query = query.filter(PostRecord.text.like(f"%{search_text}%"))
             if offset is not None:
                 query = query.offset(offset)
+            query = query.limit(limit)
             for post_record in query.all():
                 yield self._post_record_to_model(post_record)
 

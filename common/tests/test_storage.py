@@ -147,6 +147,29 @@ def test_get_posts_offset(
     assert expected == actual
 
 
+def test_get_posts_limit(
+    engine_for_test: Engine,
+    post_samples: List[Post],
+    post_records_sample: List[PostRecord],
+) -> None:
+    storage = Storage(engine=engine_for_test)
+    expected = [post_samples[i] for i in (0,)]
+    actual = list(storage.get_posts(limit=1))
+    assert expected == actual
+
+
+def test_get_posts_offset_and_limit_with_filter(
+    engine_for_test: Engine,
+    post_samples: List[Post],
+    post_records_sample: List[PostRecord],
+) -> None:
+    storage = Storage(engine=engine_for_test)
+    search_word = "https://t.co/xxxxxxxxxxx/"
+    expected = [post_samples[i] for i in (2,)]
+    actual = list(storage.get_posts(search_text=search_word, offset=1, limit=1))
+    assert expected == actual
+
+
 def test_get_notes_by_ids(
     engine_for_test: Engine,
     note_samples: List[Note],
