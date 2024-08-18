@@ -123,6 +123,19 @@ def test_search_posts_by_text(
     assert actual == expected
 
 
+def test_get_posts_by_note_ids(
+    engine_for_test: Engine,
+    post_samples: List[Post],
+    post_records_sample: List[PostRecord],
+    note_records_sample: List[NoteRecord],
+) -> None:
+    storage = Storage(engine=engine_for_test)
+    note_ids = [NoteId.from_str("1234567890123456781")]
+    expected = [post_samples[i] for i in (0,)]
+    actual = list(storage.get_posts_by_note_ids(note_ids=note_ids))
+    assert expected == actual
+
+
 def test_get_notes_by_ids(
     engine_for_test: Engine,
     note_samples: List[Note],
