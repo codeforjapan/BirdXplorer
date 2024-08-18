@@ -322,6 +322,16 @@ class Storage:
                 query = query.filter(PostRecord.text.like(f"%{search_text}%"))
             return query.count()
 
+    def get_number_of_posts(
+        self,
+        post_ids: Union[List[PostId], None] = None,
+        note_ids: Union[List[NoteId], None] = None,
+        start: Union[TwitterTimestamp, None] = None,
+        end: Union[TwitterTimestamp, None] = None,
+        search_text: Union[str, None] = None,
+    ) -> int:
+        raise NotImplementedError
+
 
 def gen_storage(settings: GlobalSettings) -> Storage:
     engine = create_engine(settings.storage_settings.sqlalchemy_database_url)
