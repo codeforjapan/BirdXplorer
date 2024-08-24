@@ -96,8 +96,8 @@ def gen_router(storage: Storage) -> APIRouter:
         request: Request,
         post_id: Union[List[PostId], None] = Query(default=None),
         note_id: Union[List[NoteId], None] = Query(default=None),
-        created_at_start: Union[None, TwitterTimestamp, str] = Query(default=None),
-        created_at_end: Union[None, TwitterTimestamp, str] = Query(default=None),
+        created_at_from: Union[None, TwitterTimestamp, str] = Query(default=None),
+        created_at_to: Union[None, TwitterTimestamp, str] = Query(default=None),
         offset: int = Query(default=0, ge=0),
         limit: int = Query(default=100, gt=0, le=1000),
         search_text: Union[None, str] = Query(default=None),
@@ -108,18 +108,18 @@ def gen_router(storage: Storage) -> APIRouter:
             posts = list(storage.get_posts_by_ids(post_ids=post_id))
         elif note_id is not None:
             posts = list(storage.get_posts_by_note_ids(note_ids=note_id))
-        elif created_at_start is not None:
-            if created_at_end is not None:
+        elif created_at_from is not None:
+            if created_at_to is not None:
                 posts = list(
                     storage.get_posts_by_created_at_range(
-                        start=ensure_twitter_timestamp(created_at_start),
-                        end=ensure_twitter_timestamp(created_at_end),
+                        start=ensure_twitter_timestamp(created_at_from),
+                        end=ensure_twitter_timestamp(created_at_to),
                     )
                 )
             else:
-                posts = list(storage.get_posts_by_created_at_start(start=ensure_twitter_timestamp(created_at_start)))
-        elif created_at_end is not None:
-            posts = list(storage.get_posts_by_created_at_end(end=ensure_twitter_timestamp(created_at_end)))
+                posts = list(storage.get_posts_by_created_at_start(start=ensure_twitter_timestamp(created_at_from)))
+        elif created_at_to is not None:
+            posts = list(storage.get_posts_by_created_at_end(end=ensure_twitter_timestamp(created_at_to)))
         elif search_text is not None and len(search_text) > 0:
             posts = list(storage.search_posts_by_text(search_text))
         else:
