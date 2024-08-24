@@ -96,22 +96,22 @@ def gen_router(storage: Storage) -> APIRouter:
         request: Request,
         post_id: Union[List[PostId], None] = Query(default=None),
         note_id: Union[List[NoteId], None] = Query(default=None),
-        created_at_start: Union[None, TwitterTimestamp, str] = Query(default=None),
-        created_at_end: Union[None, TwitterTimestamp, str] = Query(default=None),
+        created_at_from: Union[None, TwitterTimestamp, str] = Query(default=None),
+        created_at_to: Union[None, TwitterTimestamp, str] = Query(default=None),
         offset: int = Query(default=0, ge=0),
         limit: int = Query(default=100, gt=0, le=1000),
         search_text: Union[None, str] = Query(default=None),
     ) -> PostListResponse:
-        if created_at_start is not None and isinstance(created_at_start, str):
-            created_at_start = ensure_twitter_timestamp(created_at_start)
-        if created_at_end is not None and isinstance(created_at_end, str):
-            created_at_end = ensure_twitter_timestamp(created_at_end)
+        if created_at_from is not None and isinstance(created_at_from, str):
+            created_at_from = ensure_twitter_timestamp(created_at_from)
+        if created_at_to is not None and isinstance(created_at_to, str):
+            created_at_to = ensure_twitter_timestamp(created_at_to)
         posts = list(
             storage.get_posts(
                 post_ids=post_id,
                 note_ids=note_id,
-                start=created_at_start,
-                end=created_at_end,
+                start=created_at_from,
+                end=created_at_to,
                 search_text=search_text,
                 offset=offset,
                 limit=limit,
@@ -120,8 +120,8 @@ def gen_router(storage: Storage) -> APIRouter:
         total_count = storage.get_number_of_posts(
             post_ids=post_id,
             note_ids=note_id,
-            start=created_at_start,
-            end=created_at_end,
+            start=created_at_from,
+            end=created_at_to,
             search_text=search_text,
         )
 

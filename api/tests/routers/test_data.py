@@ -61,14 +61,14 @@ def test_posts_get_has_note_id_filter(client: TestClient, post_samples: List[Pos
 
 
 def test_posts_get_has_created_at_filter_start_and_end(client: TestClient, post_samples: List[Post]) -> None:
-    response = client.get("/api/v1/data/posts/?createdAtStart=2006-7-25 00:00:00&createdAtEnd=2006-7-30 23:59:59")
+    response = client.get("/api/v1/data/posts/?createdAtFrom=2006-7-25 00:00:00&createdAtTo=2006-7-30 23:59:59")
     assert response.status_code == 200
     res_json = response.json()
     assert res_json == {"data": [json.loads(post_samples[1].model_dump_json())], "meta": {"next": None, "prev": None}}
 
 
 def test_posts_get_has_created_at_filter_start(client: TestClient, post_samples: List[Post]) -> None:
-    response = client.get("/api/v1/data/posts/?createdAtStart=2006-7-25 00:00:00")
+    response = client.get("/api/v1/data/posts/?createdAtFrom=2006-7-25 00:00:00")
     assert response.status_code == 200
     res_json = response.json()
     assert res_json == {
@@ -78,7 +78,7 @@ def test_posts_get_has_created_at_filter_start(client: TestClient, post_samples:
 
 
 def test_posts_get_has_created_at_filter_end(client: TestClient, post_samples: List[Post]) -> None:
-    response = client.get("/api/v1/data/posts/?createdAtEnd=2006-7-30 00:00:00")
+    response = client.get("/api/v1/data/posts/?createdAtTo=2006-7-30 00:00:00")
     assert response.status_code == 200
     res_json = response.json()
     assert res_json == {
@@ -88,14 +88,14 @@ def test_posts_get_has_created_at_filter_end(client: TestClient, post_samples: L
 
 
 def test_posts_get_created_at_range_filter_accepts_integer(client: TestClient, post_samples: List[Post]) -> None:
-    response = client.get("/api/v1/data/posts/?createdAtStart=1153921700000&createdAtEnd=1154921800000")
+    response = client.get("/api/v1/data/posts/?createdAtFrom=1153921700000&createdAtTo=1154921800000")
     assert response.status_code == 200
     res_json = response.json()
     assert res_json == {"data": [json.loads(post_samples[1].model_dump_json())], "meta": {"next": None, "prev": None}}
 
 
 def test_posts_get_created_at_start_filter_accepts_integer(client: TestClient, post_samples: List[Post]) -> None:
-    response = client.get("/api/v1/data/posts/?createdAtStart=1153921700000")
+    response = client.get("/api/v1/data/posts/?createdAtFrom=1153921700000")
     assert response.status_code == 200
     res_json = response.json()
     assert res_json == {
@@ -105,7 +105,7 @@ def test_posts_get_created_at_start_filter_accepts_integer(client: TestClient, p
 
 
 def test_posts_get_created_at_end_filter_accepts_integer(client: TestClient, post_samples: List[Post]) -> None:
-    response = client.get("/api/v1/data/posts/?createdAtEnd=1154921800000")
+    response = client.get("/api/v1/data/posts/?createdAtTo=1154921800000")
     assert response.status_code == 200
     res_json = response.json()
     assert res_json == {
@@ -115,7 +115,7 @@ def test_posts_get_created_at_end_filter_accepts_integer(client: TestClient, pos
 
 
 def test_posts_get_timestamp_out_of_range(client: TestClient, post_samples: List[Post]) -> None:
-    response = client.get("/api/v1/data/posts/?createdAtStart=1153921700&createdAtEnd=1153921700")
+    response = client.get("/api/v1/data/posts/?createdAtFrom=1153921700&createdAtTo=1153921700")
     assert response.status_code == 422
 
 
