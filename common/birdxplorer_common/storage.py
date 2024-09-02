@@ -268,47 +268,59 @@ class Storage:
                     created_at=note_record.created_at,
                 )
 
-    def get_posts(self) -> Generator[PostModel, None, None]:
-        with Session(self.engine) as sess:
-            for post_record in sess.query(PostRecord).all():
-                yield self._post_record_to_model(post_record)
-
-    def get_posts_by_ids(self, post_ids: List[PostId]) -> Generator[PostModel, None, None]:
-        with Session(self.engine) as sess:
-            for post_record in sess.query(PostRecord).filter(PostRecord.post_id.in_(post_ids)).all():
-                yield self._post_record_to_model(post_record)
-
-    def get_posts_by_created_at_range(
-        self, start: TwitterTimestamp, end: TwitterTimestamp
+    def get_posts(
+        self,
+        post_ids: Union[List[PostId], None] = None,
+        note_ids: Union[List[NoteId], None] = None,
+        start: Union[TwitterTimestamp, None] = None,
+        end: Union[TwitterTimestamp, None] = None,
+        search_text: Union[str, None] = None,
+        offset: Union[int, None] = None,
+        limit: int = 100,
     ) -> Generator[PostModel, None, None]:
         with Session(self.engine) as sess:
-            for post_record in sess.query(PostRecord).filter(PostRecord.created_at.between(start, end)).all():
+            query = sess.query(PostRecord)
+            if post_ids is not None:
+                query = query.filter(PostRecord.post_id.in_(post_ids))
+            if note_ids is not None:
+                query = query.join(NoteRecord, NoteRecord.post_id == PostRecord.post_id).filter(
+                    NoteRecord.note_id.in_(note_ids)
+                )
+            if start is not None:
+                query = query.filter(PostRecord.created_at >= start)
+            if end is not None:
+                query = query.filter(PostRecord.created_at < end)
+            if search_text is not None:
+                query = query.filter(PostRecord.text.like(f"%{search_text}%"))
+            if offset is not None:
+                query = query.offset(offset)
+            query = query.limit(limit)
+            for post_record in query.all():
                 yield self._post_record_to_model(post_record)
 
-    def get_posts_by_created_at_start(self, start: TwitterTimestamp) -> Generator[PostModel, None, None]:
+    def get_number_of_posts(
+        self,
+        post_ids: Union[List[PostId], None] = None,
+        note_ids: Union[List[NoteId], None] = None,
+        start: Union[TwitterTimestamp, None] = None,
+        end: Union[TwitterTimestamp, None] = None,
+        search_text: Union[str, None] = None,
+    ) -> int:
         with Session(self.engine) as sess:
-            for post_record in sess.query(PostRecord).filter(PostRecord.created_at >= start).all():
-                yield self._post_record_to_model(post_record)
-
-    def get_posts_by_created_at_end(self, end: TwitterTimestamp) -> Generator[PostModel, None, None]:
-        with Session(self.engine) as sess:
-            for post_record in sess.query(PostRecord).filter(PostRecord.created_at < end).all():
-                yield self._post_record_to_model(post_record)
-
-    def get_posts_by_note_ids(self, note_ids: List[NoteId]) -> Generator[PostModel, None, None]:
-        query = (
-            select(PostRecord)
-            .join(NoteRecord, NoteRecord.post_id == PostRecord.post_id)
-            .where(NoteRecord.note_id.in_(note_ids))
-        )
-        with Session(self.engine) as sess:
-            for post_record in sess.execute(query).scalars().all():
-                yield self._post_record_to_model(post_record)
-
-    def search_posts_by_text(self, search_word: str) -> Generator[PostModel, None, None]:
-        with Session(self.engine) as sess:
-            for post_record in sess.query(PostRecord).filter(PostRecord.text.like(f"%{search_word}%")):
-                yield self._post_record_to_model(post_record)
+            query = sess.query(PostRecord)
+            if post_ids is not None:
+                query = query.filter(PostRecord.post_id.in_(post_ids))
+            if note_ids is not None:
+                query = query.join(NoteRecord, NoteRecord.post_id == PostRecord.post_id).filter(
+                    NoteRecord.note_id.in_(note_ids)
+                )
+            if start is not None:
+                query = query.filter(PostRecord.created_at >= start)
+            if end is not None:
+                query = query.filter(PostRecord.created_at < end)
+            if search_text is not None:
+                query = query.filter(PostRecord.text.like(f"%{search_text}%"))
+            return query.count()
 
 
 def gen_storage(settings: GlobalSettings) -> Storage:
