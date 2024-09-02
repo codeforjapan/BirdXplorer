@@ -254,60 +254,50 @@ def mock_storage(
     mock.get_topics.side_effect = _get_topics
     mock.get_notes.side_effect = _get_notes
 
-    def _get_posts() -> Generator[Post, None, None]:
-        yield from post_samples
+    def _get_posts(
+        post_ids: Union[List[PostId], None] = None,
+        note_ids: Union[List[NoteId], None] = None,
+        start: Union[TwitterTimestamp, None] = None,
+        end: Union[TwitterTimestamp, None] = None,
+        search_text: Union[str, None] = None,
+        offset: Union[int, None] = None,
+        limit: Union[int, None] = None,
+    ) -> Generator[Post, None, None]:
+        gen_count = 0
+        actual_gen_count = 0
+        for idx, post in enumerate(post_samples):
+            if limit is not None and actual_gen_count >= limit:
+                break
+            if post_ids is not None and post.post_id not in post_ids:
+                continue
+            if note_ids is not None and not any(
+                note.note_id in note_ids and note.post_id == post.post_id for note in note_samples
+            ):
+                continue
+            if start is not None and post.created_at < start:
+                continue
+            if end is not None and post.created_at >= end:
+                continue
+            if search_text is not None and search_text not in post.text:
+                continue
+            gen_count += 1
+            if offset is not None and gen_count <= offset:
+                continue
+            actual_gen_count += 1
+            yield post
 
     mock.get_posts.side_effect = _get_posts
 
-    def _get_posts_by_ids(post_ids: List[PostId]) -> Generator[Post, None, None]:
-        for i in post_ids:
-            for post in post_samples:
-                if post.post_id == i:
-                    yield post
-                    break
+    def _get_number_of_posts(
+        post_ids: Union[List[PostId], None] = None,
+        note_ids: Union[List[NoteId], None] = None,
+        start: Union[TwitterTimestamp, None] = None,
+        end: Union[TwitterTimestamp, None] = None,
+        search_text: Union[str, None] = None,
+    ) -> int:
+        return len(list(_get_posts(post_ids, note_ids, start, end, search_text)))
 
-    mock.get_posts_by_ids.side_effect = _get_posts_by_ids
-
-    def _get_posts_by_note_ids(note_ids: List[NoteId]) -> Generator[Post, None, None]:
-        for post in post_samples:
-            for note in note_samples:
-                if note.note_id in note_ids and post.post_id == note.post_id:
-                    yield post
-                    break
-
-    mock.get_posts_by_note_ids.side_effect = _get_posts_by_note_ids
-
-    def _get_posts_by_created_at_range(start: TwitterTimestamp, end: TwitterTimestamp) -> Generator[Post, None, None]:
-        for post in post_samples:
-            if start <= post.created_at < end:
-                yield post
-
-    mock.get_posts_by_created_at_range.side_effect = _get_posts_by_created_at_range
-
-    def _get_posts_by_created_at_start(
-        start: TwitterTimestamp,
-    ) -> Generator[Post, None, None]:
-        for post in post_samples:
-            if start <= post.created_at:
-                yield post
-
-    mock.get_posts_by_created_at_start.side_effect = _get_posts_by_created_at_start
-
-    def _get_posts_by_created_at_end(
-        end: TwitterTimestamp,
-    ) -> Generator[Post, None, None]:
-        for post in post_samples:
-            if post.created_at < end:
-                yield post
-
-    mock.get_posts_by_created_at_end.side_effect = _get_posts_by_created_at_end
-
-    def _search_posts_by_text(search_text: str) -> Generator[Post, None, None]:
-        for post in post_samples:
-            if search_text in post.text:
-                yield post
-
-    mock.search_posts_by_text.side_effect = _search_posts_by_text
+    mock.get_number_of_posts.side_effect = _get_number_of_posts
 
     yield mock
 

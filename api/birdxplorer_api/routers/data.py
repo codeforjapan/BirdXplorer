@@ -102,32 +102,30 @@ def gen_router(storage: Storage) -> APIRouter:
         limit: int = Query(default=100, gt=0, le=1000),
         search_text: Union[None, str] = Query(default=None),
     ) -> PostListResponse:
-        posts = None
+        if created_at_from is not None and isinstance(created_at_from, str):
+            created_at_from = ensure_twitter_timestamp(created_at_from)
+        if created_at_to is not None and isinstance(created_at_to, str):
+            created_at_to = ensure_twitter_timestamp(created_at_to)
+        posts = list(
+            storage.get_posts(
+                post_ids=post_id,
+                note_ids=note_id,
+                start=created_at_from,
+                end=created_at_to,
+                search_text=search_text,
+                offset=offset,
+                limit=limit,
+            )
+        )
+        total_count = storage.get_number_of_posts(
+            post_ids=post_id,
+            note_ids=note_id,
+            start=created_at_from,
+            end=created_at_to,
+            search_text=search_text,
+        )
 
-        if post_id is not None:
-            posts = list(storage.get_posts_by_ids(post_ids=post_id))
-        elif note_id is not None:
-            posts = list(storage.get_posts_by_note_ids(note_ids=note_id))
-        elif created_at_from is not None:
-            if created_at_to is not None:
-                posts = list(
-                    storage.get_posts_by_created_at_range(
-                        start=ensure_twitter_timestamp(created_at_from),
-                        end=ensure_twitter_timestamp(created_at_to),
-                    )
-                )
-            else:
-                posts = list(storage.get_posts_by_created_at_start(start=ensure_twitter_timestamp(created_at_from)))
-        elif created_at_to is not None:
-            posts = list(storage.get_posts_by_created_at_end(end=ensure_twitter_timestamp(created_at_to)))
-        elif search_text is not None and len(search_text) > 0:
-            posts = list(storage.search_posts_by_text(search_text))
-        else:
-            posts = list(storage.get_posts())
-
-        total_count = len(posts)
-        paginated_posts = posts[offset : offset + limit]
-        for post in paginated_posts:
+        for post in posts:
             post.link = HttpUrl(f"https://x.com/{post.x_user.name}/status/{post.post_id}")
 
         base_url = str(request.url).split("?")[0]
@@ -140,6 +138,6 @@ def gen_router(storage: Storage) -> APIRouter:
         if offset > 0:
             prev_url = f"{base_url}?offset={prev_offset}&limit={limit}"
 
-        return PostListResponse(data=paginated_posts, meta=PaginationMeta(next=next_url, prev=prev_url))
+        return PostListResponse(data=posts, meta=PaginationMeta(next=next_url, prev=prev_url))
 
     return router
