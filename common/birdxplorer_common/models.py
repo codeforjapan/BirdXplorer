@@ -677,6 +677,26 @@ class XUser(BaseModel):
 MediaDetails: TypeAlias = List[HttpUrl] | None
 
 
+class LinkId(NonNegativeInt):
+    """
+    >>> LinkId.from_int(1)
+    LinkId(1)
+    """
+
+    pass
+
+
+class Link(BaseModel):
+    """
+    >>> Link.model_validate_json('{"linkId": 1, "canonicalUrl": "https://example.com", "shortUrl": "https://example.com/short"}')
+    Link(link_id=LinkId(1), canonical_url=Url('https://example.com/'), short_url=Url('https://example.com/short'))
+    """  # noqa: E501
+
+    link_id: LinkId
+    canonical_url: HttpUrl
+    short_url: HttpUrl
+
+
 class Post(BaseModel):
     post_id: PostId
     link: Optional[HttpUrl] = None
@@ -688,6 +708,7 @@ class Post(BaseModel):
     like_count: NonNegativeInt
     repost_count: NonNegativeInt
     impression_count: NonNegativeInt
+    links: List[Link] = []
 
 
 class PaginationMeta(BaseModel):
