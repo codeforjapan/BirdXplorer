@@ -7,7 +7,9 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 from sqlalchemy.types import CHAR, DECIMAL, JSON, Integer, String
 
-from .models import BinaryBool, LanguageIdentifier, LinkId, MediaDetails, NonNegativeInt
+from .models import BinaryBool, LanguageIdentifier
+from .models import Link as LinkModel
+from .models import LinkId, MediaDetails, NonNegativeInt
 from .models import Note as NoteModel
 from .models import NoteId, NotesClassification, NotesHarmful, ParticipantId
 from .models import Post as PostModel
@@ -97,6 +99,14 @@ class LinkRecord(Base):
     short_url: Mapped[HttpUrl] = mapped_column(nullable=False, index=True)
 
 
+class PostLinkAssociation(Base):
+    __tablename__ = "post_link"
+
+    post_id: Mapped[PostId] = mapped_column(ForeignKey("posts.post_id"), primary_key=True)
+    link_id: Mapped[LinkId] = mapped_column(ForeignKey("links.link_id"), primary_key=True)
+    link: Mapped[LinkRecord] = relationship()
+
+
 class PostRecord(Base):
     __tablename__ = "posts"
 
@@ -109,14 +119,7 @@ class PostRecord(Base):
     like_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
     repost_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
     impression_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
-
-
-class PostLinkAssociation(Base):
-    __tablename__ = "post_link"
-
-    post_id: Mapped[PostId] = mapped_column(ForeignKey("posts.post_id"), primary_key=True)
-    link_id: Mapped[LinkId] = mapped_column(ForeignKey("links.link_id"), primary_key=True)
-    link: Mapped["LinkRecord"] = relationship()
+    links: Mapped[List[PostLinkAssociation]] = relationship()
 
 
 class RowNoteRecord(Base):
@@ -213,6 +216,10 @@ class Storage:
             like_count=post_record.like_count,
             repost_count=post_record.repost_count,
             impression_count=post_record.impression_count,
+            links=[
+                LinkModel(link_id=link.link_id, canonical_url=link.link.canonical_url, short_url=link.link.short_url)
+                for link in post_record.links
+            ],
         )
 
     def get_user_enrollment_by_participant_id(self, participant_id: ParticipantId) -> UserEnrollment:
