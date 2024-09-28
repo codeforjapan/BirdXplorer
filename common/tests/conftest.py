@@ -281,6 +281,19 @@ https://t.co/yyyyyyyyyyy/ #学び #自己啓発""",
             impression_count=30,
             links=[link_samples[2], link_samples[3]],
         ),
+        post_factory.build(
+            post_id="2234567890123456821",
+            link=None,
+            x_user_id="1234567890123456783",
+            x_user=x_user_samples[2],
+            text="empty",
+            media_details=None,
+            created_at=1154923900000,
+            like_count=10,
+            repost_count=20,
+            impression_count=30,
+            links=[],
+        ),
     ]
     yield posts
 
