@@ -31,14 +31,14 @@ def test_get_topic_list(
 @pytest.mark.parametrize(
     ["filter_args", "expected_indices"],
     [
-        [dict(), [0, 1, 2, 3]],
-        [dict(offset=1), [1, 2, 3]],
+        [dict(), [0, 1, 2, 3, 4]],
+        [dict(offset=1), [1, 2, 3, 4]],
         [dict(limit=1), [0]],
         [dict(offset=1, limit=1), [1]],
         [dict(post_ids=[PostId.from_str("2234567890123456781"), PostId.from_str("2234567890123456801")]), [0, 2]],
         [dict(post_ids=[]), []],
         [dict(start=TwitterTimestamp.from_int(1153921700000), end=TwitterTimestamp.from_int(1153921800000)), [1]],
-        [dict(start=TwitterTimestamp.from_int(1153921700000)), [1, 2]],
+        [dict(start=TwitterTimestamp.from_int(1153921700000)), [1, 2, 3, 4]],
         [dict(end=TwitterTimestamp.from_int(1153921700000)), [0]],
         [dict(search_text="https://t.co/xxxxxxxxxxx/"), [0, 2]],
         [dict(note_ids=[NoteId.from_str("1234567890123456781")]), [0]],
@@ -63,11 +63,11 @@ def test_get_post(
 @pytest.mark.parametrize(
     ["filter_args", "expected_indices"],
     [
-        [dict(), [0, 1, 2, 3]],
+        [dict(), [0, 1, 2, 3, 4]],
         [dict(post_ids=[PostId.from_str("2234567890123456781"), PostId.from_str("2234567890123456801")]), [0, 2]],
         [dict(post_ids=[]), []],
         [dict(start=TwitterTimestamp.from_int(1153921700000), end=TwitterTimestamp.from_int(1153921800000)), [1]],
-        [dict(start=TwitterTimestamp.from_int(1153921700000)), [1, 2, 3]],
+        [dict(start=TwitterTimestamp.from_int(1153921700000)), [1, 2, 3, 4]],
         [dict(end=TwitterTimestamp.from_int(1153921700000)), [0]],
         [dict(search_text="https://t.co/xxxxxxxxxxx/"), [0, 2]],
         [dict(note_ids=[NoteId.from_str("1234567890123456781")]), [0]],

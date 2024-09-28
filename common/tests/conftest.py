@@ -26,8 +26,10 @@ from birdxplorer_common.models import (
 from birdxplorer_common.settings import GlobalSettings, PostgresStorageSettings
 from birdxplorer_common.storage import (
     Base,
+    LinkRecord,
     NoteRecord,
     NoteTopicAssociation,
+    PostLinkAssociation,
     PostRecord,
     TopicRecord,
     XUserRecord,
@@ -410,25 +412,42 @@ def x_user_records_sample(
 
 
 @fixture
+def link_records_sample(
+    link_samples: List[Link],
+    engine_for_test: Engine,
+) -> Generator[List[LinkRecord], None, None]:
+    res = [LinkRecord(link_id=d.link_id, canonical_url=d.canonical_url, short_url=d.short_url) for d in link_samples]
+    with Session(engine_for_test) as sess:
+        sess.add_all(res)
+        sess.commit()
+    yield res
+
+
+@fixture
 def post_records_sample(
     x_user_records_sample: List[XUserRecord],
+    link_records_sample: List[LinkRecord],
     post_samples: List[Post],
     engine_for_test: Engine,
 ) -> Generator[List[PostRecord], None, None]:
-    res = [
-        PostRecord(
-            post_id=d.post_id,
-            user_id=d.x_user_id,
-            text=d.text,
-            media_details=d.media_details,
-            created_at=d.created_at,
-            like_count=d.like_count,
-            repost_count=d.repost_count,
-            impression_count=d.impression_count,
-        )
-        for d in post_samples
-    ]
+    res: List[PostRecord] = []
     with Session(engine_for_test) as sess:
-        sess.add_all(res)
+        for post in post_samples:
+            inst = PostRecord(
+                post_id=post.post_id,
+                user_id=post.x_user_id,
+                text=post.text,
+                media_details=post.media_details,
+                created_at=post.created_at,
+                like_count=post.like_count,
+                repost_count=post.repost_count,
+                impression_count=post.impression_count,
+            )
+            sess.add(inst)
+            for link in post.links:
+                assoc = PostLinkAssociation(link_id=link.link_id, post_id=inst.post_id)
+                sess.add(assoc)
+                inst.links.append(assoc)
+            res.append(inst)
         sess.commit()
     yield res
