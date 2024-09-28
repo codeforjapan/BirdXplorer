@@ -7,7 +7,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 from sqlalchemy.types import CHAR, DECIMAL, JSON, Integer, String
 
-from .models import BinaryBool, LanguageIdentifier, MediaDetails, NonNegativeInt
+from .models import BinaryBool, LanguageIdentifier, LinkId, MediaDetails, NonNegativeInt
 from .models import Note as NoteModel
 from .models import NoteId, NotesClassification, NotesHarmful, ParticipantId
 from .models import Post as PostModel
@@ -34,6 +34,7 @@ register_adapter(AnyUrl, adapt_pydantic_http_url)
 
 class Base(DeclarativeBase):
     type_annotation_map = {
+        LinkId: Integer,
         TopicId: Integer,
         TopicLabel: JSON,
         NoteId: String,
@@ -88,6 +89,14 @@ class XUserRecord(Base):
     following_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
 
 
+class LinkRecord(Base):
+    __tablename__ = "links"
+
+    link_id: Mapped[LinkId] = mapped_column(primary_key=True)
+    canonical_url: Mapped[HttpUrl] = mapped_column(nullable=False, index=True)
+    short_url: Mapped[HttpUrl] = mapped_column(nullable=False, index=True)
+
+
 class PostRecord(Base):
     __tablename__ = "posts"
 
@@ -100,6 +109,14 @@ class PostRecord(Base):
     like_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
     repost_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
     impression_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
+
+
+class PostLinkAssociation(Base):
+    __tablename__ = "post_link"
+
+    post_id: Mapped[PostId] = mapped_column(ForeignKey("posts.post_id"), primary_key=True)
+    link_id: Mapped[LinkId] = mapped_column(ForeignKey("links.link_id"), primary_key=True)
+    link: Mapped["LinkRecord"] = relationship()
 
 
 class RowNoteRecord(Base):
