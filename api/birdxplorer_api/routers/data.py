@@ -1,10 +1,6 @@
 from datetime import timezone
 from typing import List, Union
 
-from dateutil.parser import parse as dateutil_parse
-from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import HttpUrl
-
 from birdxplorer_common.models import (
     BaseModel,
     LanguageIdentifier,
@@ -20,6 +16,9 @@ from birdxplorer_common.models import (
     UserEnrollment,
 )
 from birdxplorer_common.storage import Storage
+from dateutil.parser import parse as dateutil_parse
+from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import HttpUrl
 
 
 class TopicListResponse(BaseModel):
@@ -104,6 +103,7 @@ def gen_router(storage: Storage) -> APIRouter:
         limit: int = Query(default=100, gt=0, le=1000),
         search_text: Union[None, str] = Query(default=None),
         search_url: Union[None, HttpUrl] = Query(default=None),
+        media: bool = Query(default=True),
     ) -> PostListResponse:
         if created_at_from is not None and isinstance(created_at_from, str):
             created_at_from = ensure_twitter_timestamp(created_at_from)
@@ -119,6 +119,7 @@ def gen_router(storage: Storage) -> APIRouter:
                 search_url=search_url,
                 offset=offset,
                 limit=limit,
+                with_media=media,
             )
         )
         total_count = storage.get_number_of_posts(
