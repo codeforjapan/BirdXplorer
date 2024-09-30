@@ -7,15 +7,20 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 from sqlalchemy.types import CHAR, DECIMAL, JSON, Integer, String, Uuid
 
-from .models import BinaryBool, LanguageIdentifier
-from .models import Link as LinkModel
-from .models import LinkId, Media, MediaDetails, MediaType, NonNegativeInt
-from .models import Note as NoteModel
-from .models import NoteId, NotesClassification, NotesHarmful, ParticipantId
-from .models import Post as PostModel
-from .models import PostId, SummaryString
-from .models import Topic as TopicModel
 from .models import (
+    BinaryBool,
+    LanguageIdentifier,
+    LinkId,
+    Media,
+    MediaDetails,
+    MediaType,
+    NonNegativeInt,
+    NoteId,
+    NotesClassification,
+    NotesHarmful,
+    ParticipantId,
+    PostId,
+    SummaryString,
     TopicId,
     TopicLabel,
     TwitterTimestamp,
@@ -23,6 +28,10 @@ from .models import (
     UserId,
     UserName,
 )
+from .models import Link as LinkModel
+from .models import Note as NoteModel
+from .models import Post as PostModel
+from .models import Topic as TopicModel
 from .models import XUser as XUserModel
 from .settings import GlobalSettings
 
