@@ -197,7 +197,7 @@ def post_samples(
 新しいプロジェクトがついに公開されました！詳細はこちら👉
 
 https://t.co/xxxxxxxxxxx/ #プロジェクト #新発売 #Tech""",
-            media_details=None,
+            media_details=[],
             created_at=1152921600000,
             like_count=10,
             repost_count=20,
@@ -213,7 +213,7 @@ https://t.co/xxxxxxxxxxx/ #プロジェクト #新発売 #Tech""",
 このブログ記事、めちゃくちゃ参考になった！🔥 チェックしてみて！
 
 https://t.co/yyyyyyyyyyy/ #学び #自己啓発""",
-            media_details=None,
+            media_details=[],
             created_at=1153921700000,
             like_count=10,
             repost_count=20,
@@ -227,7 +227,7 @@ https://t.co/yyyyyyyyyyy/ #学び #自己啓発""",
             x_user=x_user_samples[1],
             text="""\
 次の休暇はここに決めた！🌴🏖️ 見てみて～ https://t.co/xxxxxxxxxxx/ https://t.co/wwwwwwwwwww/ #旅行 #バケーション""",
-            media_details=None,
+            media_details=[],
             created_at=1154921800000,
             like_count=10,
             repost_count=20,
@@ -240,7 +240,7 @@ https://t.co/yyyyyyyyyyy/ #学び #自己啓発""",
             x_user_id="1234567890123456782",
             x_user=x_user_samples[1],
             text="https://t.co/zzzzzzzzzzz/ https://t.co/wwwwwwwwwww/",
-            media_details=None,
+            media_details=[],
             created_at=1154922900000,
             like_count=10,
             repost_count=20,
@@ -253,7 +253,7 @@ https://t.co/yyyyyyyyyyy/ #学び #自己啓発""",
             x_user_id="1234567890123456783",
             x_user=x_user_samples[2],
             text="empty",
-            media_details=None,
+            media_details=[],
             created_at=1154923900000,
             like_count=10,
             repost_count=20,
@@ -325,6 +325,7 @@ def mock_storage(
         search_url: Union[HttpUrl, None] = None,
         offset: Union[int, None] = None,
         limit: Union[int, None] = None,
+        with_media: bool = True,
     ) -> Generator[Post, None, None]:
         gen_count = 0
         actual_gen_count = 0
@@ -354,6 +355,8 @@ def mock_storage(
             if offset is not None and gen_count <= offset:
                 continue
             actual_gen_count += 1
+            if not with_media:
+                post.media_details = []
             yield post
 
     mock.get_posts.side_effect = _get_posts
