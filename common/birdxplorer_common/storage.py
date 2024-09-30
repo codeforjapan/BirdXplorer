@@ -279,8 +279,6 @@ class Storage:
 
     @classmethod
     def _post_record_media_details_to_model(cls, post_record: PostRecord) -> MediaDetails:
-        if post_record.media_details is None:
-            return None
         if post_record.media_details == []:
             return []
         return [cls._media_record_to_model(post_media.media) for post_media in post_record.media_details]
@@ -289,7 +287,7 @@ class Storage:
     def _post_record_to_model(cls, post_record: PostRecord, *, with_media: bool) -> PostModel:
         # post_record.media_detailsにアクセスしたタイミングでメディア情報を一気に引っ張るクエリが発行される
         # media情報がいらない場合はクエリを発行したくないので先にwith_mediaをチェック
-        media_details = cls._post_record_media_details_to_model(post_record) if with_media else None
+        media_details = cls._post_record_media_details_to_model(post_record) if with_media else []
 
         return PostModel(
             post_id=post_record.post_id,

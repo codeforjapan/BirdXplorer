@@ -25,6 +25,7 @@ from pydantic import (
     model_validator,
 )
 from pydantic import Field as PydanticField
+from pydantic.alias_generators import to_camel
 from pydantic_core import core_schema
 
 IntT = TypeVar("IntT", bound="BaseInt")
@@ -705,7 +706,7 @@ class XMedia(BaseModel):
     height: NonNegativeInt
 
 
-MediaDetails: TypeAlias = list[XMedia] | None
+MediaDetails: TypeAlias = List[XMedia]
 
 
 class LinkId(UUID):
@@ -776,7 +777,7 @@ class Post(BaseModel):
     x_user_id: UserId
     x_user: XUser
     text: str
-    media_details: Annotated[MediaDetails, PydanticField(default_factory=lambda: None)]
+    media_details: Annotated[MediaDetails, PydanticField(default_factory=lambda: [])]
     created_at: TwitterTimestamp
     like_count: NonNegativeInt
     repost_count: NonNegativeInt
