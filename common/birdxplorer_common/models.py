@@ -2,7 +2,18 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from enum import Enum
 from random import Random
-from typing import Any, Dict, List, Literal, Optional, Type, TypeAlias, TypeVar, Union
+from typing import (
+    Annotated,
+    Any,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Type,
+    TypeAlias,
+    TypeVar,
+    Union,
+)
 from uuid import UUID
 
 from pydantic import BaseModel as PydanticBaseModel
@@ -13,11 +24,9 @@ from pydantic import (
     TypeAdapter,
     model_validator,
 )
-from pydantic.alias_generators import to_camel
-from pydantic.main import IncEx
+from pydantic import Field as PydanticField
 from pydantic_core import core_schema
 
-StrT = TypeVar("StrT", bound="BaseString")
 IntT = TypeVar("IntT", bound="BaseInt")
 FloatT = TypeVar("FloatT", bound="BaseFloat")
 
@@ -683,7 +692,20 @@ class XUser(BaseModel):
     following_count: NonNegativeInt
 
 
-MediaDetails: TypeAlias = List[HttpUrl] | None
+# ref: https://developer.x.com/en/docs/x-api/data-dictionary/object-model/media
+XMediaType: TypeAlias = Literal["photo", "video", "animated_gif"]
+
+
+class XMedia(BaseModel):
+    media_key: str
+
+    type: XMediaType
+    url: HttpUrl
+    width: NonNegativeInt
+    height: NonNegativeInt
+
+
+MediaDetails: TypeAlias = list[XMedia] | None
 
 
 class LinkId(UUID):
@@ -754,7 +776,7 @@ class Post(BaseModel):
     x_user_id: UserId
     x_user: XUser
     text: str
-    media_details: MediaDetails = None
+    media_details: Annotated[MediaDetails, PydanticField(default_factory=lambda: None)]
     created_at: TwitterTimestamp
     like_count: NonNegativeInt
     repost_count: NonNegativeInt
