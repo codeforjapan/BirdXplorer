@@ -68,6 +68,7 @@ class NoteRecord(Base):
     topics: Mapped[List[NoteTopicAssociation]] = relationship()
     language: Mapped[LanguageIdentifier] = mapped_column(nullable=False)
     summary: Mapped[SummaryString] = mapped_column(nullable=False)
+    current_status: Mapped[String] = mapped_column(nullable=True)
     created_at: Mapped[TwitterTimestamp] = mapped_column(nullable=False)
 
 
@@ -132,6 +133,34 @@ class RowNoteRecord(Base):
     row_post: Mapped["RowPostRecord"] = relationship("RowPostRecord", back_populates="row_notes")
 
 
+class RowNoteStatusRecord(Base):
+    __tablename__ = "row_note_status"
+
+    note_id: Mapped[NoteId] = mapped_column(ForeignKey("row_notes.note_id"), primary_key=True)
+    note_author_participant_id: Mapped[ParticipantId] = mapped_column(nullable=False)
+    created_at_millis: Mapped[TwitterTimestamp] = mapped_column(nullable=False)
+    timestamp_millis_of_first_non_n_m_r_status: Mapped[TwitterTimestamp] = mapped_column()
+    first_non_n_m_r_status: Mapped[String] = mapped_column()
+    timestamp_millis_of_current_status: Mapped[TwitterTimestamp] = mapped_column()
+    current_status: Mapped[String] = mapped_column()
+    timestamp_millis_of_latest_non_n_m_r_status: Mapped[TwitterTimestamp] = mapped_column()
+    most_recent_non_n_m_r_status: Mapped[String] = mapped_column()
+    timestamp_millis_of_status_lock: Mapped[TwitterTimestamp] = mapped_column()
+    locked_status: Mapped[String] = mapped_column()
+    timestamp_millis_of_retro_lock: Mapped[TwitterTimestamp] = mapped_column()
+    current_core_status: Mapped[String] = mapped_column()
+    current_expansion_status: Mapped[String] = mapped_column()
+    current_group_status: Mapped[String] = mapped_column()
+    current_decided_by: Mapped[String] = mapped_column()
+    current_modeling_group: Mapped[int] = mapped_column()
+    timestamp_millis_of_most_recent_status_change: Mapped[TwitterTimestamp] = mapped_column()
+    timestamp_millis_of_nmr_due_to_min_stable_crh_time: Mapped[TwitterTimestamp] = mapped_column()
+    current_multi_group_status: Mapped[String] = mapped_column()
+    current_modeling_multi_group: Mapped[int] = mapped_column()
+    timestamp_minute_of_final_scoring_output: Mapped[TwitterTimestamp] = mapped_column()
+    timestamp_millis_of_first_nmr_due_to_min_stable_crh_time: Mapped[TwitterTimestamp] = mapped_column()
+
+
 class RowPostRecord(Base):
     __tablename__ = "row_posts"
 
@@ -150,6 +179,15 @@ class RowPostRecord(Base):
     lang: Mapped[String] = mapped_column()
     row_notes: Mapped["RowNoteRecord"] = relationship("RowNoteRecord", back_populates="row_post")
     user: Mapped["RowUserRecord"] = relationship("RowUserRecord", back_populates="row_post")
+
+
+class RowPostEmbedURLRecord(Base):
+    __tablename__ = "row_post_embed_urls"
+
+    post_id: Mapped[PostId] = mapped_column(ForeignKey("row_posts.post_id"), primary_key=True)
+    url: Mapped[String] = mapped_column(primary_key=True)
+    expanded_url: Mapped[String] = mapped_column(nullable=False)
+    unwound_url: Mapped[String] = mapped_column(nullable=False)
 
 
 class RowUserRecord(Base):
@@ -224,6 +262,7 @@ class Storage:
         created_at_to: Union[None, TwitterTimestamp] = None,
         topic_ids: Union[List[TopicId], None] = None,
         post_ids: Union[List[PostId], None] = None,
+        current_status: Union[None, List[str]] = None,
         language: Union[LanguageIdentifier, None] = None,
     ) -> Generator[NoteModel, None, None]:
         with Session(self.engine) as sess:
@@ -248,6 +287,8 @@ class Storage:
                 query = query.filter(NoteRecord.post_id.in_(post_ids))
             if language is not None:
                 query = query.filter(NoteRecord.language == language)
+            if current_status is not None:
+                query = query.filter(NoteRecord.current_status.in_(current_status))
             for note_record in query.all():
                 yield NoteModel(
                     note_id=note_record.note_id,
@@ -265,6 +306,7 @@ class Storage:
                     ],
                     language=LanguageIdentifier.normalize(note_record.language),
                     summary=note_record.summary,
+                    current_status=note_record.current_status,
                     created_at=note_record.created_at,
                 )
 
