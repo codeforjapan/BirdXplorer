@@ -5,7 +5,13 @@ import stringcase
 from prefect import get_run_logger
 from sqlalchemy.orm import Session
 from lib.x.postlookup import lookup
-from birdxplorer_common.storage import RowNoteRecord, RowPostRecord, RowUserRecord
+from birdxplorer_common.storage import (
+    RowNoteRecord,
+    RowPostRecord,
+    RowUserRecord,
+    RowPostEmbedURLRecord,
+    RowNoteStatusRecord,
+)
 import settings
 
 
@@ -28,9 +34,11 @@ def extract_data(db: Session):
             > datetime.timestamp(date) - 24 * 60 * 60 * settings.COMMUNITY_NOTE_DAYS_AGO
         ):
             break
-        url = f'https://ton.twimg.com/birdwatch-public-data/{date.strftime("%Y/%m/%d")}/notes/notes-00000.tsv'
-        logger.info(url)
-        res = requests.get(url)
+
+        dateString = date.strftime("%Y/%m/%d")
+        note_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/notes/notes-00000.tsv"
+        logger.info(note_url)
+        res = requests.get(note_url)
 
         if res.status_code == 200:
             # res.contentをdbのNoteテーブル
@@ -45,7 +53,26 @@ def extract_data(db: Session):
                 rows_to_add.append(RowNoteRecord(**row))
             db.bulk_save_objects(rows_to_add)
 
-            break
+            status_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/noteStatusHistory/noteStatusHistory-00000.tsv"
+            logger.info(status_url)
+            res = requests.get(status_url)
+
+            if res.status_code == 200:
+                # res.contentをdbのNoteStatusテーブル
+                tsv_data = res.content.decode("utf-8").splitlines()
+                reader = csv.DictReader(tsv_data, delimiter="\t")
+                reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
+
+                rows_to_add = []
+                for row in reader:
+                    status = db.query(RowNoteStatusRecord).filter(RowNoteStatusRecord.note_id == row["note_id"]).first()
+                    if status is None or status.created_at_millis > int(datetime.now().time() * 1000):
+                        db.query(RowNoteStatusRecord).filter(RowNoteStatusRecord.note_id == row["note_id"]).delete()
+                        rows_to_add.append(RowNoteStatusRecord(**row))
+                db.bulk_save_objects(rows_to_add)
+
+                break
+
         date = date - timedelta(days=1)
 
     db.commit()
@@ -58,7 +85,9 @@ def extract_data(db: Session):
         .filter(RowNoteRecord.created_at_millis <= settings.TARGET_TWITTER_POST_END_UNIX_MILLISECOND)
         .all()
     )
-    logger.info(len(postExtract_targetNotes))
+
+    logger.info(f"Num of Target Notes: {len(postExtract_targetNotes)}")
+
     for note in postExtract_targetNotes:
         tweet_id = note.tweet_id
 
@@ -70,6 +99,8 @@ def extract_data(db: Session):
 
         logger.info(tweet_id)
         post = lookup(tweet_id)
+
+        logger.info(post)
 
         if post == None or "data" not in post:
             continue
@@ -100,6 +131,18 @@ def extract_data(db: Session):
                 url=user_data.get("url", ""),
             )
             db.add(db_user)
+
+        if "entities" in post["data"] and "urls" in post["data"]["entities"]:
+            for url in post["data"]["entities"]["urls"]:
+                if "unwound_url" not in url or url["status"] != 200:
+                    continue
+                db_post_embed_url = RowPostEmbedURLRecord(
+                    post_id=post["data"]["id"],
+                    url=url["url"],
+                    expanded_url=url["expanded_url"],
+                    unwound_url=url["unwound_url"],
+                )
+                db.add(db_post_embed_url)
 
         media_data = (
             post["includes"]["media"][0]

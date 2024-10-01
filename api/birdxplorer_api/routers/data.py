@@ -76,6 +76,7 @@ def gen_router(storage: Storage) -> APIRouter:
         created_at_to: Union[None, TwitterTimestamp] = Query(default=None),
         topic_ids: Union[List[TopicId], None] = Query(default=None),
         post_ids: Union[List[PostId], None] = Query(default=None),
+        current_status: Union[None, List[str]] = Query(default=None),
         language: Union[LanguageIdentifier, None] = Query(default=None),
     ) -> NoteListResponse:
         return NoteListResponse(
@@ -86,6 +87,7 @@ def gen_router(storage: Storage) -> APIRouter:
                     created_at_to=created_at_to,
                     topic_ids=topic_ids,
                     post_ids=post_ids,
+                    current_status=current_status,
                     language=language,
                 )
             )

@@ -205,6 +205,18 @@ def test_get_notes_by_post_ids_empty(
     assert expected == actual
 
 
+def test_get_notes_by_note_status(
+    engine_for_test: Engine,
+    note_samples: List[Note],
+    note_records_sample: List[NoteRecord],
+) -> None:
+    storage = Storage(engine=engine_for_test)
+    current_status = ["NEEDS_MORE_RATINGS"]
+    expected = [note for note in note_samples if note.current_status in current_status]
+    actual = list(storage.get_notes(current_status=current_status))
+    assert expected == actual
+
+
 def test_get_notes_by_language(
     engine_for_test: Engine,
     note_samples: List[Note],
