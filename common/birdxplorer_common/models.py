@@ -694,19 +694,19 @@ class XUser(BaseModel):
 
 
 # ref: https://developer.x.com/en/docs/x-api/data-dictionary/object-model/media
-XMediaType: TypeAlias = Literal["photo", "video", "animated_gif"]
+MediaType: TypeAlias = Literal["photo", "video", "animated_gif"]
 
 
-class XMedia(BaseModel):
+class Media(BaseModel):
     media_key: str
 
-    type: XMediaType
+    type: MediaType
     url: HttpUrl
     width: NonNegativeInt
     height: NonNegativeInt
 
 
-MediaDetails: TypeAlias = List[XMedia]
+MediaDetails: TypeAlias = List[Media]
 
 
 class LinkId(UUID):
