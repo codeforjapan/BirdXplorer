@@ -1,14 +1,25 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional, Type, TypeAlias, TypeVar, Union
+from typing import (
+    Any,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Set,
+    Type,
+    TypeAlias,
+    TypeVar,
+    Union,
+)
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict, GetCoreSchemaHandler, HttpUrl, TypeAdapter
 from pydantic.alias_generators import to_camel
 from pydantic_core import core_schema
 
-IncEx: TypeAlias = "set[int] | set[str] | dict[int, IncEx] | dict[str, IncEx] | None"
+IncEx: TypeAlias = Union[Set[int], Set[str], Dict[int, Any], Dict[str, Any], None]
 StrT = TypeVar("StrT", bound="BaseString")
 IntT = TypeVar("IntT", bound="BaseInt")
 FloatT = TypeVar("FloatT", bound="BaseFloat")
