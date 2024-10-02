@@ -1,6 +1,12 @@
 from sqlalchemy import select, func, and_, Integer
 from sqlalchemy.orm import Session
-from birdxplorer_common.storage import RowNoteRecord, RowPostRecord, RowUserRecord, RowNoteStatusRecord
+from birdxplorer_common.storage import (
+    RowNoteRecord,
+    RowPostRecord,
+    RowUserRecord,
+    RowNoteStatusRecord,
+    RowPostEmbedURLRecord,
+)
 from birdxplorer_etl.lib.ai_model.ai_model_interface import get_ai_service
 from birdxplorer_etl.settings import (
     TARGET_NOTE_ESTIMATE_TOPIC_START_UNIX_MILLISECOND,
@@ -9,6 +15,8 @@ from birdxplorer_etl.settings import (
 import csv
 import os
 from prefect import get_run_logger
+import uuid
+import random
 
 
 def transform_data(db: Session):
@@ -138,6 +146,10 @@ def transform_data(db: Session):
                 writer.writerow(user)
         offset += limit
 
+    # Transform row post embed link
+    generate_post_link(db)
+
+    # Transform row post embed url data and generate post_embed_url.csv
     csv_seed_file_path = "./seed/topic_seed.csv"
     output_csv_file_path = "./data/transformed/topic.csv"
     records = []
@@ -161,15 +173,61 @@ def transform_data(db: Session):
         for record in records:
             writer.writerow({"topic_id": record["topic_id"], "label": {k: v for k, v in record["label"].items()}})
 
-    generate_note_topic()
+    generate_note_topic(db)
 
     return
 
 
+def generate_post_link(db: Session):
+    link_csv_file_path = "./data/transformed/post_link.csv"
+    association_csv_file_path = "./data/transformed/post_link_association.csv"
+
+    if os.path.exists(link_csv_file_path):
+        os.remove(link_csv_file_path)
+    with open(link_csv_file_path, "a", newline="", encoding="utf-8") as file:
+        fieldnames = ["link_id", "url"]
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+
+    if os.path.exists(association_csv_file_path):
+        os.remove(association_csv_file_path)
+    with open(association_csv_file_path, "a", newline="", encoding="utf-8") as file:
+        fieldnames = ["post_id", "link_id"]
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+
+    offset = 0
+    limit = 1000
+    num_of_links = db.query(func.count(RowPostEmbedURLRecord.post_id)).scalar()
+
+    records = []
+    while offset < num_of_links:
+        links = db.query(RowPostEmbedURLRecord).limit(limit).offset(offset)
+
+        for link in links:
+            random.seed(link.unwound_url)
+            link_id = uuid.UUID(int=random.getrandbits(128))
+            is_link_exist = next((record for record in records if record["link_id"] == link_id), None)
+            if is_link_exist is None:
+                with open(link_csv_file_path, "a", newline="", encoding="utf-8") as file:
+                    fieldnames = ["link_id", "unwound_url"]
+                    writer = csv.DictWriter(file, fieldnames=fieldnames)
+                    writer.writerow({"link_id": link_id, "unwound_url": link.unwound_url})
+                record = {"post_id": link.post_id, "link_id": link_id, "unwound_url": link.unwound_url}
+                records.append(record)
+            with open(association_csv_file_path, "a", newline="", encoding="utf-8") as file:
+                fieldnames = ["post_id", "link_id"]
+                writer = csv.DictWriter(file, fieldnames=fieldnames)
+                writer.writerow({"post_id": link.post_id, "link_id": link_id})
+        offset += limit
+
+
 def generate_note_topic(db: Session):
-    note_csv_file_path = "./data/transformed/note.csv"
     output_csv_file_path = "./data/transformed/note_topic_association.csv"
     ai_service = get_ai_service()
+
+    if os.path.exists(output_csv_file_path):
+        os.remove(output_csv_file_path)
 
     records = []
     with open(output_csv_file_path, "w", newline="", encoding="utf-8", buffering=1) as file:
@@ -214,6 +272,7 @@ def generate_note_topic(db: Session):
                         )
                     records = []
                 print(index)
+            offset += limit
 
         for record in records:
             writer.writerow(

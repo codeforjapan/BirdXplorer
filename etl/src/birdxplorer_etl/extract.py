@@ -5,7 +5,13 @@ import stringcase
 from prefect import get_run_logger
 from sqlalchemy.orm import Session
 from lib.x.postlookup import lookup
-from birdxplorer_common.storage import RowNoteRecord, RowPostRecord, RowUserRecord, RowNoteStatusRecord
+from birdxplorer_common.storage import (
+    RowNoteRecord,
+    RowPostRecord,
+    RowUserRecord,
+    RowNoteStatusRecord,
+    RowPostEmbedURLRecord,
+)
 import settings
 
 
@@ -30,10 +36,12 @@ def extract_data(db: Session):
             break
 
         dateString = date.strftime("%Y/%m/%d")
-        # note_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/notes/notes-00000.tsv"
-        note_url = (
-            "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/notes_sample.tsv"
-        )
+        note_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/notes/notes-00000.tsv"
+        if settings.USE_DUMMY_DATA:
+            note_url = (
+                "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/notes_sample.tsv"
+            )
+
         logger.info(note_url)
         res = requests.get(note_url)
 
@@ -53,8 +61,10 @@ def extract_data(db: Session):
                     rows_to_add = []
             db.bulk_save_objects(rows_to_add)
 
-            # status_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/noteStatusHistory/noteStatusHistory-00000.tsv"
-            status_url = "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/noteStatus_sample.tsv"
+            status_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/noteStatusHistory/noteStatusHistory-00000.tsv"
+            if settings.USE_DUMMY_DATA:
+                status_url = "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/noteStatus_sample.tsv"
+
             logger.info(status_url)
             res = requests.get(status_url)
 
@@ -155,6 +165,17 @@ def extract_data(db: Session):
             lang=post["data"]["lang"],
         )
         db.add(db_post)
+
+        if "entities" in post["data"] and "urls" in post["data"]["entities"]:
+            for url in post["data"]["entities"]["urls"]:
+                if "unwound_url" in url:
+                    post_url = RowPostEmbedURLRecord(
+                        post_id=post["data"]["id"],
+                        url=url["url"] if url["url"] else None,
+                        expanded_url=url["expanded_url"] if url["expanded_url"] else None,
+                        unwound_url=url["unwound_url"] if url["unwound_url"] else None,
+                    )
+                    db.add(post_url)
         note.row_post_id = tweet_id
         db.commit()
         continue
