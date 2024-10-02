@@ -122,6 +122,40 @@ def test_posts_get_timestamp_out_of_range(client: TestClient, post_samples: List
     assert response.status_code == 422
 
 
+def test_posts_get_with_media_by_default(client: TestClient, post_samples: List[Post]) -> None:
+    response = client.get("/api/v1/data/posts/?postId=2234567890123456791")
+
+    assert response.status_code == 200
+    res_json_default = response.json()
+    assert res_json_default == {
+        "data": [json.loads(post_samples[1].model_dump_json())],
+        "meta": {"next": None, "prev": None},
+    }
+
+
+def test_posts_get_with_media_true(client: TestClient, post_samples: List[Post]) -> None:
+    response = client.get("/api/v1/data/posts/?postId=2234567890123456791&media=true")
+
+    assert response.status_code == 200
+    res_json_default = response.json()
+    assert res_json_default == {
+        "data": [json.loads(post_samples[1].model_dump_json())],
+        "meta": {"next": None, "prev": None},
+    }
+
+
+def test_posts_get_with_media_false(client: TestClient, post_samples: List[Post]) -> None:
+    expected_post = post_samples[1].model_copy(update={"media_details": []})
+    response = client.get("/api/v1/data/posts/?postId=2234567890123456791&media=false")
+
+    assert response.status_code == 200
+    res_json_default = response.json()
+    assert res_json_default == {
+        "data": [json.loads(expected_post.model_dump_json())],
+        "meta": {"next": None, "prev": None},
+    }
+
+
 def test_posts_search_by_text(client: TestClient, post_samples: List[Post]) -> None:
     response = client.get("/api/v1/data/posts/?searchText=https%3A%2F%2Ft.co%2Fxxxxxxxxxxx%2F")
     assert response.status_code == 200
