@@ -1,6 +1,6 @@
 from sqlalchemy import select, func, and_, Integer
 from sqlalchemy.orm import Session
-from birdxplorer_common.storage import RowNoteRecord, RowPostRecord, RowUserRecord
+from birdxplorer_common.storage import RowNoteRecord, RowPostRecord, RowUserRecord, RowNoteStatusRecord
 from birdxplorer_etl.lib.ai_model.ai_model_interface import get_ai_service
 from birdxplorer_etl.settings import (
     TARGET_NOTE_ESTIMATE_TOPIC_START_UNIX_MILLISECOND,
@@ -23,7 +23,7 @@ def transform_data(db: Session):
         os.remove("./data/transformed/note.csv")
     with open("./data/transformed/note.csv", "a") as file:
         writer = csv.writer(file)
-        writer.writerow(["note_id", "post_id", "summary", "created_at", "language"])
+        writer.writerow(["note_id", "post_id", "summary", "current_status", "created_at", "language"])
 
     offset = 0
     limit = 1000
@@ -49,14 +49,10 @@ def transform_data(db: Session):
                     RowNoteRecord.note_id,
                     RowNoteRecord.row_post_id,
                     RowNoteRecord.summary,
+                    RowNoteStatusRecord.current_status,
                     func.cast(RowNoteRecord.created_at_millis, Integer).label("created_at"),
                 )
-                .filter(
-                    and_(
-                        RowNoteRecord.created_at_millis <= TARGET_NOTE_ESTIMATE_TOPIC_END_UNIX_MILLISECOND,
-                        RowNoteRecord.created_at_millis >= TARGET_NOTE_ESTIMATE_TOPIC_START_UNIX_MILLISECOND,
-                    )
-                )
+                .join(RowNoteStatusRecord, RowNoteRecord.note_id == RowNoteStatusRecord.note_id)
                 .limit(limit)
                 .offset(offset)
             )
@@ -170,7 +166,7 @@ def transform_data(db: Session):
     return
 
 
-def generate_note_topic():
+def generate_note_topic(db: Session):
     note_csv_file_path = "./data/transformed/note.csv"
     output_csv_file_path = "./data/transformed/note_topic_association.csv"
     ai_service = get_ai_service()
@@ -181,17 +177,33 @@ def generate_note_topic():
         writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
 
-        with open(note_csv_file_path, newline="", encoding="utf-8") as csvfile:
-            reader = csv.DictReader(csvfile)
-            for index, row in enumerate(reader):
-                note_id = row["note_id"]
-                summary = row["summary"]
+        offset = 0
+        limit = 1000
+
+        num_of_users = db.query(func.count(RowUserRecord.user_id)).scalar()
+
+        while offset < num_of_users:
+            topicEstimationTargetNotes = db.execute(
+                select(RowNoteRecord.note_id, RowNoteRecord.row_post_id, RowNoteRecord.summary)
+                .filter(
+                    and_(
+                        RowNoteRecord.created_at_millis <= TARGET_NOTE_ESTIMATE_TOPIC_END_UNIX_MILLISECOND,
+                        RowNoteRecord.created_at_millis >= TARGET_NOTE_ESTIMATE_TOPIC_START_UNIX_MILLISECOND,
+                    )
+                )
+                .join(RowNoteStatusRecord, RowNoteRecord.note_id == RowNoteStatusRecord.note_id)
+                .limit(limit)
+                .offset(offset)
+            )
+
+            for index, note in enumerate(topicEstimationTargetNotes):
+                note_id = note.note_id
+                summary = note.summary
                 topics_info = ai_service.detect_topic(note_id, summary)
                 if topics_info:
                     for topic in topics_info.get("topics", []):
                         record = {"note_id": note_id, "topic_id": topic}
                         records.append(record)
-
                 if index % 100 == 0:
                     for record in records:
                         writer.writerow(
