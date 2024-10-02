@@ -11,7 +11,9 @@ from .models import (
     BinaryBool,
     LanguageIdentifier,
     LinkId,
+    Media,
     MediaDetails,
+    MediaType,
     NonNegativeInt,
     NoteId,
     NotesClassification,
@@ -25,8 +27,6 @@ from .models import (
     UserEnrollment,
     UserId,
     UserName,
-    XMedia,
-    XMediaType,
 )
 from .models import Link as LinkModel
 from .models import Note as NoteModel
@@ -120,18 +120,18 @@ class PostMediaAssociation(Base):
     __tablename__ = "post_media"
 
     post_id: Mapped[PostId] = mapped_column(ForeignKey("posts.post_id"), primary_key=True)
-    media_key: Mapped[str] = mapped_column(ForeignKey("x_medias.media_key"), primary_key=True)
+    media_key: Mapped[str] = mapped_column(ForeignKey("media.media_key"), primary_key=True)
 
     # このテーブルにアクセスした時点でほぼ間違いなく MediaRecord も必要なので一気に引っ張る
     media: Mapped["MediaRecord"] = relationship(back_populates="post_media_association", lazy="joined")
 
 
 class MediaRecord(Base):
-    __tablename__ = "x_medias"
+    __tablename__ = "media"
 
     media_key: Mapped[str] = mapped_column(primary_key=True)
 
-    type: Mapped[XMediaType] = mapped_column(nullable=False)
+    type: Mapped[MediaType] = mapped_column(nullable=False)
     url: Mapped[HttpUrl] = mapped_column(nullable=False)
     width: Mapped[NonNegativeInt] = mapped_column(nullable=False)
     height: Mapped[NonNegativeInt] = mapped_column(nullable=False)
@@ -268,8 +268,8 @@ class Storage:
         return self._engine
 
     @classmethod
-    def _media_record_to_model(cls, media_record: MediaRecord) -> XMedia:
-        return XMedia(
+    def _media_record_to_model(cls, media_record: MediaRecord) -> Media:
+        return Media(
             media_key=media_record.media_key,
             type=media_record.type,
             url=media_record.url,
