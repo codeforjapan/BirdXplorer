@@ -1,25 +1,22 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from enum import Enum
-from typing import (
-    Any,
-    Dict,
-    List,
-    Literal,
-    Optional,
-    Set,
-    Type,
-    TypeAlias,
-    TypeVar,
-    Union,
-)
+from random import Random
+from typing import Any, Dict, List, Literal, Optional, Type, TypeAlias, TypeVar, Union
+from uuid import UUID
 
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import ConfigDict, GetCoreSchemaHandler, HttpUrl, TypeAdapter
+from pydantic import (
+    ConfigDict,
+    GetCoreSchemaHandler,
+    HttpUrl,
+    TypeAdapter,
+    model_validator,
+)
 from pydantic.alias_generators import to_camel
+from pydantic.main import IncEx
 from pydantic_core import core_schema
 
-IncEx: TypeAlias = Union[Set[int], Set[str], Dict[int, Any], Dict[str, Any], None]
 StrT = TypeVar("StrT", bound="BaseString")
 IntT = TypeVar("IntT", bound="BaseInt")
 FloatT = TypeVar("FloatT", bound="BaseFloat")
@@ -478,8 +475,8 @@ class BaseModel(PydanticBaseModel):
         self,
         *,
         indent: int | None = None,
-        include: IncEx = None,
-        exclude: IncEx = None,
+        include: IncEx | None = None,
+        exclude: IncEx | None = None,
         context: Dict[str, Any] | None = None,
         by_alias: bool = True,
         exclude_unset: bool = False,
@@ -689,6 +686,68 @@ class XUser(BaseModel):
 MediaDetails: TypeAlias = List[HttpUrl] | None
 
 
+class LinkId(UUID):
+    """
+    >>> LinkId("53dc4ed6-fc9b-54ef-1afa-90f1125098c5")
+    LinkId('53dc4ed6-fc9b-54ef-1afa-90f1125098c5')
+    >>> LinkId(UUID("53dc4ed6-fc9b-54ef-1afa-90f1125098c5"))
+    LinkId('53dc4ed6-fc9b-54ef-1afa-90f1125098c5')
+    """
+
+    def __init__(
+        self,
+        hex: str | None = None,
+        int: int | None = None,
+    ) -> None:
+        if isinstance(hex, UUID):
+            hex = str(hex)
+        super().__init__(hex, int=int)
+
+    @classmethod
+    def from_url(cls, url: HttpUrl) -> "LinkId":
+        """
+        >>> LinkId.from_url("https://example.com/")
+        LinkId('d5d15194-6574-0c01-8f6f-15abd72b2cf6')
+        """
+        random_number_generator = Random()
+        random_number_generator.seed(str(url).encode("utf-8"))
+        return LinkId(int=random_number_generator.getrandbits(128))
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, _source_type: Any, _handler: GetCoreSchemaHandler) -> core_schema.CoreSchema:
+        return core_schema.no_info_plain_validator_function(
+            cls.validate,
+            serialization=core_schema.plain_serializer_function_ser_schema(cls.serialize, when_used="json"),
+        )
+
+    @classmethod
+    def validate(cls, v: Any) -> "LinkId":
+        return cls(v)
+
+    def serialize(self) -> str:
+        return str(self)
+
+
+class Link(BaseModel):
+    """
+    >>> Link.model_validate_json('{"linkId": "d5d15194-6574-0c01-8f6f-15abd72b2cf6", "url": "https://example.com"}')
+    Link(link_id=LinkId('d5d15194-6574-0c01-8f6f-15abd72b2cf6'), url=Url('https://example.com/'))
+    >>> Link(url="https://example.com/")
+    Link(link_id=LinkId('d5d15194-6574-0c01-8f6f-15abd72b2cf6'), url=Url('https://example.com/'))
+    >>> Link(link_id=UUID("d5d15194-6574-0c01-8f6f-15abd72b2cf6"), url="https://example.com/")
+    Link(link_id=LinkId('d5d15194-6574-0c01-8f6f-15abd72b2cf6'), url=Url('https://example.com/'))
+    """  # noqa: E501
+
+    link_id: LinkId
+    url: HttpUrl
+
+    @model_validator(mode="before")
+    def validate_link_id(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        if "link_id" not in values:
+            values["link_id"] = LinkId.from_url(values["url"])
+        return values
+
+
 class Post(BaseModel):
     post_id: PostId
     link: Optional[HttpUrl] = None
@@ -700,6 +759,7 @@ class Post(BaseModel):
     like_count: NonNegativeInt
     repost_count: NonNegativeInt
     impression_count: NonNegativeInt
+    links: List[Link] = []
 
 
 class PaginationMeta(BaseModel):
