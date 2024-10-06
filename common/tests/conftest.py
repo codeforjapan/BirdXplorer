@@ -145,6 +145,7 @@ def note_samples(note_factory: NoteFactory, topic_samples: List[Topic]) -> Gener
             topics=[topic_samples[0]],
             language="ja",
             summary="要約文1",
+            current_status=None,
             created_at=1152921600000,
         ),
         note_factory.build(
@@ -153,6 +154,7 @@ def note_samples(note_factory: NoteFactory, topic_samples: List[Topic]) -> Gener
             topics=[],
             language="en",
             summary="summary2",
+            current_status=None,
             created_at=1152921601000,
         ),
         note_factory.build(
@@ -161,6 +163,7 @@ def note_samples(note_factory: NoteFactory, topic_samples: List[Topic]) -> Gener
             topics=[topic_samples[1]],
             language="en",
             summary="summary3",
+            current_status=None,
             created_at=1152921602000,
         ),
         note_factory.build(
@@ -169,6 +172,7 @@ def note_samples(note_factory: NoteFactory, topic_samples: List[Topic]) -> Gener
             topics=[topic_samples[0], topic_samples[1], topic_samples[2]],
             language="en",
             summary="summary4",
+            current_status=None,
             created_at=1152921603000,
         ),
         note_factory.build(
@@ -177,6 +181,7 @@ def note_samples(note_factory: NoteFactory, topic_samples: List[Topic]) -> Gener
             topics=[topic_samples[0]],
             language="en",
             summary="summary5",
+            current_status=None,
             created_at=1152921604000,
         ),
         note_factory.build(
@@ -185,6 +190,7 @@ def note_samples(note_factory: NoteFactory, topic_samples: List[Topic]) -> Gener
             topics=[topic_samples[0]],
             language="en",
             summary="summary6_empty_post_id",
+            current_status=None,
             created_at=1152921604000,
         ),
     ]

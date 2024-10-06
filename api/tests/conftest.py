@@ -110,6 +110,7 @@ def note_samples(note_factory: NoteFactory, topic_samples: List[Topic]) -> Gener
             topics=[topic_samples[0]],
             language="ja",
             summary="要約文1",
+            current_status="NEEDS_MORE_RATINGS",
             created_at=1152921600000,
         ),
         note_factory.build(
@@ -118,6 +119,7 @@ def note_samples(note_factory: NoteFactory, topic_samples: List[Topic]) -> Gener
             topics=[],
             language="en",
             summary="summary2",
+            current_status="NEEDS_MORE_RATINGS",
             created_at=1152921601000,
         ),
         note_factory.build(
@@ -126,6 +128,7 @@ def note_samples(note_factory: NoteFactory, topic_samples: List[Topic]) -> Gener
             topics=[topic_samples[1]],
             language="en",
             summary="summary3",
+            current_status="",
             created_at=1152921602000,
         ),
         note_factory.build(
@@ -134,6 +137,7 @@ def note_samples(note_factory: NoteFactory, topic_samples: List[Topic]) -> Gener
             topics=[topic_samples[0], topic_samples[1], topic_samples[2]],
             language="en",
             summary="summary4",
+            current_status="CURRENTLY_RATED_HELPFUL",
             created_at=1152921603000,
         ),
         note_factory.build(
@@ -142,6 +146,7 @@ def note_samples(note_factory: NoteFactory, topic_samples: List[Topic]) -> Gener
             topics=[topic_samples[0]],
             language="en",
             summary="summary5",
+            current_status="CURRENTLY_RATED_HELPFUL",
             created_at=1152921604000,
         ),
     ]
@@ -285,6 +290,7 @@ def mock_storage(
         created_at_to: Union[None, TwitterTimestamp] = None,
         topic_ids: Union[List[TopicId], None] = None,
         post_ids: Union[List[PostId], None] = None,
+        current_status: Union[None, List[str]] = None,
         language: Union[LanguageIdentifier, None] = None,
     ) -> Generator[Note, None, None]:
         for note in note_samples:
@@ -297,6 +303,8 @@ def mock_storage(
             if topic_ids is not None and not set(topic_ids).issubset({topic.topic_id for topic in note.topics}):
                 continue
             if post_ids is not None and note.post_id not in post_ids:
+                continue
+            if current_status is not None and note.current_status not in current_status:
                 continue
             if language is not None and note.language != language:
                 continue
