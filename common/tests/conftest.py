@@ -128,10 +128,10 @@ def topic_samples(topic_factory: TopicFactory) -> Generator[List[Topic], None, N
 @fixture
 def link_samples(link_factory: LinkFactory) -> Generator[List[Link], None, None]:
     links = [
-        link_factory.build(link_id=0, canonical_url="https://t.co/xxxxxxxxxxx/", short_url="https://example.com/sh0"),
-        link_factory.build(link_id=1, canonical_url="https://t.co/yyyyyyyyyyy/", short_url="https://example.com/sh1"),
-        link_factory.build(link_id=2, canonical_url="https://t.co/zzzzzzzzzzz/", short_url="https://example.com/sh2"),
-        link_factory.build(link_id=3, canonical_url="https://t.co/wwwwwwwwwww/", short_url="https://example.com/sh3"),
+        link_factory.build(link_id="9f56ee4a-6b36-b79c-d6ca-67865e54bbd5", url="https://example.com/sh0"),
+        link_factory.build(link_id="f5b0ac79-20fe-9718-4a40-6030bb62d156", url="https://example.com/sh1"),
+        link_factory.build(link_id="76a0ac4a-a20c-b1f4-1906-d00e2e8f8bf8", url="https://example.com/sh2"),
+        link_factory.build(link_id="6c352be8-eca3-0d96-55bf-a9bbef1c0fc2", url="https://example.com/sh3"),
     ]
     yield links
 
@@ -416,7 +416,7 @@ def link_records_sample(
     link_samples: List[Link],
     engine_for_test: Engine,
 ) -> Generator[List[LinkRecord], None, None]:
-    res = [LinkRecord(link_id=d.link_id, canonical_url=d.canonical_url, short_url=d.short_url) for d in link_samples]
+    res = [LinkRecord(link_id=d.link_id, url=d.url) for d in link_samples]
     with Session(engine_for_test) as sess:
         sess.add_all(res)
         sess.commit()

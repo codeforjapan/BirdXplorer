@@ -5,7 +5,7 @@ from pydantic import AnyUrl, HttpUrl
 from sqlalchemy import ForeignKey, create_engine, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
-from sqlalchemy.types import CHAR, DECIMAL, JSON, Integer, String
+from sqlalchemy.types import CHAR, DECIMAL, JSON, Integer, String, Uuid
 
 from .models import BinaryBool, LanguageIdentifier
 from .models import Link as LinkModel
@@ -36,7 +36,7 @@ register_adapter(AnyUrl, adapt_pydantic_http_url)
 
 class Base(DeclarativeBase):
     type_annotation_map = {
-        LinkId: Integer,
+        LinkId: Uuid,
         TopicId: Integer,
         TopicLabel: JSON,
         NoteId: String,
@@ -95,8 +95,7 @@ class LinkRecord(Base):
     __tablename__ = "links"
 
     link_id: Mapped[LinkId] = mapped_column(primary_key=True)
-    canonical_url: Mapped[HttpUrl] = mapped_column(nullable=False, index=True)
-    short_url: Mapped[HttpUrl] = mapped_column(nullable=False, index=True)
+    url: Mapped[HttpUrl] = mapped_column(nullable=False, index=True)
 
 
 class PostLinkAssociation(Base):
@@ -216,10 +215,7 @@ class Storage:
             like_count=post_record.like_count,
             repost_count=post_record.repost_count,
             impression_count=post_record.impression_count,
-            links=[
-                LinkModel(link_id=link.link_id, canonical_url=link.link.canonical_url, short_url=link.link.short_url)
-                for link in post_record.links
-            ],
+            links=[LinkModel(link_id=link.link_id, url=link.link.url) for link in post_record.links],
         )
 
     def get_user_enrollment_by_participant_id(self, participant_id: ParticipantId) -> UserEnrollment:
