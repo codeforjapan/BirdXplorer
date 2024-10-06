@@ -14,6 +14,7 @@ from pytest import fixture
 from birdxplorer_common.exceptions import UserEnrollmentNotFoundError
 from birdxplorer_common.models import (
     LanguageIdentifier,
+    Link,
     Note,
     NoteId,
     ParticipantId,
@@ -66,6 +67,11 @@ class PostFactory(ModelFactory[Post]):
     __model__ = Post
 
 
+@register_fixture(name="link_factory")
+class LinkFactory(ModelFactory[Link]):
+    __model__ = Link
+
+
 @fixture
 def user_enrollment_samples(
     user_enrollment_factory: UserEnrollmentFactory,
@@ -82,6 +88,17 @@ def topic_samples(topic_factory: TopicFactory) -> Generator[List[Topic], None, N
         topic_factory.build(topic_id=3, label={"en": "topic3", "ja": "トピック3"}, reference_count=0),
     ]
     yield topics
+
+
+@fixture
+def link_samples(link_factory: LinkFactory) -> Generator[List[Link], None, None]:
+    links = [
+        link_factory.build(link_id="9f56ee4a-6b36-b79c-d6ca-67865e54bbd5", url="https://example.com/sh0"),
+        link_factory.build(link_id="f5b0ac79-20fe-9718-4a40-6030bb62d156", url="https://example.com/sh1"),
+        link_factory.build(link_id="76a0ac4a-a20c-b1f4-1906-d00e2e8f8bf8", url="https://example.com/sh2"),
+        link_factory.build(link_id="6c352be8-eca3-0d96-55bf-a9bbef1c0fc2", url="https://example.com/sh3"),
+    ]
+    yield links
 
 
 @fixture
@@ -165,10 +182,13 @@ def x_user_samples(x_user_factory: XUserFactory) -> Generator[List[XUser], None,
 
 
 @fixture
-def post_samples(post_factory: PostFactory, x_user_samples: List[XUser]) -> Generator[List[Post], None, None]:
+def post_samples(
+    post_factory: PostFactory, x_user_samples: List[XUser], link_samples: List[Link]
+) -> Generator[List[Post], None, None]:
     posts = [
         post_factory.build(
             post_id="2234567890123456781",
+            link=None,
             x_user_id="1234567890123456781",
             x_user=x_user_samples[0],
             text="""\
@@ -180,9 +200,11 @@ https://t.co/xxxxxxxxxxx/ #プロジェクト #新発売 #Tech""",
             like_count=10,
             repost_count=20,
             impression_count=30,
+            links=[link_samples[0]],
         ),
         post_factory.build(
             post_id="2234567890123456791",
+            link=None,
             x_user_id="1234567890123456781",
             x_user=x_user_samples[0],
             text="""\
@@ -194,18 +216,47 @@ https://t.co/yyyyyyyyyyy/ #学び #自己啓発""",
             like_count=10,
             repost_count=20,
             impression_count=30,
+            links=[link_samples[1]],
         ),
         post_factory.build(
             post_id="2234567890123456801",
+            link=None,
             x_user_id="1234567890123456782",
             x_user=x_user_samples[1],
             text="""\
-次の休暇はここに決めた！🌴🏖️ 見てみて～ https://t.co/xxxxxxxxxxx/ #旅行 #バケーション""",
+次の休暇はここに決めた！🌴🏖️ 見てみて～ https://t.co/xxxxxxxxxxx/ https://t.co/wwwwwwwwwww/ #旅行 #バケーション""",
             media_details=None,
             created_at=1154921800000,
             like_count=10,
             repost_count=20,
             impression_count=30,
+            links=[link_samples[0], link_samples[3]],
+        ),
+        post_factory.build(
+            post_id="2234567890123456811",
+            link=None,
+            x_user_id="1234567890123456782",
+            x_user=x_user_samples[1],
+            text="https://t.co/zzzzzzzzzzz/ https://t.co/wwwwwwwwwww/",
+            media_details=None,
+            created_at=1154922900000,
+            like_count=10,
+            repost_count=20,
+            impression_count=30,
+            links=[link_samples[2], link_samples[3]],
+        ),
+        post_factory.build(
+            post_id="2234567890123456821",
+            link=None,
+            x_user_id="1234567890123456783",
+            x_user=x_user_samples[2],
+            text="empty",
+            media_details=None,
+            created_at=1154923900000,
+            like_count=10,
+            repost_count=20,
+            impression_count=30,
+            links=[],
         ),
     ]
     yield posts
