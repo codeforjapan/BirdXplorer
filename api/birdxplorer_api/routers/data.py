@@ -103,6 +103,7 @@ def gen_router(storage: Storage) -> APIRouter:
         offset: int = Query(default=0, ge=0),
         limit: int = Query(default=100, gt=0, le=1000),
         search_text: Union[None, str] = Query(default=None),
+        search_url: Union[None, HttpUrl] = Query(default=None),
     ) -> PostListResponse:
         if created_at_from is not None and isinstance(created_at_from, str):
             created_at_from = ensure_twitter_timestamp(created_at_from)
@@ -115,6 +116,7 @@ def gen_router(storage: Storage) -> APIRouter:
                 start=created_at_from,
                 end=created_at_to,
                 search_text=search_text,
+                search_url=search_url,
                 offset=offset,
                 limit=limit,
             )
@@ -125,6 +127,7 @@ def gen_router(storage: Storage) -> APIRouter:
             start=created_at_from,
             end=created_at_to,
             search_text=search_text,
+            search_url=search_url,
         )
 
         for post in posts:
