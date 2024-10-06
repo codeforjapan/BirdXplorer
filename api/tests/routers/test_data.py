@@ -36,7 +36,10 @@ def test_posts_get_limit_and_offset(client: TestClient, post_samples: List[Post]
     res_json = response.json()
     assert res_json == {
         "data": [json.loads(d.model_dump_json()) for d in post_samples[1:3]],
-        "meta": {"next": None, "prev": "http://testserver/api/v1/data/posts?offset=0&limit=2"},
+        "meta": {
+            "next": "http://testserver/api/v1/data/posts?offset=3&limit=2",
+            "prev": "http://testserver/api/v1/data/posts?offset=0&limit=2",
+        },
     }
 
 
@@ -72,7 +75,7 @@ def test_posts_get_has_created_at_filter_start(client: TestClient, post_samples:
     assert response.status_code == 200
     res_json = response.json()
     assert res_json == {
-        "data": [json.loads(post_samples[i].model_dump_json()) for i in (1, 2)],
+        "data": [json.loads(post_samples[i].model_dump_json()) for i in (1, 2, 3, 4)],
         "meta": {"next": None, "prev": None},
     }
 
@@ -99,7 +102,7 @@ def test_posts_get_created_at_start_filter_accepts_integer(client: TestClient, p
     assert response.status_code == 200
     res_json = response.json()
     assert res_json == {
-        "data": [json.loads(post_samples[i].model_dump_json()) for i in (1, 2)],
+        "data": [json.loads(post_samples[i].model_dump_json()) for i in (1, 2, 3, 4)],
         "meta": {"next": None, "prev": None},
     }
 
