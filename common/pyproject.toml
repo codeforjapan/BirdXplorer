@@ -30,6 +30,7 @@ dependencies = [
     "sqlalchemy",
     "pydantic_settings",
     "JSON-log-formatter",
+    "ulid-py",
 ]
 
 [project.urls]
