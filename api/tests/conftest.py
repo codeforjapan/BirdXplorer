@@ -9,12 +9,14 @@ from fastapi.testclient import TestClient
 from polyfactory import Use
 from polyfactory.factories.pydantic_factory import ModelFactory
 from polyfactory.pytest_plugin import register_fixture
+from pydantic import HttpUrl
 from pytest import fixture
 
 from birdxplorer_common.exceptions import UserEnrollmentNotFoundError
 from birdxplorer_common.models import (
     LanguageIdentifier,
     Link,
+    LinkId,
     Note,
     NoteId,
     ParticipantId,
@@ -263,6 +265,7 @@ def mock_storage(
     topic_samples: List[Topic],
     post_samples: List[Post],
     note_samples: List[Note],
+    link_samples: List[Link],
 ) -> Generator[MagicMock, None, None]:
     mock = MagicMock(spec=Storage)
 
@@ -311,11 +314,17 @@ def mock_storage(
         start: Union[TwitterTimestamp, None] = None,
         end: Union[TwitterTimestamp, None] = None,
         search_text: Union[str, None] = None,
+        search_url: Union[HttpUrl, None] = None,
         offset: Union[int, None] = None,
         limit: Union[int, None] = None,
     ) -> Generator[Post, None, None]:
         gen_count = 0
         actual_gen_count = 0
+        url_id: LinkId | None = None
+        if search_url is not None:
+            url_candidates = [link.link_id for link in link_samples if link.url == search_url]
+            if len(url_candidates) > 0:
+                url_id = url_candidates[0]
         for idx, post in enumerate(post_samples):
             if limit is not None and actual_gen_count >= limit:
                 break
@@ -331,6 +340,8 @@ def mock_storage(
                 continue
             if search_text is not None and search_text not in post.text:
                 continue
+            if search_url is not None and url_id not in [link.link_id for link in post.links]:
+                continue
             gen_count += 1
             if offset is not None and gen_count <= offset:
                 continue
@@ -345,8 +356,9 @@ def mock_storage(
         start: Union[TwitterTimestamp, None] = None,
         end: Union[TwitterTimestamp, None] = None,
         search_text: Union[str, None] = None,
+        search_url: Union[str, None] = None,
     ) -> int:
-        return len(list(_get_posts(post_ids, note_ids, start, end, search_text)))
+        return len(list(_get_posts(post_ids, note_ids, start, end, search_text, search_url)))
 
     mock.get_number_of_posts.side_effect = _get_number_of_posts
 
