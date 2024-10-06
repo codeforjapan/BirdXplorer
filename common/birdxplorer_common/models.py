@@ -6,9 +6,9 @@ from typing import Any, Dict, List, Literal, Optional, Type, TypeAlias, TypeVar,
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict, GetCoreSchemaHandler, HttpUrl, TypeAdapter
 from pydantic.alias_generators import to_camel
+from pydantic.main import IncEx
 from pydantic_core import core_schema
 
-IncEx: TypeAlias = "set[int] | set[str] | dict[int, IncEx] | dict[str, IncEx] | None"
 StrT = TypeVar("StrT", bound="BaseString")
 IntT = TypeVar("IntT", bound="BaseInt")
 FloatT = TypeVar("FloatT", bound="BaseFloat")
@@ -467,8 +467,8 @@ class BaseModel(PydanticBaseModel):
         self,
         *,
         indent: int | None = None,
-        include: IncEx = None,
-        exclude: IncEx = None,
+        include: IncEx | None = None,
+        exclude: IncEx | None = None,
         context: Dict[str, Any] | None = None,
         by_alias: bool = True,
         exclude_unset: bool = False,
