@@ -5,7 +5,13 @@ import stringcase
 from prefect import get_run_logger
 from sqlalchemy.orm import Session
 from lib.x.postlookup import lookup
-from birdxplorer_common.storage import RowNoteRecord, RowPostRecord, RowUserRecord
+from birdxplorer_common.storage import (
+    RowNoteRecord,
+    RowPostRecord,
+    RowUserRecord,
+    RowNoteStatusRecord,
+    RowPostEmbedURLRecord,
+)
 import settings
 
 
@@ -28,9 +34,16 @@ def extract_data(db: Session):
             > datetime.timestamp(date) - 24 * 60 * 60 * settings.COMMUNITY_NOTE_DAYS_AGO
         ):
             break
-        url = f'https://ton.twimg.com/birdwatch-public-data/{date.strftime("%Y/%m/%d")}/notes/notes-00000.tsv'
-        logger.info(url)
-        res = requests.get(url)
+
+        dateString = date.strftime("%Y/%m/%d")
+        note_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/notes/notes-00000.tsv"
+        if settings.USE_DUMMY_DATA:
+            note_url = (
+                "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/notes_sample.tsv"
+            )
+
+        logger.info(note_url)
+        res = requests.get(note_url)
 
         if res.status_code == 200:
             # res.contentをdbのNoteテーブル
@@ -39,13 +52,43 @@ def extract_data(db: Session):
             reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
 
             rows_to_add = []
-            for row in reader:
+            for index, row in enumerate(reader):
                 if db.query(RowNoteRecord).filter(RowNoteRecord.note_id == row["note_id"]).first():
                     continue
                 rows_to_add.append(RowNoteRecord(**row))
+                if index % 1000 == 0:
+                    db.bulk_save_objects(rows_to_add)
+                    rows_to_add = []
             db.bulk_save_objects(rows_to_add)
 
-            break
+            status_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/noteStatusHistory/noteStatusHistory-00000.tsv"
+            if settings.USE_DUMMY_DATA:
+                status_url = "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/noteStatus_sample.tsv"
+
+            logger.info(status_url)
+            res = requests.get(status_url)
+
+            if res.status_code == 200:
+                tsv_data = res.content.decode("utf-8").splitlines()
+                reader = csv.DictReader(tsv_data, delimiter="\t")
+                reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
+
+                rows_to_add = []
+                for index, row in enumerate(reader):
+                    for key, value in list(row.items()):
+                        if value == "":
+                            row[key] = None
+                    status = db.query(RowNoteStatusRecord).filter(RowNoteStatusRecord.note_id == row["note_id"]).first()
+                    if status is None or status.created_at_millis > int(datetime.now().timestamp() * 1000):
+                        db.query(RowNoteStatusRecord).filter(RowNoteStatusRecord.note_id == row["note_id"]).delete()
+                        rows_to_add.append(RowNoteStatusRecord(**row))
+                    if index % 1000 == 0:
+                        db.bulk_save_objects(rows_to_add)
+                        rows_to_add = []
+                db.bulk_save_objects(rows_to_add)
+
+                break
+
         date = date - timedelta(days=1)
 
     db.commit()
@@ -122,6 +165,17 @@ def extract_data(db: Session):
             lang=post["data"]["lang"],
         )
         db.add(db_post)
+
+        if "entities" in post["data"] and "urls" in post["data"]["entities"]:
+            for url in post["data"]["entities"]["urls"]:
+                if "unwound_url" in url:
+                    post_url = RowPostEmbedURLRecord(
+                        post_id=post["data"]["id"],
+                        url=url["url"] if url["url"] else None,
+                        expanded_url=url["expanded_url"] if url["expanded_url"] else None,
+                        unwound_url=url["unwound_url"] if url["unwound_url"] else None,
+                    )
+                    db.add(post_url)
         note.row_post_id = tweet_id
         db.commit()
         continue

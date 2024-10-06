@@ -665,6 +665,7 @@ class Note(BaseModel):
     language: LanguageIdentifier
     topics: List[Topic]
     summary: SummaryString
+    current_status: str | None
     created_at: TwitterTimestamp
 
 
