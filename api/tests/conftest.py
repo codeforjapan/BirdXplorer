@@ -356,7 +356,7 @@ def mock_storage(
         start: Union[TwitterTimestamp, None] = None,
         end: Union[TwitterTimestamp, None] = None,
         search_text: Union[str, None] = None,
-        search_url: Union[str, None] = None,
+        search_url: Union[HttpUrl, None] = None,
     ) -> int:
         return len(list(_get_posts(post_ids, note_ids, start, end, search_text, search_url)))
 
