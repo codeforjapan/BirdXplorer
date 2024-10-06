@@ -1,6 +1,7 @@
 from typing import Any, Dict, List
 
 import pytest
+from pydantic import HttpUrl
 from sqlalchemy.engine import Engine
 
 from birdxplorer_common.models import (
@@ -41,6 +42,7 @@ def test_get_topic_list(
         [dict(start=TwitterTimestamp.from_int(1153921700000)), [1, 2, 3, 4]],
         [dict(end=TwitterTimestamp.from_int(1153921700000)), [0]],
         [dict(search_text="https://t.co/xxxxxxxxxxx/"), [0, 2]],
+        [dict(search_url=HttpUrl("https://example.com/sh3")), [2, 3]],
         [dict(note_ids=[NoteId.from_str("1234567890123456781")]), [0]],
         [dict(offset=1, limit=1, search_text="https://t.co/xxxxxxxxxxx/"), [2]],
     ],
@@ -70,6 +72,7 @@ def test_get_post(
         [dict(start=TwitterTimestamp.from_int(1153921700000)), [1, 2, 3, 4]],
         [dict(end=TwitterTimestamp.from_int(1153921700000)), [0]],
         [dict(search_text="https://t.co/xxxxxxxxxxx/"), [0, 2]],
+        [dict(search_url=HttpUrl("https://example.com/sh3")), [2, 3]],
         [dict(note_ids=[NoteId.from_str("1234567890123456781")]), [0]],
     ],
 )
