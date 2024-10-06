@@ -132,6 +132,16 @@ def test_posts_search_by_text(client: TestClient, post_samples: List[Post]) -> N
     }
 
 
+def test_posts_search_by_url(client: TestClient, post_samples: List[Post]) -> None:
+    response = client.get("/api/v1/data/posts/?searchUrl=https%3A%2F%2Fexample.com%2Fsh3")
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json == {
+        "data": [json.loads(post_samples[i].model_dump_json()) for i in (2, 3)],
+        "meta": {"next": None, "prev": None},
+    }
+
+
 def test_notes_get(client: TestClient, note_samples: List[Note]) -> None:
     response = client.get("/api/v1/data/notes")
     assert response.status_code == 200

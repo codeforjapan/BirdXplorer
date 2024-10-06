@@ -337,6 +337,7 @@ class Storage:
         start: Union[TwitterTimestamp, None] = None,
         end: Union[TwitterTimestamp, None] = None,
         search_text: Union[str, None] = None,
+        search_url: Union[HttpUrl, None] = None,
         offset: Union[int, None] = None,
         limit: int = 100,
     ) -> Generator[PostModel, None, None]:
@@ -354,6 +355,12 @@ class Storage:
                 query = query.filter(PostRecord.created_at < end)
             if search_text is not None:
                 query = query.filter(PostRecord.text.like(f"%{search_text}%"))
+            if search_url is not None:
+                query = (
+                    query.join(PostLinkAssociation, PostLinkAssociation.post_id == PostRecord.post_id)
+                    .join(LinkRecord, LinkRecord.link_id == PostLinkAssociation.link_id)
+                    .filter(LinkRecord.url == search_url)
+                )
             if offset is not None:
                 query = query.offset(offset)
             query = query.limit(limit)
@@ -367,6 +374,7 @@ class Storage:
         start: Union[TwitterTimestamp, None] = None,
         end: Union[TwitterTimestamp, None] = None,
         search_text: Union[str, None] = None,
+        search_url: Union[HttpUrl, None] = None,
     ) -> int:
         with Session(self.engine) as sess:
             query = sess.query(PostRecord)
@@ -382,6 +390,12 @@ class Storage:
                 query = query.filter(PostRecord.created_at < end)
             if search_text is not None:
                 query = query.filter(PostRecord.text.like(f"%{search_text}%"))
+            if search_url is not None:
+                query = (
+                    query.join(PostLinkAssociation, PostLinkAssociation.post_id == PostRecord.post_id)
+                    .join(LinkRecord, LinkRecord.link_id == PostLinkAssociation.link_id)
+                    .filter(LinkRecord.url == search_url)
+                )
             return query.count()
 
 
