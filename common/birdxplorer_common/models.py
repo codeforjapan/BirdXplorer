@@ -17,17 +17,14 @@ from typing import (
 from uuid import UUID
 
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import (
-    ConfigDict,
-    GetCoreSchemaHandler,
-    HttpUrl,
-    TypeAdapter,
-    model_validator,
-)
+from pydantic import ConfigDict
 from pydantic import Field as PydanticField
+from pydantic import GetCoreSchemaHandler, HttpUrl, TypeAdapter, model_validator
 from pydantic.alias_generators import to_camel
+from pydantic.main import IncEx
 from pydantic_core import core_schema
 
+StrT = TypeVar("StrT", bound="BaseString")
 IntT = TypeVar("IntT", bound="BaseInt")
 FloatT = TypeVar("FloatT", bound="BaseFloat")
 

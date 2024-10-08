@@ -45,7 +45,7 @@ def test_get_topic_list(
         [dict(search_url=HttpUrl("https://example.com/sh3")), [2, 3]],
         [dict(note_ids=[NoteId.from_str("1234567890123456781")]), [0]],
         [dict(offset=1, limit=1, search_text="https://t.co/xxxxxxxxxxx/"), [2]],
-        [dict(with_media=True), [0, 1, 2]],
+        [dict(with_media=True), [0, 1, 2, 3, 4]],
         [dict(post_ids=[PostId.from_str("2234567890123456781")], with_media=False), [0]],
     ],
 )

@@ -3,6 +3,17 @@ import random
 from collections.abc import Generator
 from typing import List, Type
 
+from dotenv import load_dotenv
+from polyfactory import Use
+from polyfactory.factories.pydantic_factory import ModelFactory
+from polyfactory.pytest_plugin import register_fixture
+from pytest import fixture
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
+from sqlalchemy.sql import text
+
 from birdxplorer_common.models import (
     Link,
     Media,
@@ -26,16 +37,6 @@ from birdxplorer_common.storage import (
     TopicRecord,
     XUserRecord,
 )
-from dotenv import load_dotenv
-from polyfactory import Use
-from polyfactory.factories.pydantic_factory import ModelFactory
-from polyfactory.pytest_plugin import register_fixture
-from pytest import fixture
-from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
-from sqlalchemy.sql import text
 
 
 def gen_random_twitter_timestamp() -> int:
@@ -499,13 +500,13 @@ def post_records_sample(
                 post_id=post.post_id,
                 user_id=post.x_user_id,
                 text=post.text,
-                media_details=post.media_details,
                 created_at=post.created_at,
                 like_count=post.like_count,
                 repost_count=post.repost_count,
                 impression_count=post.impression_count,
             )
             sess.add(inst)
+
             for link in post.links:
                 post_link_assoc = PostLinkAssociation(link_id=link.link_id, post_id=inst.post_id)
                 sess.add(post_link_assoc)
