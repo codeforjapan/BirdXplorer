@@ -2,17 +2,24 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from enum import Enum
 from random import Random
-from typing import Any, Dict, List, Literal, Optional, Type, TypeAlias, TypeVar, Union
+from typing import (
+    Annotated,
+    Any,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Type,
+    TypeAlias,
+    TypeVar,
+    Union,
+)
 from uuid import UUID
 
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import (
-    ConfigDict,
-    GetCoreSchemaHandler,
-    HttpUrl,
-    TypeAdapter,
-    model_validator,
-)
+from pydantic import ConfigDict
+from pydantic import Field as PydanticField
+from pydantic import GetCoreSchemaHandler, HttpUrl, TypeAdapter, model_validator, computed_field
 from pydantic.alias_generators import to_camel
 from pydantic.main import IncEx
 from pydantic_core import core_schema
@@ -683,7 +690,20 @@ class XUser(BaseModel):
     following_count: NonNegativeInt
 
 
-MediaDetails: TypeAlias = List[HttpUrl] | None
+# ref: https://developer.x.com/en/docs/x-api/data-dictionary/object-model/media
+MediaType: TypeAlias = Literal["photo", "video", "animated_gif"]
+
+
+class Media(BaseModel):
+    media_key: str
+
+    type: MediaType
+    url: HttpUrl
+    width: NonNegativeInt
+    height: NonNegativeInt
+
+
+MediaDetails: TypeAlias = List[Media]
 
 
 class LinkId(UUID):
@@ -750,16 +770,38 @@ class Link(BaseModel):
 
 class Post(BaseModel):
     post_id: PostId
-    link: Optional[HttpUrl] = None
     x_user_id: UserId
     x_user: XUser
     text: str
-    media_details: MediaDetails = None
+    media_details: Annotated[MediaDetails, PydanticField(default_factory=lambda: [])]
     created_at: TwitterTimestamp
     like_count: NonNegativeInt
     repost_count: NonNegativeInt
     impression_count: NonNegativeInt
     links: List[Link] = []
+
+    @property
+    @computed_field
+    def link(self) -> HttpUrl:
+        """
+        PostのX上でのURLを返す。
+
+        Examples
+        --------
+        >>> post = Post(post_id="1234567890123456789",
+                        x_user_id="1234567890123456789",
+                        x_user=XUser(user_id="1234567890123456789",
+                                     name="test",
+                                     profile_image="https://x.com/test"),
+                        text="test",
+                        created_at=1288834974657,
+                        like_count=1,
+                        repost_count=1,
+                        impression_count=1)
+        >>> post.link
+        HttpUrl('https://x.com/test/status/1234567890123456789')
+        """
+        return HttpUrl(f"https://x.com/{self.x_user.name}/status/{self.post_id}")
 
 
 class PaginationMeta(BaseModel):

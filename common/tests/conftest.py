@@ -16,6 +16,7 @@ from sqlalchemy.sql import text
 
 from birdxplorer_common.models import (
     Link,
+    Media,
     Note,
     Post,
     Topic,
@@ -27,9 +28,11 @@ from birdxplorer_common.settings import GlobalSettings, PostgresStorageSettings
 from birdxplorer_common.storage import (
     Base,
     LinkRecord,
+    MediaRecord,
     NoteRecord,
     NoteTopicAssociation,
     PostLinkAssociation,
+    PostMediaAssociation,
     PostRecord,
     TopicRecord,
     XUserRecord,
@@ -95,6 +98,11 @@ class TopicFactory(ModelFactory[Topic]):
 @register_fixture(name="x_user_factory")
 class XUserFactory(ModelFactory[XUser]):
     __model__ = XUser
+
+
+@register_fixture(name="media_factory")
+class MediaFactory(ModelFactory[Media]):
+    __model__ = Media
 
 
 @register_fixture(name="post_factory")
@@ -226,20 +234,46 @@ def x_user_samples(x_user_factory: XUserFactory) -> Generator[List[XUser], None,
 
 
 @fixture
+def media_samples(media_factory: MediaFactory) -> Generator[List[Media], None, None]:
+    yield [
+        media_factory.build(
+            media_key="1234567890123456781",
+            url="https://pbs.twimg.com/media/xxxxxxxxxxxxxxx.jpg",
+            type="photo",
+            width=100,
+            height=100,
+        ),
+        media_factory.build(
+            media_key="1234567890123456782",
+            url="https://pbs.twimg.com/media/yyyyyyyyyyyyyyy.mp4",
+            type="video",
+            width=200,
+            height=200,
+        ),
+        media_factory.build(
+            media_key="1234567890123456783",
+            url="https://pbs.twimg.com/media/zzzzzzzzzzzzzzz.gif",
+            type="animated_gif",
+            width=300,
+            height=300,
+        ),
+    ]
+
+
+@fixture
 def post_samples(
-    post_factory: PostFactory, x_user_samples: List[XUser], link_samples: List[Link]
+    post_factory: PostFactory, x_user_samples: List[XUser], media_samples: List[Media], link_samples: List[Link]
 ) -> Generator[List[Post], None, None]:
     posts = [
         post_factory.build(
             post_id="2234567890123456781",
-            link=None,
             x_user_id="1234567890123456781",
             x_user=x_user_samples[0],
             text="""\
 新しいプロジェクトがついに公開されました！詳細はこちら👉
 
 https://t.co/xxxxxxxxxxx/ #プロジェクト #新発売 #Tech""",
-            media_details=None,
+            media_details=[],
             created_at=1152921600000,
             like_count=10,
             repost_count=20,
@@ -248,14 +282,13 @@ https://t.co/xxxxxxxxxxx/ #プロジェクト #新発売 #Tech""",
         ),
         post_factory.build(
             post_id="2234567890123456791",
-            link=None,
             x_user_id="1234567890123456781",
             x_user=x_user_samples[0],
             text="""\
 このブログ記事、めちゃくちゃ参考になった！🔥 チェックしてみて！
 
 https://t.co/yyyyyyyyyyy/ #学び #自己啓発""",
-            media_details=None,
+            media_details=[media_samples[0]],
             created_at=1153921700000,
             like_count=10,
             repost_count=20,
@@ -264,12 +297,11 @@ https://t.co/yyyyyyyyyyy/ #学び #自己啓発""",
         ),
         post_factory.build(
             post_id="2234567890123456801",
-            link=None,
             x_user_id="1234567890123456782",
             x_user=x_user_samples[1],
             text="""\
-次の休暇はここに決めた！🌴🏖️ 見てみて～ https://t.co/xxxxxxxxxxx/ https://t.co/wwwwwwwwwww/ #旅行 #バケーション""",
-            media_details=None,
+次の休暇はここに決めた！🌴🏖️ 見てみて～ https://t.co/xxxxxxxxxxx/ #旅行 #バケーション""",
+            media_details=[media_samples[1], media_samples[2]],
             created_at=1154921800000,
             like_count=10,
             repost_count=20,
@@ -282,7 +314,7 @@ https://t.co/yyyyyyyyyyy/ #学び #自己啓発""",
             x_user_id="1234567890123456782",
             x_user=x_user_samples[1],
             text="https://t.co/zzzzzzzzzzz/ https://t.co/wwwwwwwwwww/",
-            media_details=None,
+            media_details=[],
             created_at=1154922900000,
             like_count=10,
             repost_count=20,
@@ -295,7 +327,7 @@ https://t.co/yyyyyyyyyyy/ #学び #自己啓発""",
             x_user_id="1234567890123456783",
             x_user=x_user_samples[2],
             text="empty",
-            media_details=None,
+            media_details=[],
             created_at=1154923900000,
             like_count=10,
             repost_count=20,
@@ -419,8 +451,8 @@ def x_user_records_sample(
 
 @fixture
 def link_records_sample(
-    link_samples: List[Link],
     engine_for_test: Engine,
+    link_samples: List[Link],
 ) -> Generator[List[LinkRecord], None, None]:
     res = [LinkRecord(link_id=d.link_id, url=d.url) for d in link_samples]
     with Session(engine_for_test) as sess:
@@ -430,8 +462,30 @@ def link_records_sample(
 
 
 @fixture
+def media_records_sample(
+    engine_for_test: Engine,
+    media_samples: List[Media],
+) -> Generator[List[MediaRecord], None, None]:
+    res = [
+        MediaRecord(
+            media_key=d.media_key,
+            type=d.type,
+            url=d.url,
+            width=d.width,
+            height=d.height,
+        )
+        for d in media_samples
+    ]
+    with Session(engine_for_test) as sess:
+        sess.add_all(res)
+        sess.commit()
+    yield res
+
+
+@fixture
 def post_records_sample(
     x_user_records_sample: List[XUserRecord],
+    media_records_sample: List[MediaRecord],
     link_records_sample: List[LinkRecord],
     post_samples: List[Post],
     engine_for_test: Engine,
@@ -443,17 +497,23 @@ def post_records_sample(
                 post_id=post.post_id,
                 user_id=post.x_user_id,
                 text=post.text,
-                media_details=post.media_details,
                 created_at=post.created_at,
                 like_count=post.like_count,
                 repost_count=post.repost_count,
                 impression_count=post.impression_count,
             )
             sess.add(inst)
+
             for link in post.links:
-                assoc = PostLinkAssociation(link_id=link.link_id, post_id=inst.post_id)
-                sess.add(assoc)
-                inst.links.append(assoc)
+                post_link_assoc = PostLinkAssociation(link_id=link.link_id, post_id=inst.post_id)
+                sess.add(post_link_assoc)
+                inst.links.append(post_link_assoc)
+
+            for media in post.media_details:
+                post_media_assoc = PostMediaAssociation(media_key=media.media_key, post_id=inst.post_id)
+                sess.add(post_media_assoc)
+                inst.media_details.append(post_media_assoc)
+
             res.append(inst)
         sess.commit()
     yield res
