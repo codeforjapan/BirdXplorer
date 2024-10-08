@@ -104,6 +104,7 @@ def gen_router(storage: Storage) -> APIRouter:
         limit: int = Query(default=100, gt=0, le=1000),
         search_text: Union[None, str] = Query(default=None),
         search_url: Union[None, HttpUrl] = Query(default=None),
+        media: bool = Query(default=True),
     ) -> PostListResponse:
         if created_at_from is not None and isinstance(created_at_from, str):
             created_at_from = ensure_twitter_timestamp(created_at_from)
@@ -119,6 +120,7 @@ def gen_router(storage: Storage) -> APIRouter:
                 search_url=search_url,
                 offset=offset,
                 limit=limit,
+                with_media=media,
             )
         )
         total_count = storage.get_number_of_posts(
@@ -129,9 +131,6 @@ def gen_router(storage: Storage) -> APIRouter:
             search_text=search_text,
             search_url=search_url,
         )
-
-        for post in posts:
-            post.link = HttpUrl(f"https://x.com/{post.x_user.name}/status/{post.post_id}")
 
         base_url = str(request.url).split("?")[0]
         next_offset = offset + limit
