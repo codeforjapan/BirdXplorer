@@ -218,7 +218,7 @@ def media_samples(media_factory: MediaFactory) -> Generator[List[Media], None, N
 
 @fixture
 def post_samples(
-    post_factory: PostFactory, x_user_samples: List[XUser], media_samples: List[Media],link_samples: List[Link]
+    post_factory: PostFactory, x_user_samples: List[XUser], media_samples: List[Media], link_samples: List[Link]
 ) -> Generator[List[Post], None, None]:
     posts = [
         post_factory.build(
