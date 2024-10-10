@@ -223,6 +223,18 @@ class RowPostRecord(Base):
     user: Mapped["RowUserRecord"] = relationship("RowUserRecord", back_populates="row_post")
 
 
+class RowPostMediaRecord(Base):
+    __tablename__ = "row_post_media"
+
+    media_key: Mapped[String] = mapped_column(primary_key=True)
+
+    url: Mapped[String] = mapped_column(nullable=False)
+    type: Mapped[MediaType] = mapped_column(nullable=False)
+    width: Mapped[NonNegativeInt] = mapped_column(nullable=False)
+    height: Mapped[NonNegativeInt] = mapped_column(nullable=False)
+
+    post_id: Mapped[PostId] = mapped_column(ForeignKey("row_posts.post_id"), nullable=False)
+
 class RowPostEmbedURLRecord(Base):
     __tablename__ = "row_post_embed_urls"
 
