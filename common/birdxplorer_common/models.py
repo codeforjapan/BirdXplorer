@@ -19,7 +19,13 @@ from uuid import UUID
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict
 from pydantic import Field as PydanticField
-from pydantic import GetCoreSchemaHandler, HttpUrl, TypeAdapter, model_validator, computed_field
+from pydantic import (
+    GetCoreSchemaHandler,
+    HttpUrl,
+    TypeAdapter,
+    computed_field,
+    model_validator,
+)
 from pydantic.alias_generators import to_camel
 from pydantic.main import IncEx
 from pydantic_core import core_schema
