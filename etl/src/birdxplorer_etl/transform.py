@@ -6,7 +6,6 @@ import logging
 from pathlib import Path
 from typing import Generator
 
-from prefect import get_run_logger
 from sqlalchemy import Integer, and_, func, select
 from sqlalchemy.orm import Session
 
@@ -25,7 +24,7 @@ from birdxplorer_etl.settings import (
 )
 
 
-def transform_data(db: Session):
+def transform_data(sqlite: Session, postgresql: Session):
 
     logging.info("Transforming data")
 
@@ -44,7 +43,7 @@ def transform_data(db: Session):
     ai_service = get_ai_service()
 
     num_of_notes = (
-        db.query(func.count(RowNoteRecord.note_id))
+        sqlite.query(func.count(RowNoteRecord.note_id))
         .filter(
             and_(
                 RowNoteRecord.created_at_millis <= TARGET_NOTE_ESTIMATE_TOPIC_END_UNIX_MILLISECOND,
@@ -58,7 +57,7 @@ def transform_data(db: Session):
 
         logging.info(f"Transforming note data: {num_of_notes}")
         while offset < num_of_notes:
-            notes = db.execute(
+            notes = sqlite.execute(
                 select(
                     RowNoteRecord.note_id,
                     RowNoteRecord.row_post_id,
@@ -90,10 +89,10 @@ def transform_data(db: Session):
     offset = 0
     limit = 1000
 
-    num_of_posts = db.query(func.count(RowPostRecord.post_id)).scalar()
+    num_of_posts = postgresql.query(func.count(RowPostRecord.post_id)).scalar()
 
     while offset < num_of_posts:
-        posts = db.execute(
+        posts = postgresql.execute(
             select(
                 RowPostRecord.post_id,
                 RowPostRecord.author_id.label("user_id"),
@@ -131,10 +130,10 @@ def transform_data(db: Session):
     offset = 0
     limit = 1000
 
-    num_of_users = db.query(func.count(RowUserRecord.user_id)).scalar()
+    num_of_users = postgresql.query(func.count(RowUserRecord.user_id)).scalar()
 
     while offset < num_of_users:
-        users = db.execute(
+        users = postgresql.execute(
             select(
                 RowUserRecord.user_id,
                 RowUserRecord.user_name.label("name"),
@@ -153,8 +152,8 @@ def transform_data(db: Session):
         offset += limit
 
     # Transform row post embed link
-    write_media_csv(db)
-    generate_post_link(db)
+    write_media_csv(postgresql)
+    generate_post_link(postgresql)
 
     # Transform row post embed url data and generate post_embed_url.csv
     csv_seed_file_path = "./seed/topic_seed.csv"
@@ -180,12 +179,12 @@ def transform_data(db: Session):
         for record in records:
             writer.writerow({"topic_id": record["topic_id"], "label": {k: v for k, v in record["label"].items()}})
 
-    generate_note_topic(db)
+    generate_note_topic(sqlite)
 
     return
 
 
-def write_media_csv(db: Session) -> None:
+def write_media_csv(postgresql: Session) -> None:
     media_csv_path = Path("./data/transformed/media.csv")
     post_media_association_csv_path = Path("./data/transformed/post_media_association.csv")
 
@@ -205,7 +204,7 @@ def write_media_csv(db: Session) -> None:
         assoc_writer = csv.DictWriter(assoc_csv, fieldnames=assoc_fields)
         assoc_writer.writeheader()
 
-        for m in _iterate_media(db):
+        for m in _iterate_media(postgresql):
             media_writer.writerow(
                 {
                     "media_key": m.media_key,
@@ -219,17 +218,17 @@ def write_media_csv(db: Session) -> None:
             assoc_writer.writerow({"post_id": m.post_id, "media_key": m.media_key})
 
 
-def _iterate_media(db: Session, limit: int = 1000) -> Generator[RowPostMediaRecord, None, None]:
+def _iterate_media(postgresql: Session, limit: int = 1000) -> Generator[RowPostMediaRecord, None, None]:
     offset = 0
-    total_media: int = db.query(func.count(RowPostMediaRecord.media_key)).scalar() or 0
+    total_media: int = postgresql.query(func.count(RowPostMediaRecord.media_key)).scalar() or 0
 
     while offset < total_media:
-        yield from db.query(RowPostMediaRecord).limit(limit).offset(offset)
+        yield from postgresql.query(RowPostMediaRecord).limit(limit).offset(offset)
 
         offset += limit
 
 
-def generate_post_link(db: Session):
+def generate_post_link(postgresql: Session):
     link_csv_file_path = "./data/transformed/post_link.csv"
     association_csv_file_path = "./data/transformed/post_link_association.csv"
 
@@ -249,15 +248,15 @@ def generate_post_link(db: Session):
 
     offset = 0
     limit = 1000
-    num_of_links = db.query(func.count(RowPostEmbedURLRecord.post_id)).scalar()
+    num_of_links = postgresql.query(func.count(RowPostEmbedURLRecord.post_id)).scalar()
 
     records = []
     while offset < num_of_links:
-        links = db.query(RowPostEmbedURLRecord).limit(limit).offset(offset)
+        links = postgresql.query(RowPostEmbedURLRecord).limit(limit).offset(offset)
 
         for link in links:
             random.seed(link.unwound_url)
-            link_id = uuid.UUID(int=random.getrandbits(128))
+            link_id = uuid.UUID(int=random.getransqliteits(128))
             is_link_exist = next((record for record in records if record["link_id"] == link_id), None)
             if is_link_exist is None:
                 with open(link_csv_file_path, "a", newline="", encoding="utf-8") as file:
@@ -273,7 +272,7 @@ def generate_post_link(db: Session):
         offset += limit
 
 
-def generate_note_topic(db: Session):
+def generate_note_topic(sqlite: Session):
     output_csv_file_path = "./data/transformed/note_topic_association.csv"
     ai_service = get_ai_service()
 
@@ -289,10 +288,10 @@ def generate_note_topic(db: Session):
         offset = 0
         limit = 1000
 
-        num_of_users = db.query(func.count(RowUserRecord.user_id)).scalar()
+        num_of_notes = sqlite.query(func.count(RowNoteRecord.row_post_id)).scalar()
 
-        while offset < num_of_users:
-            topicEstimationTargetNotes = db.execute(
+        while offset < num_of_notes:
+            topicEstimationTargetNotes = sqlite.execute(
                 select(RowNoteRecord.note_id, RowNoteRecord.row_post_id, RowNoteRecord.summary)
                 .filter(
                     and_(
