@@ -254,7 +254,7 @@ class RowUserRecord(Base):
     followers_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
     following_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
     tweet_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
-    verified: Mapped[BinaryBool] = mapped_column(nullable=False)
+    verified: Mapped[bool] = mapped_column(nullable=False)
     verified_type: Mapped[String] = mapped_column(nullable=False)
     location: Mapped[String] = mapped_column(nullable=False)
     url: Mapped[String] = mapped_column(nullable=False)

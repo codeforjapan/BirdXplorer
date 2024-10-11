@@ -103,7 +103,7 @@ def extract_data(sqlite: Session, postgresql: Session):
         .filter(RowNoteRecord.created_at_millis <= settings.TARGET_TWITTER_POST_END_UNIX_MILLISECOND)
         .all()
     )
-    logging.info("Target notes: ", len(postExtract_targetNotes))
+    logging.info(f"Target notes: {len(postExtract_targetNotes)}")
     for note in postExtract_targetNotes:
         tweet_id = note.tweet_id
 
@@ -168,6 +168,7 @@ def extract_data(sqlite: Session, postgresql: Session):
             lang=post["data"]["lang"],
         )
         postgresql.add(row_post)
+        postgresql.commit()
 
         media_recs = [
             RowPostMediaRecord(
