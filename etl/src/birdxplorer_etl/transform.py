@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Generator
 
-from sqlalchemy import Integer, and_, func, select
+from sqlalchemy import Integer, Numeric, and_, func, select
 from sqlalchemy.orm import Session
 
 from birdxplorer_common.storage import (
@@ -97,7 +97,7 @@ def transform_data(sqlite: Session, postgresql: Session):
                 RowPostRecord.post_id,
                 RowPostRecord.author_id.label("user_id"),
                 RowPostRecord.text,
-                func.cast(RowPostRecord.created_at, Integer).label("created_at"),
+                func.cast(RowPostRecord.created_at, Numeric).label("created_at"),
                 func.cast(RowPostRecord.like_count, Integer).label("like_count"),
                 func.cast(RowPostRecord.repost_count, Integer).label("repost_count"),
                 func.cast(RowPostRecord.impression_count, Integer).label("impression_count"),
@@ -256,7 +256,7 @@ def generate_post_link(postgresql: Session):
 
         for link in links:
             random.seed(link.unwound_url)
-            link_id = uuid.UUID(int=random.getransqliteits(128))
+            link_id = uuid.UUID(int=random.getrandbits(128))
             is_link_exist = next((record for record in records if record["link_id"] == link_id), None)
             if is_link_exist is None:
                 with open(link_csv_file_path, "a", newline="", encoding="utf-8") as file:

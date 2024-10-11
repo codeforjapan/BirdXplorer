@@ -37,9 +37,9 @@ def init_sqlite():
 def init_postgresql():
     db_host = os.getenv("DB_HOST", "localhost")
     db_port = os.getenv("DB_PORT", "5432")
-    db_user = os.getenv("DB_USER", "birdxplorer")
+    db_user = os.getenv("DB_USER", "postgres")
     db_pass = os.getenv("DB_PASS", "birdxplorer")
-    db_name = os.getenv("DB_NAME", "etl")
+    db_name = os.getenv("DB_NAME", "postgres")
 
     logging.info(f"Initializing database at {db_host}:{db_port}/{db_name}")
     engine = create_engine(f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}")

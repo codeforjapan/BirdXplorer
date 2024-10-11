@@ -2,6 +2,9 @@ from lib.sqlite.init import init_sqlite, init_postgresql
 from extract import extract_data
 from load import load_data
 from transform import transform_data
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 if __name__ == "__main__":
     sqlite = init_sqlite()
