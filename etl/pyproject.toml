@@ -52,6 +52,7 @@ dev=[
     "isort",
 ]
 prod=[
+    "psycopg2",
     "birdxplorer_common @ git+https://github.com/codeforjapan/BirdXplorer.git@main#subdirectory=common",
 ]
 
