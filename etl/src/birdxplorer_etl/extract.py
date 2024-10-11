@@ -16,16 +16,16 @@ from birdxplorer_common.storage import (
 import settings
 
 
-def extract_data(db: Session):
+def extract_data(sqlite: Session, postgresql: Session):
     logging.info("Downloading community notes data")
 
     # get columns of post table
-    columns = db.query(RowUserRecord).statement.columns.keys()
+    columns = sqlite.query(RowUserRecord).statement.columns.keys()
     logging.info(columns)
 
     # Noteデータを取得してSQLiteに保存
     date = datetime.now()
-    latest_note = db.query(RowNoteRecord).order_by(RowNoteRecord.created_at_millis.desc()).first()
+    latest_note = sqlite.query(RowNoteRecord).order_by(RowNoteRecord.created_at_millis.desc()).first()
 
     while True:
         if (
@@ -46,20 +46,20 @@ def extract_data(db: Session):
         res = requests.get(note_url)
 
         if res.status_code == 200:
-            # res.contentをdbのNoteテーブル
+            # res.contentをsqliteのNoteテーブル
             tsv_data = res.content.decode("utf-8").splitlines()
             reader = csv.DictReader(tsv_data, delimiter="\t")
             reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
 
             rows_to_add = []
             for index, row in enumerate(reader):
-                if db.query(RowNoteRecord).filter(RowNoteRecord.note_id == row["note_id"]).first():
+                if sqlite.query(RowNoteRecord).filter(RowNoteRecord.note_id == row["note_id"]).first():
                     continue
                 rows_to_add.append(RowNoteRecord(**row))
                 if index % 1000 == 0:
-                    db.bulk_save_objects(rows_to_add)
+                    sqlite.bulk_save_objects(rows_to_add)
                     rows_to_add = []
-            db.bulk_save_objects(rows_to_add)
+            sqlite.bulk_save_objects(rows_to_add)
 
             status_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/noteStatusHistory/noteStatusHistory-00000.tsv"
             if settings.USE_DUMMY_DATA:
@@ -78,34 +78,36 @@ def extract_data(db: Session):
                     for key, value in list(row.items()):
                         if value == "":
                             row[key] = None
-                    status = db.query(RowNoteStatusRecord).filter(RowNoteStatusRecord.note_id == row["note_id"]).first()
+                    status = (
+                        sqlite.query(RowNoteStatusRecord).filter(RowNoteStatusRecord.note_id == row["note_id"]).first()
+                    )
                     if status is None or status.created_at_millis > int(datetime.now().timestamp() * 1000):
-                        db.query(RowNoteStatusRecord).filter(RowNoteStatusRecord.note_id == row["note_id"]).delete()
+                        sqlite.query(RowNoteStatusRecord).filter(RowNoteStatusRecord.note_id == row["note_id"]).delete()
                         rows_to_add.append(RowNoteStatusRecord(**row))
                     if index % 1000 == 0:
-                        db.bulk_save_objects(rows_to_add)
+                        sqlite.bulk_save_objects(rows_to_add)
                         rows_to_add = []
-                db.bulk_save_objects(rows_to_add)
+                sqlite.bulk_save_objects(rows_to_add)
 
                 break
 
         date = date - timedelta(days=1)
 
-    db.commit()
+    sqlite.commit()
 
     # Noteに紐づくtweetデータを取得
     postExtract_targetNotes = (
-        db.query(RowNoteRecord)
+        sqlite.query(RowNoteRecord)
         .filter(RowNoteRecord.tweet_id != None)
         .filter(RowNoteRecord.created_at_millis >= settings.TARGET_TWITTER_POST_START_UNIX_MILLISECOND)
         .filter(RowNoteRecord.created_at_millis <= settings.TARGET_TWITTER_POST_END_UNIX_MILLISECOND)
         .all()
     )
-    logging.info(len(postExtract_targetNotes))
+    logging.info(f"Target notes: {len(postExtract_targetNotes)}")
     for note in postExtract_targetNotes:
         tweet_id = note.tweet_id
 
-        is_tweetExist = db.query(RowPostRecord).filter(RowPostRecord.post_id == str(tweet_id)).first()
+        is_tweetExist = postgresql.query(RowPostRecord).filter(RowPostRecord.post_id == str(tweet_id)).first()
         if is_tweetExist is not None:
             logging.info(f"tweet_id {tweet_id} is already exist")
             note.row_post_id = tweet_id
@@ -120,7 +122,9 @@ def extract_data(db: Session):
         created_at = datetime.strptime(post["data"]["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ")
         created_at_millis = int(created_at.timestamp() * 1000)
 
-        is_userExist = db.query(RowUserRecord).filter(RowUserRecord.user_id == post["data"]["author_id"]).first()
+        is_userExist = (
+            postgresql.query(RowUserRecord).filter(RowUserRecord.user_id == post["data"]["author_id"]).first()
+        )
         logging.info(is_userExist)
         if is_userExist is None:
             user_data = (
@@ -128,7 +132,7 @@ def extract_data(db: Session):
                 if "includes" in post and "users" in post["includes"] and len(post["includes"]["users"]) > 0
                 else {}
             )
-            db_user = RowUserRecord(
+            row_user = RowUserRecord(
                 user_id=post["data"]["author_id"],
                 name=user_data.get("name"),
                 user_name=user_data.get("username"),
@@ -142,7 +146,7 @@ def extract_data(db: Session):
                 location=user_data.get("location", ""),
                 url=user_data.get("url", ""),
             )
-            db.add(db_user)
+            postgresql.add(row_user)
 
         media_data = (
             post["includes"]["media"]
@@ -150,9 +154,7 @@ def extract_data(db: Session):
             else []
         )
 
-        print(media_data)
-
-        db_post = RowPostRecord(
+        row_post = RowPostRecord(
             post_id=post["data"]["id"],
             author_id=post["data"]["author_id"],
             text=post["data"]["text"],
@@ -165,7 +167,8 @@ def extract_data(db: Session):
             reply_count=post["data"]["public_metrics"]["reply_count"],
             lang=post["data"]["lang"],
         )
-        db.add(db_post)
+        postgresql.add(row_post)
+        postgresql.commit()
 
         media_recs = [
             RowPostMediaRecord(
@@ -178,7 +181,7 @@ def extract_data(db: Session):
             )
             for m in media_data
         ]
-        db.add_all(media_recs)
+        postgresql.add_all(media_recs)
 
         if "entities" in post["data"] and "urls" in post["data"]["entities"]:
             for url in post["data"]["entities"]["urls"]:
@@ -189,12 +192,9 @@ def extract_data(db: Session):
                         expanded_url=url["expanded_url"] if url["expanded_url"] else None,
                         unwound_url=url["unwound_url"] if url["unwound_url"] else None,
                     )
-                    db.add(post_url)
+                    postgresql.add(post_url)
         note.row_post_id = tweet_id
-        db.commit()
+        postgresql.commit()
         continue
-
-    # select note from db, get relation tweet and user data
-    note = db.query(RowNoteRecord).filter(RowNoteRecord.tweet_id == "1797617478950170784").first()
 
     return
