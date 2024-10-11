@@ -1,8 +1,8 @@
 import csv
+import logging
 from datetime import datetime, timedelta
 import requests
 import stringcase
-from prefect import get_run_logger
 from sqlalchemy.orm import Session
 from lib.x.postlookup import lookup
 from birdxplorer_common.storage import (
@@ -17,12 +17,11 @@ import settings
 
 
 def extract_data(db: Session):
-    logger = get_run_logger()
-    logger.info("Downloading community notes data")
+    logging.info("Downloading community notes data")
 
     # get columns of post table
     columns = db.query(RowUserRecord).statement.columns.keys()
-    logger.info(columns)
+    logging.info(columns)
 
     # Noteデータを取得してSQLiteに保存
     date = datetime.now()
@@ -43,7 +42,7 @@ def extract_data(db: Session):
                 "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/notes_sample.tsv"
             )
 
-        logger.info(note_url)
+        logging.info(note_url)
         res = requests.get(note_url)
 
         if res.status_code == 200:
@@ -66,7 +65,7 @@ def extract_data(db: Session):
             if settings.USE_DUMMY_DATA:
                 status_url = "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/noteStatus_sample.tsv"
 
-            logger.info(status_url)
+            logging.info(status_url)
             res = requests.get(status_url)
 
             if res.status_code == 200:
@@ -102,17 +101,17 @@ def extract_data(db: Session):
         .filter(RowNoteRecord.created_at_millis <= settings.TARGET_TWITTER_POST_END_UNIX_MILLISECOND)
         .all()
     )
-    logger.info(len(postExtract_targetNotes))
+    logging.info(len(postExtract_targetNotes))
     for note in postExtract_targetNotes:
         tweet_id = note.tweet_id
 
         is_tweetExist = db.query(RowPostRecord).filter(RowPostRecord.post_id == str(tweet_id)).first()
         if is_tweetExist is not None:
-            logger.info(f"tweet_id {tweet_id} is already exist")
+            logging.info(f"tweet_id {tweet_id} is already exist")
             note.row_post_id = tweet_id
             continue
 
-        logger.info(tweet_id)
+        logging.info(tweet_id)
         post = lookup(tweet_id)
 
         if post == None or "data" not in post:
@@ -122,7 +121,7 @@ def extract_data(db: Session):
         created_at_millis = int(created_at.timestamp() * 1000)
 
         is_userExist = db.query(RowUserRecord).filter(RowUserRecord.user_id == post["data"]["author_id"]).first()
-        logger.info(is_userExist)
+        logging.info(is_userExist)
         if is_userExist is None:
             user_data = (
                 post["includes"]["users"][0]

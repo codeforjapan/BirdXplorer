@@ -2,6 +2,7 @@ import csv
 import os
 import random
 import uuid
+import logging
 from pathlib import Path
 from typing import Generator
 
@@ -25,8 +26,8 @@ from birdxplorer_etl.settings import (
 
 
 def transform_data(db: Session):
-    logger = get_run_logger()
-    logger.info("Transforming data")
+
+    logging.info("Transforming data")
 
     if not os.path.exists("./data/transformed"):
         os.makedirs("./data/transformed")
@@ -55,7 +56,7 @@ def transform_data(db: Session):
 
     with open("./data/transformed/note.csv", "a") as file:
 
-        logger.info(f"Transforming note data: {num_of_notes}")
+        logging.info(f"Transforming note data: {num_of_notes}")
         while offset < num_of_notes:
             notes = db.execute(
                 select(
@@ -78,7 +79,7 @@ def transform_data(db: Session):
             offset += limit
 
     # Transform row post data and generate post.csv
-    logger.info("Transforming post data")
+    logging.info("Transforming post data")
 
     if os.path.exists("./data/transformed/post.csv"):
         os.remove("./data/transformed/post.csv")
