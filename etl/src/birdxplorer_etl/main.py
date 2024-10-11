@@ -1,10 +1,14 @@
-from lib.sqlite.init import init_db
+from lib.sqlite.init import init_sqlite, init_postgresql
 from extract import extract_data
 from load import load_data
 from transform import transform_data
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 if __name__ == "__main__":
-    db = init_db()
-    extract_data(db)
-    transform_data(db)
+    sqlite = init_sqlite()
+    postgresql = init_postgresql()
+    extract_data(sqlite, postgresql)
+    transform_data(sqlite, postgresql)
     load_data()
