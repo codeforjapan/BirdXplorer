@@ -1,7 +1,7 @@
 import requests
 import settings
-from prefect import get_run_logger
 import time
+import logging
 
 
 def create_url(id):
@@ -30,11 +30,10 @@ def bearer_oauth(r):
 
 
 def connect_to_endpoint(url):
-    logger = get_run_logger()
     response = requests.request("GET", url, auth=bearer_oauth)
     if response.status_code == 429:
         limit = response.headers["x-rate-limit-reset"]
-        logger.info("Waiting for rate limit reset...")
+        logging.info("Waiting for rate limit reset...")
         time.sleep(int(limit) - int(time.time()) + 1)
         data = connect_to_endpoint(url)
         return data
