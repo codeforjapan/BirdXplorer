@@ -148,15 +148,15 @@ def extract_data(db: Session):
         media_data = (
             post["includes"]["media"]
             if "includes" in post and "media" in post["includes"] and len(post["includes"]["media"]) > 0
-            else [{}]
+            else []
         )
+
+        print(media_data)
 
         db_post = RowPostRecord(
             post_id=post["data"]["id"],
             author_id=post["data"]["author_id"],
             text=post["data"]["text"],
-            media_type=media_data[0].get("type", ""),
-            media_url=media_data[0].get("url", ""),
             created_at=created_at_millis,
             like_count=post["data"]["public_metrics"]["like_count"],
             repost_count=post["data"]["public_metrics"]["retweet_count"],
@@ -172,7 +172,7 @@ def extract_data(db: Session):
             RowPostMediaRecord(
                 media_key=m["media_key"],
                 type=m["type"],
-                url=m["url"],
+                url=m.get("url") or (m["variants"][0]["url"] if "variants" in m and m["variants"] else ""),
                 width=m["width"],
                 height=m["height"],
                 post_id=post["data"]["id"],
