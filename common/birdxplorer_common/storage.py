@@ -209,8 +209,6 @@ class RowPostRecord(Base):
     post_id: Mapped[PostId] = mapped_column(primary_key=True)
     author_id: Mapped[UserId] = mapped_column(ForeignKey("row_users.user_id"), nullable=False)
     text: Mapped[SummaryString] = mapped_column(nullable=False)
-    media_type: Mapped[String] = mapped_column(nullable=True)
-    media_url: Mapped[String] = mapped_column(nullable=True)
     created_at: Mapped[TwitterTimestamp] = mapped_column(nullable=False)
     like_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
     repost_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
@@ -234,6 +232,7 @@ class RowPostMediaRecord(Base):
     height: Mapped[NonNegativeInt] = mapped_column(nullable=False)
 
     post_id: Mapped[PostId] = mapped_column(ForeignKey("row_posts.post_id"), nullable=False)
+
 
 class RowPostEmbedURLRecord(Base):
     __tablename__ = "row_post_embed_urls"
