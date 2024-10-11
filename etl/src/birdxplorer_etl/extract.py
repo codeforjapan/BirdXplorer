@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from lib.x.postlookup import lookup
 from birdxplorer_common.storage import (
     RowNoteRecord,
+    RowPostMediaRecord,
     RowPostRecord,
     RowUserRecord,
     RowNoteStatusRecord,
@@ -144,16 +145,17 @@ def extract_data(db: Session):
             db.add(db_user)
 
         media_data = (
-            post["includes"]["media"][0]
+            post["includes"]["media"]
             if "includes" in post and "media" in post["includes"] and len(post["includes"]["media"]) > 0
-            else {}
+            else []
         )
+
+        print(media_data)
+
         db_post = RowPostRecord(
             post_id=post["data"]["id"],
             author_id=post["data"]["author_id"],
             text=post["data"]["text"],
-            media_type=media_data.get("type", ""),
-            media_url=media_data.get("url", ""),
             created_at=created_at_millis,
             like_count=post["data"]["public_metrics"]["like_count"],
             repost_count=post["data"]["public_metrics"]["retweet_count"],
@@ -164,6 +166,19 @@ def extract_data(db: Session):
             lang=post["data"]["lang"],
         )
         db.add(db_post)
+
+        media_recs = [
+            RowPostMediaRecord(
+                media_key=m["media_key"],
+                type=m["type"],
+                url=m.get("url") or (m["variants"][0]["url"] if "variants" in m and m["variants"] else ""),
+                width=m["width"],
+                height=m["height"],
+                post_id=post["data"]["id"],
+            )
+            for m in media_data
+        ]
+        db.add_all(media_recs)
 
         if "entities" in post["data"] and "urls" in post["data"]["entities"]:
             for url in post["data"]["entities"]["urls"]:
