@@ -741,9 +741,14 @@ class LinkId(UUID):
 
     @classmethod
     def __get_pydantic_core_schema__(cls, _source_type: Any, _handler: GetCoreSchemaHandler) -> core_schema.CoreSchema:
-        return core_schema.no_info_plain_validator_function(
-            cls.validate,
-            serialization=core_schema.plain_serializer_function_ser_schema(cls.serialize, when_used="json"),
+        return core_schema.union_schema(
+            [
+                core_schema.is_instance_schema(cls),
+                core_schema.no_info_plain_validator_function(cls.validate),
+            ],
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                cls.serialize, info_arg=False, when_used="json"
+            ),
         )
 
     @classmethod
