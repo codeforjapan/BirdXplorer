@@ -21,6 +21,8 @@ from birdxplorer_common.models import (
 )
 from birdxplorer_common.storage import Storage
 
+from .openapi_doc import V1DataPostsQueryDocs
+
 
 class TopicListResponse(BaseModel):
     data: List[Topic]
@@ -96,15 +98,17 @@ def gen_router(storage: Storage) -> APIRouter:
     @router.get("/posts", response_model=PostListResponse)
     def get_posts(
         request: Request,
-        post_id: Union[List[PostId], None] = Query(default=None),
-        note_id: Union[List[NoteId], None] = Query(default=None),
-        created_at_from: Union[None, TwitterTimestamp, str] = Query(default=None),
-        created_at_to: Union[None, TwitterTimestamp, str] = Query(default=None),
+        post_id: Union[List[PostId], None] = Query(default=None, **V1DataPostsQueryDocs.post_id),
+        note_id: Union[List[NoteId], None] = Query(default=None, **V1DataPostsQueryDocs.note_id),
+        created_at_from: Union[None, TwitterTimestamp, str] = Query(
+            default=None, **V1DataPostsQueryDocs.created_at_from
+        ),
+        created_at_to: Union[None, TwitterTimestamp, str] = Query(default=None, **V1DataPostsQueryDocs.created_at_to),
         offset: int = Query(default=0, ge=0),
         limit: int = Query(default=100, gt=0, le=1000),
-        search_text: Union[None, str] = Query(default=None),
-        search_url: Union[None, HttpUrl] = Query(default=None),
-        media: bool = Query(default=True),
+        search_text: Union[None, str] = Query(default=None, **V1DataPostsQueryDocs.search_text),
+        search_url: Union[None, HttpUrl] = Query(default=None, **V1DataPostsQueryDocs.search_url),
+        media: bool = Query(default=True, **V1DataPostsQueryDocs.media),
     ) -> PostListResponse:
         if created_at_from is not None and isinstance(created_at_from, str):
             created_at_from = ensure_twitter_timestamp(created_at_from)
