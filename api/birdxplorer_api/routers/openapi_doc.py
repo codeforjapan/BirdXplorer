@@ -233,6 +233,8 @@ v1_date_notes_topic_ids: FastAPIQueryDocs = {
 取得するコミュニティノートが紐づいているトピックの ID。
 
 `GET /api/v1/data/topics` で取得できるトピックの ID を指定することで、そのトピックに紐づいたコミュニティノートを取得できる。
+
+複数指定した場合は、 **いずれかのトピックに紐づいたコミュニティノート** を取得する。 (AND 検索ではなく OR 検索になる)
 """,
     "openapi_examples": {
         "single": {
