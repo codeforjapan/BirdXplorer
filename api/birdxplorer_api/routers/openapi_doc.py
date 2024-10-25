@@ -7,15 +7,15 @@ from typing_extensions import TypedDict
 from birdxplorer_common.models import LanguageIdentifier
 
 
-class FastAPIQueryDocsRequired(TypedDict):
+class FastAPIEndpointQueryDocsRequired(TypedDict):
     description: str
 
 
-class FastAPIQueryDocs(FastAPIQueryDocsRequired, total=False):
+class FastAPIEndpointQueryDocs(FastAPIEndpointQueryDocsRequired, total=False):
     openapi_examples: Dict[str, Example]
 
 
-v1_data_posts_post_id: FastAPIQueryDocs = {
+v1_data_posts_post_id: FastAPIEndpointQueryDocs = {
     "description": """
 データを取得する X の Post の ID。
 
@@ -45,7 +45,7 @@ v1_data_posts_post_id: FastAPIQueryDocs = {
     },
 }
 
-v1_data_posts_note_id: FastAPIQueryDocs = {
+v1_data_posts_note_id: FastAPIEndpointQueryDocs = {
     "description": """
 Post のデータ取得に利用する X のコミュニティノートの ID。
 コミュニティノートと Post は 1 : 1 で紐づいている。
@@ -68,7 +68,7 @@ Post のデータ取得に利用する X のコミュニティノートの ID。
     },
 }
 
-v1_data_posts_created_at_from: FastAPIQueryDocs = {
+v1_data_posts_created_at_from: FastAPIEndpointQueryDocs = {
     "description": """
 取得する Post の作成日時の下限。**指定した日時と同時かそれより新しい** Post のみを取得する。
 
@@ -86,7 +86,7 @@ v1_data_posts_created_at_from: FastAPIQueryDocs = {
     },
 }
 
-v1_data_posts_created_at_to: FastAPIQueryDocs = {
+v1_data_posts_created_at_to: FastAPIEndpointQueryDocs = {
     "description": """
 取得する Post の作成日時の上限。**指定した日時よりも古い** Post のみを取得する。
 
@@ -104,7 +104,7 @@ v1_data_posts_created_at_to: FastAPIQueryDocs = {
     },
 }
 
-v1_data_posts_search_text: FastAPIQueryDocs = {
+v1_data_posts_search_text: FastAPIEndpointQueryDocs = {
     "description": """
 指定した文字列を含む Post を検索して取得する。検索は Post の本文に対して**完全一致**で行われる。
 """,
@@ -120,7 +120,7 @@ v1_data_posts_search_text: FastAPIQueryDocs = {
     },
 }
 
-v1_data_posts_search_url: FastAPIQueryDocs = {
+v1_data_posts_search_url: FastAPIEndpointQueryDocs = {
     "description": """
 指定した URL を含む Post を検索して取得する。
 """,
@@ -136,7 +136,7 @@ v1_data_posts_search_url: FastAPIQueryDocs = {
     },
 }
 
-v1_data_posts_media: FastAPIQueryDocs = {
+v1_data_posts_media: FastAPIEndpointQueryDocs = {
     "description": """
 Post に紐づいた画像や動画などのメディア情報を取得するかどうか。
 
@@ -170,7 +170,7 @@ class V1DataPostsQueryDocs:
     media = v1_data_posts_media
 
 
-v1_data_notes_note_ids: FastAPIQueryDocs = {
+v1_data_notes_note_ids: FastAPIEndpointQueryDocs = {
     "description": """
 データを取得する X のコミュニティノートの ID。
 
@@ -192,7 +192,7 @@ v1_data_notes_note_ids: FastAPIQueryDocs = {
     },
 }
 
-v1_data_notes_created_at_from: FastAPIQueryDocs = {
+v1_data_notes_created_at_from: FastAPIEndpointQueryDocs = {
     "description": """
 取得するコミュニティノートの作成日時の下限。**指定した日時と同時かそれより新しい**コミュニティノートのみを取得する。
 
@@ -210,7 +210,7 @@ v1_data_notes_created_at_from: FastAPIQueryDocs = {
     },
 }
 
-v1_data_notes_created_at_to: FastAPIQueryDocs = {
+v1_data_notes_created_at_to: FastAPIEndpointQueryDocs = {
     "description": """
 取得するコミュニティノートの作成日時の上限。**指定した日時よりも古い**コミュニティノートのみを取得する。
 
@@ -228,7 +228,7 @@ v1_data_notes_created_at_to: FastAPIQueryDocs = {
     },
 }
 
-v1_date_notes_topic_ids: FastAPIQueryDocs = {
+v1_date_notes_topic_ids: FastAPIEndpointQueryDocs = {
     "description": """
 取得するコミュニティノートが紐づいているトピックの ID。
 
@@ -252,7 +252,7 @@ v1_date_notes_topic_ids: FastAPIQueryDocs = {
     },
 }
 
-v1_data_notes_post_ids: FastAPIQueryDocs = {
+v1_data_notes_post_ids: FastAPIEndpointQueryDocs = {
     "description": """
 コミュニティノートのデータ取得に利用する X の Post の ID。
 コミュニティノートと Post は 1 : 1 で紐づいている。
@@ -275,7 +275,7 @@ v1_data_notes_post_ids: FastAPIQueryDocs = {
     },
 }
 
-v1_data_notes_current_status: FastAPIQueryDocs = {
+v1_data_notes_current_status: FastAPIEndpointQueryDocs = {
     "description": """
 取得するコミュニティノートのステータス。
 
@@ -301,7 +301,7 @@ v1_data_notes_current_status: FastAPIQueryDocs = {
     },
 }
 
-v1_data_notes_language: FastAPIQueryDocs = {
+v1_data_notes_language: FastAPIEndpointQueryDocs = {
     "description": """
 取得するコミュニティノートの言語。
 
