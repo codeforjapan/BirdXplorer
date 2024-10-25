@@ -1,8 +1,8 @@
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, Generic
 
 from fastapi.openapi.models import Example
-from typing_extensions import TypedDict
+from typing_extensions import LiteralString, TypedDict, TypeVar
 
 from birdxplorer_common.models import LanguageIdentifier
 
@@ -11,11 +11,24 @@ class FastAPIEndpointQueryDocsRequired(TypedDict):
     description: str
 
 
-class FastAPIEndpointQueryDocs(FastAPIEndpointQueryDocsRequired, total=False):
+class FastAPIEndpointParamDocs(FastAPIEndpointQueryDocsRequired, total=False):
     openapi_examples: Dict[str, Example]
 
 
-v1_data_posts_post_id: FastAPIEndpointQueryDocs = {
+_KEY = TypeVar("_KEY", bound=LiteralString)
+
+
+@dataclass
+class FastAPIEndpointDocs(Generic[_KEY]):
+    """
+    FastAPI のエンドポイントのドキュメントをまとめた dataclass。
+    """
+
+    description: str
+    params: Dict[_KEY, FastAPIEndpointParamDocs]
+
+
+v1_data_posts_post_id: FastAPIEndpointParamDocs = {
     "description": """
 データを取得する X の Post の ID。
 
@@ -45,7 +58,7 @@ v1_data_posts_post_id: FastAPIEndpointQueryDocs = {
     },
 }
 
-v1_data_posts_note_id: FastAPIEndpointQueryDocs = {
+v1_data_posts_note_id: FastAPIEndpointParamDocs = {
     "description": """
 Post のデータ取得に利用する X のコミュニティノートの ID。
 コミュニティノートと Post は 1 : 1 で紐づいている。
@@ -68,7 +81,7 @@ Post のデータ取得に利用する X のコミュニティノートの ID。
     },
 }
 
-v1_data_posts_created_at_from: FastAPIEndpointQueryDocs = {
+v1_data_posts_created_at_from: FastAPIEndpointParamDocs = {
     "description": """
 取得する Post の作成日時の下限。**指定した日時と同時かそれより新しい** Post のみを取得する。
 
@@ -86,7 +99,7 @@ v1_data_posts_created_at_from: FastAPIEndpointQueryDocs = {
     },
 }
 
-v1_data_posts_created_at_to: FastAPIEndpointQueryDocs = {
+v1_data_posts_created_at_to: FastAPIEndpointParamDocs = {
     "description": """
 取得する Post の作成日時の上限。**指定した日時よりも古い** Post のみを取得する。
 
@@ -104,7 +117,7 @@ v1_data_posts_created_at_to: FastAPIEndpointQueryDocs = {
     },
 }
 
-v1_data_posts_search_text: FastAPIEndpointQueryDocs = {
+v1_data_posts_search_text: FastAPIEndpointParamDocs = {
     "description": """
 指定した文字列を含む Post を検索して取得する。検索は Post の本文に対して**完全一致**で行われる。
 """,
@@ -120,7 +133,7 @@ v1_data_posts_search_text: FastAPIEndpointQueryDocs = {
     },
 }
 
-v1_data_posts_search_url: FastAPIEndpointQueryDocs = {
+v1_data_posts_search_url: FastAPIEndpointParamDocs = {
     "description": """
 指定した URL を含む Post を検索して取得する。
 """,
@@ -136,7 +149,7 @@ v1_data_posts_search_url: FastAPIEndpointQueryDocs = {
     },
 }
 
-v1_data_posts_media: FastAPIEndpointQueryDocs = {
+v1_data_posts_media: FastAPIEndpointParamDocs = {
     "description": """
 Post に紐づいた画像や動画などのメディア情報を取得するかどうか。
 
@@ -154,23 +167,20 @@ Post に紐づいた画像や動画などのメディア情報を取得するか
     },
 }
 
+V1DataPostsDocs = FastAPIEndpointDocs(
+    "Post のデータを取得するエンドポイント",
+    {
+        "post_id": v1_data_posts_post_id,
+        "note_id": v1_data_posts_note_id,
+        "created_at_from": v1_data_posts_created_at_from,
+        "created_at_to": v1_data_posts_created_at_to,
+        "search_text": v1_data_posts_search_text,
+        "search_url": v1_data_posts_search_url,
+        "media": v1_data_posts_media,
+    },
+)
 
-@dataclass(frozen=True)
-class V1DataPostsQueryDocs:
-    """
-    `GET /api/v1/data/posts` のクエリパラメータの OpenAPI ドキュメント
-    """
-
-    post_id = v1_data_posts_post_id
-    note_id = v1_data_posts_note_id
-    created_at_from = v1_data_posts_created_at_from
-    created_at_to = v1_data_posts_created_at_to
-    search_text = v1_data_posts_search_text
-    search_url = v1_data_posts_search_url
-    media = v1_data_posts_media
-
-
-v1_data_notes_note_ids: FastAPIEndpointQueryDocs = {
+v1_data_notes_note_ids: FastAPIEndpointParamDocs = {
     "description": """
 データを取得する X のコミュニティノートの ID。
 
@@ -192,7 +202,7 @@ v1_data_notes_note_ids: FastAPIEndpointQueryDocs = {
     },
 }
 
-v1_data_notes_created_at_from: FastAPIEndpointQueryDocs = {
+v1_data_notes_created_at_from: FastAPIEndpointParamDocs = {
     "description": """
 取得するコミュニティノートの作成日時の下限。**指定した日時と同時かそれより新しい**コミュニティノートのみを取得する。
 
@@ -210,7 +220,7 @@ v1_data_notes_created_at_from: FastAPIEndpointQueryDocs = {
     },
 }
 
-v1_data_notes_created_at_to: FastAPIEndpointQueryDocs = {
+v1_data_notes_created_at_to: FastAPIEndpointParamDocs = {
     "description": """
 取得するコミュニティノートの作成日時の上限。**指定した日時よりも古い**コミュニティノートのみを取得する。
 
@@ -228,7 +238,7 @@ v1_data_notes_created_at_to: FastAPIEndpointQueryDocs = {
     },
 }
 
-v1_date_notes_topic_ids: FastAPIEndpointQueryDocs = {
+v1_date_notes_topic_ids: FastAPIEndpointParamDocs = {
     "description": """
 取得するコミュニティノートが紐づいているトピックの ID。
 
@@ -252,7 +262,7 @@ v1_date_notes_topic_ids: FastAPIEndpointQueryDocs = {
     },
 }
 
-v1_data_notes_post_ids: FastAPIEndpointQueryDocs = {
+v1_data_notes_post_ids: FastAPIEndpointParamDocs = {
     "description": """
 コミュニティノートのデータ取得に利用する X の Post の ID。
 コミュニティノートと Post は 1 : 1 で紐づいている。
@@ -275,7 +285,7 @@ v1_data_notes_post_ids: FastAPIEndpointQueryDocs = {
     },
 }
 
-v1_data_notes_current_status: FastAPIEndpointQueryDocs = {
+v1_data_notes_current_status: FastAPIEndpointParamDocs = {
     "description": """
 取得するコミュニティノートのステータス。
 
@@ -301,7 +311,7 @@ v1_data_notes_current_status: FastAPIEndpointQueryDocs = {
     },
 }
 
-v1_data_notes_language: FastAPIEndpointQueryDocs = {
+v1_data_notes_language: FastAPIEndpointParamDocs = {
     "description": """
 取得するコミュニティノートの言語。
 
@@ -324,16 +334,17 @@ ISO 639-1 に準拠した 2 文字の言語コードを指定することで、�
 }
 
 
-@dataclass(frozen=True)
-class V1DataNotesQueryDocs:
-    """
-    `GET /api/v1/data/notes` のクエリパラメータの OpenAPI ドキュメント
-    """
+# GET /api/v1/data/notes のクエリパラメータの OpenAPI ドキュメント
+V1DataNotesDocs = FastAPIEndpointDocs(
+    "コミュニティノートのデータを取得するエンドポイント",
+    {
+        "note_ids": v1_data_notes_note_ids,
+        "created_at_from": v1_data_notes_created_at_from,
+        "created_at_to": v1_data_notes_created_at_to,
+        "topic_ids": v1_date_notes_topic_ids,
+        "post_ids": v1_data_notes_post_ids,
+        "current_status": v1_data_notes_current_status,
+        "language": v1_data_notes_language,
+    },
+)
 
-    note_ids = v1_data_notes_note_ids
-    created_at_from = v1_data_notes_created_at_from
-    created_at_to = v1_data_notes_created_at_to
-    topic_ids = v1_date_notes_topic_ids
-    post_ids = v1_data_notes_post_ids
-    current_status = v1_data_notes_current_status
-    language = v1_data_notes_language

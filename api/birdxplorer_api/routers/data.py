@@ -21,7 +21,7 @@ from birdxplorer_common.models import (
 )
 from birdxplorer_common.storage import Storage
 
-from .openapi_doc import V1DataNotesQueryDocs, V1DataPostsQueryDocs
+from .openapi_doc import V1DataNotesDocs, V1DataPostsDocs
 
 
 class TopicListResponse(BaseModel):
@@ -71,15 +71,17 @@ def gen_router(storage: Storage) -> APIRouter:
     def get_topics() -> TopicListResponse:
         return TopicListResponse(data=list(storage.get_topics()))
 
-    @router.get("/notes", response_model=NoteListResponse)
+    @router.get("/notes", description=V1DataNotesDocs.description, response_model=NoteListResponse)
     def get_notes(
-        note_ids: Union[List[NoteId], None] = Query(default=None, **V1DataNotesQueryDocs.note_ids),
-        created_at_from: Union[None, TwitterTimestamp] = Query(default=None, **V1DataNotesQueryDocs.created_at_from),
-        created_at_to: Union[None, TwitterTimestamp] = Query(default=None, **V1DataNotesQueryDocs.created_at_to),
-        topic_ids: Union[List[TopicId], None] = Query(default=None, **V1DataNotesQueryDocs.topic_ids),
-        post_ids: Union[List[PostId], None] = Query(default=None, **V1DataNotesQueryDocs.post_ids),
-        current_status: Union[None, List[str]] = Query(default=None, **V1DataNotesQueryDocs.current_status),
-        language: Union[LanguageIdentifier, None] = Query(default=None, **V1DataNotesQueryDocs.language),
+        note_ids: Union[List[NoteId], None] = Query(default=None, **V1DataNotesDocs.params["note_ids"]),
+        created_at_from: Union[None, TwitterTimestamp] = Query(
+            default=None, **V1DataNotesDocs.params["created_at_from"]
+        ),
+        created_at_to: Union[None, TwitterTimestamp] = Query(default=None, **V1DataNotesDocs.params["created_at_to"]),
+        topic_ids: Union[List[TopicId], None] = Query(default=None, **V1DataNotesDocs.params["topic_ids"]),
+        post_ids: Union[List[PostId], None] = Query(default=None, **V1DataNotesDocs.params["post_ids"]),
+        current_status: Union[None, List[str]] = Query(default=None, **V1DataNotesDocs.params["current_status"]),
+        language: Union[LanguageIdentifier, None] = Query(default=None, **V1DataNotesDocs.params["language"]),
     ) -> NoteListResponse:
         return NoteListResponse(
             data=list(
@@ -95,20 +97,22 @@ def gen_router(storage: Storage) -> APIRouter:
             )
         )
 
-    @router.get("/posts", response_model=PostListResponse)
+    @router.get("/posts", description=V1DataPostsDocs.description, response_model=PostListResponse)
     def get_posts(
         request: Request,
-        post_id: Union[List[PostId], None] = Query(default=None, **V1DataPostsQueryDocs.post_id),
-        note_id: Union[List[NoteId], None] = Query(default=None, **V1DataPostsQueryDocs.note_id),
+        post_id: Union[List[PostId], None] = Query(default=None, **V1DataPostsDocs.params["post_id"]),
+        note_id: Union[List[NoteId], None] = Query(default=None, **V1DataPostsDocs.params["note_id"]),
         created_at_from: Union[None, TwitterTimestamp, str] = Query(
-            default=None, **V1DataPostsQueryDocs.created_at_from
+            default=None, **V1DataPostsDocs.params["created_at_from"]
         ),
-        created_at_to: Union[None, TwitterTimestamp, str] = Query(default=None, **V1DataPostsQueryDocs.created_at_to),
+        created_at_to: Union[None, TwitterTimestamp, str] = Query(
+            default=None, **V1DataPostsDocs.params["created_at_to"]
+        ),
         offset: int = Query(default=0, ge=0),
         limit: int = Query(default=100, gt=0, le=1000),
-        search_text: Union[None, str] = Query(default=None, **V1DataPostsQueryDocs.search_text),
-        search_url: Union[None, HttpUrl] = Query(default=None, **V1DataPostsQueryDocs.search_url),
-        media: bool = Query(default=True, **V1DataPostsQueryDocs.media),
+        search_text: Union[None, str] = Query(default=None, **V1DataPostsDocs.params["search_text"]),
+        search_url: Union[None, HttpUrl] = Query(default=None, **V1DataPostsDocs.params["search_url"]),
+        media: bool = Query(default=True, **V1DataPostsDocs.params["media"]),
     ) -> PostListResponse:
         if created_at_from is not None and isinstance(created_at_from, str):
             created_at_from = ensure_twitter_timestamp(created_at_from)
