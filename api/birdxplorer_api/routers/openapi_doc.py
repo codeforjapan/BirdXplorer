@@ -354,3 +354,21 @@ V1DataTopicsDocs = FastAPIEndpointDocs(
     "自動分類されたコミュニティノートのトピックを取得するエンドポイント",
     {},  # type: ignore[var-annotated]
 )
+
+
+v1_data_user_enrollments_participant_id: FastAPIEndpointParamDocs = {
+    "description": "取得するコミュニティノート参加ユーザーの ID。",
+    "openapi_examples": {
+        "single": {
+            "summary": "ID: B8B599F50C14003B9520DC8832612831B2D69BFC3B44C8336A800DF725396FBF のユーザーのデータを取得する",
+            "value": "B8B599F50C14003B9520DC8832612831B2D69BFC3B44C8336A800DF725396FBF",
+        },
+    },
+}
+
+V1DataUserEnrollmentsDocs = FastAPIEndpointDocs(
+    "コミュニティノート参加ユーザーのデータを取得するエンドポイント",
+    {
+        "participant_id": v1_data_user_enrollments_participant_id,
+    },
+)

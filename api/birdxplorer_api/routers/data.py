@@ -2,7 +2,7 @@ from datetime import timezone
 from typing import List, Union
 
 from dateutil.parser import parse as dateutil_parse
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import HttpUrl
 
 from birdxplorer_common.models import (
@@ -21,7 +21,12 @@ from birdxplorer_common.models import (
 )
 from birdxplorer_common.storage import Storage
 
-from .openapi_doc import V1DataNotesDocs, V1DataPostsDocs, V1DataTopicsDocs
+from .openapi_doc import (
+    V1DataNotesDocs,
+    V1DataPostsDocs,
+    V1DataTopicsDocs,
+    V1DataUserEnrollmentsDocs,
+)
 
 
 class TopicListResponse(BaseModel):
@@ -58,9 +63,13 @@ def ensure_twitter_timestamp(t: Union[str, TwitterTimestamp]) -> TwitterTimestam
 def gen_router(storage: Storage) -> APIRouter:
     router = APIRouter()
 
-    @router.get("/user-enrollments/{participant_id}", response_model=UserEnrollment)
+    @router.get(
+        "/user-enrollments/{participant_id}",
+        description=V1DataUserEnrollmentsDocs.description,
+        response_model=UserEnrollment,
+    )
     def get_user_enrollment_by_participant_id(
-        participant_id: ParticipantId,
+        participant_id: ParticipantId = Path(**V1DataUserEnrollmentsDocs.params["participant_id"]),
     ) -> UserEnrollment:
         res = storage.get_user_enrollment_by_participant_id(participant_id=participant_id)
         if res is None:
