@@ -5,7 +5,9 @@ from datetime import datetime, timedelta
 load_dotenv()
 
 default_start_time = int(datetime.combine(datetime.now() - timedelta(days=2), datetime.min.time()).timestamp() * 1000)
-default_end_time = int(datetime.now().timestamp() * 1000)
+default_end_time = int(
+    datetime.combine(datetime.now() - timedelta(days=1) - timedelta(hours=20), datetime.min.time()).timestamp() * 1000
+)
 
 TARGET_TWITTER_POST_START_UNIX_MILLISECOND = int(
     os.getenv("TARGET_TWITTER_POST_START_UNIX_MILLISECOND", default_start_time)
