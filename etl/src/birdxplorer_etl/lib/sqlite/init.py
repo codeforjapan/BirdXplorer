@@ -11,6 +11,7 @@ from birdxplorer_common.storage import (
     RowUserRecord,
     RowPostEmbedURLRecord,
     RowNoteStatusRecord,
+    RowPostMediaRecord,
 )
 
 
@@ -53,6 +54,9 @@ def init_postgresql():
     if not inspect(engine).has_table("row_post_embed_urls"):
         logging.info("Creating table post_embed_urls")
         RowPostEmbedURLRecord.metadata.create_all(engine)
+    if not inspect(engine).has_table("row_post_media"):
+        logging.info("Creating table post_media")
+        RowPostMediaRecord.metadata.create_all(engine)
 
     Session = sessionmaker(bind=engine)
 

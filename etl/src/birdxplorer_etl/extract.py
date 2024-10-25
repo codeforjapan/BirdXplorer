@@ -168,11 +168,16 @@ def extract_data(sqlite: Session, postgresql: Session):
             lang=post["data"]["lang"],
         )
         postgresql.add(row_post)
-        postgresql.commit()
+
+        try:
+            postgresql.commit()
+        except Exception as e:
+            logging.error(f"Error: {e}")
+            postgresql.rollback()
 
         media_recs = [
             RowPostMediaRecord(
-                media_key=m["media_key"],
+                media_key=f"{m['media_key']}-{post['data']['id']}",
                 type=m["type"],
                 url=m.get("url") or (m["variants"][0]["url"] if "variants" in m and m["variants"] else ""),
                 width=m["width"],
@@ -186,15 +191,25 @@ def extract_data(sqlite: Session, postgresql: Session):
         if "entities" in post["data"] and "urls" in post["data"]["entities"]:
             for url in post["data"]["entities"]["urls"]:
                 if "unwound_url" in url:
-                    post_url = RowPostEmbedURLRecord(
-                        post_id=post["data"]["id"],
-                        url=url["url"] if url["url"] else None,
-                        expanded_url=url["expanded_url"] if url["expanded_url"] else None,
-                        unwound_url=url["unwound_url"] if url["unwound_url"] else None,
+                    is_urlExist = (
+                        postgresql.query(RowPostEmbedURLRecord)
+                        .filter(RowPostEmbedURLRecord.post_id == post["data"]["id"])
+                        .filter(RowPostEmbedURLRecord.url == url["url"])
+                        .first()
                     )
-                    postgresql.add(post_url)
+                    if is_urlExist is None:
+                        post_url = RowPostEmbedURLRecord(
+                            post_id=post["data"]["id"],
+                            url=url["url"] if url["url"] else None,
+                            expanded_url=url["expanded_url"] if url["expanded_url"] else None,
+                            unwound_url=url["unwound_url"] if url["unwound_url"] else None,
+                        )
+                        postgresql.add(post_url)
         note.row_post_id = tweet_id
-        postgresql.commit()
-        continue
+        try:
+            postgresql.commit()
+        except Exception as e:
+            logging.error(f"Error: {e}")
+            postgresql.rollback()
 
     return
