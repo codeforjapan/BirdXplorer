@@ -224,7 +224,7 @@ class RowPostRecord(Base):
 class RowPostMediaRecord(Base):
     __tablename__ = "row_post_media"
 
-    media_key: Mapped[String] = mapped_column(primary_key=True)
+    media_key: Mapped[String] = mapped_column(primary_key=True, unique=True)
 
     url: Mapped[String] = mapped_column(nullable=False)
     type: Mapped[MediaType] = mapped_column(nullable=False)
