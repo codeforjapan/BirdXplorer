@@ -21,7 +21,7 @@ from birdxplorer_common.models import (
 )
 from birdxplorer_common.storage import Storage
 
-from .openapi_doc import V1DataNotesDocs, V1DataPostsDocs
+from .openapi_doc import V1DataNotesDocs, V1DataPostsDocs, V1DataTopicsDocs
 
 
 class TopicListResponse(BaseModel):
@@ -67,7 +67,7 @@ def gen_router(storage: Storage) -> APIRouter:
             raise ValueError(f"participant_id={participant_id} not found")
         return res
 
-    @router.get("/topics", response_model=TopicListResponse)
+    @router.get("/topics", description=V1DataTopicsDocs.description, response_model=TopicListResponse)
     def get_topics() -> TopicListResponse:
         return TopicListResponse(data=list(storage.get_topics()))
 
