@@ -30,7 +30,8 @@ dependencies = [
     "pytest",
     "prefect",
     "stringcase",
-    "openai"
+    "openai",
+    "boto3",
 ]
 
 [project.urls]
