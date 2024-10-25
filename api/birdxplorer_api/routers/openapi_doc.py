@@ -348,3 +348,9 @@ V1DataNotesDocs = FastAPIEndpointDocs(
     },
 )
 
+# 第2引数を空の辞書にすると mypy に怒られる
+# が、第2引数が空の辞書でも怒られない実装にすると param 辞書の補完が効かなくなるので、エラーを無視する
+V1DataTopicsDocs = FastAPIEndpointDocs(
+    "自動分類されたコミュニティノートのトピックを取得するエンドポイント",
+    {},  # type: ignore[var-annotated]
+)
