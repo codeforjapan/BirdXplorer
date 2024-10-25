@@ -21,7 +21,7 @@ from birdxplorer_common.models import (
 )
 from birdxplorer_common.storage import Storage
 
-from .openapi_doc import V1DataPostsQueryDocs
+from .openapi_doc import V1DataNotesQueryDocs, V1DataPostsQueryDocs
 
 
 class TopicListResponse(BaseModel):
@@ -73,13 +73,13 @@ def gen_router(storage: Storage) -> APIRouter:
 
     @router.get("/notes", response_model=NoteListResponse)
     def get_notes(
-        note_ids: Union[List[NoteId], None] = Query(default=None),
-        created_at_from: Union[None, TwitterTimestamp] = Query(default=None),
-        created_at_to: Union[None, TwitterTimestamp] = Query(default=None),
-        topic_ids: Union[List[TopicId], None] = Query(default=None),
-        post_ids: Union[List[PostId], None] = Query(default=None),
-        current_status: Union[None, List[str]] = Query(default=None),
-        language: Union[LanguageIdentifier, None] = Query(default=None),
+        note_ids: Union[List[NoteId], None] = Query(default=None, **V1DataNotesQueryDocs.note_ids),
+        created_at_from: Union[None, TwitterTimestamp] = Query(default=None, **V1DataNotesQueryDocs.created_at_from),
+        created_at_to: Union[None, TwitterTimestamp] = Query(default=None, **V1DataNotesQueryDocs.created_at_to),
+        topic_ids: Union[List[TopicId], None] = Query(default=None, **V1DataNotesQueryDocs.topic_ids),
+        post_ids: Union[List[PostId], None] = Query(default=None, **V1DataNotesQueryDocs.post_ids),
+        current_status: Union[None, List[str]] = Query(default=None, **V1DataNotesQueryDocs.current_status),
+        language: Union[LanguageIdentifier, None] = Query(default=None, **V1DataNotesQueryDocs.language),
     ) -> NoteListResponse:
         return NoteListResponse(
             data=list(
