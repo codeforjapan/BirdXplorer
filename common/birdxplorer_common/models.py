@@ -30,7 +30,7 @@ from pydantic import (
 from pydantic.alias_generators import to_camel
 from pydantic.json_schema import JsonSchemaValue
 from pydantic.main import IncEx
-from pydantic_core import core_schema
+from pydantic_core import Url, core_schema
 
 StrT = TypeVar("StrT", bound="BaseString")
 IntT = TypeVar("IntT", bound="BaseInt")
@@ -666,22 +666,39 @@ TopicLabel: TypeAlias = Dict[LanguageIdentifier, TopicLabelString]
 class Topic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    topic_id: TopicId
-    label: TopicLabel
-    reference_count: NonNegativeInt
+    topic_id: Annotated[TopicId, PydanticField(description="トピックの ID")]
+    label: Annotated[TopicLabel, PydanticField(description="トピックの言語ごとのラベル")]
+    reference_count: Annotated[
+        NonNegativeInt, PydanticField(description="このトピックに分類されたコミュニティノートの数")
+    ]
 
 
 class SummaryString(NonEmptyTrimmedString): ...
 
 
 class Note(BaseModel):
-    note_id: NoteId
-    post_id: PostId
-    language: LanguageIdentifier
-    topics: List[Topic]
-    summary: SummaryString
-    current_status: str | None
-    created_at: TwitterTimestamp
+    note_id: Annotated[NoteId, PydanticField(description="コミュニティノートの ID")]
+    post_id: Annotated[PostId, PydanticField(description="コミュニティノートに対応する X の Post の ID")]
+    language: Annotated[LanguageIdentifier, PydanticField(description="コミュニティノートの言語")]
+    topics: Annotated[List[Topic], PydanticField(description="推定されたコミュニティノートのトピック")]
+    summary: Annotated[SummaryString, PydanticField(description="コミュニティノートの本文")]
+    current_status: Annotated[
+        Annotated[
+            str,
+            PydanticField(
+                json_schema_extra={
+                    "enum": ["NEEDS_MORE_RATINGS", "CURRENTLY_RATED_HELPFUL", "CURRENTLY_RATED_NOT_HELPFUL"]
+                },
+            ),
+        ]
+        | None,
+        PydanticField(
+            description="コミュニティノートの現在の評価状態",
+        ),
+    ]
+    created_at: Annotated[
+        TwitterTimestamp, PydanticField(description="コミュニティノートの作成日時 (ミリ秒単位の UNIX EPOCH TIMESTAMP)")
+    ]
 
 
 class UserId(UpToNineteenDigitsDecimalString): ...
@@ -796,41 +813,42 @@ class Link(BaseModel):
 
 
 class Post(BaseModel):
-    post_id: PostId
-    x_user_id: UserId
-    x_user: XUser
-    text: str
-    media_details: Annotated[MediaDetails, PydanticField(default_factory=lambda: [])]
-    created_at: TwitterTimestamp
-    like_count: NonNegativeInt
-    repost_count: NonNegativeInt
-    impression_count: NonNegativeInt
-    links: List[Link] = []
+    post_id: Annotated[PostId, PydanticField(description="X の Post の ID")]
+    x_user_id: Annotated[UserId, PydanticField(description="Post を投稿したユーザーの ID。`xUser.userId` と同じ")]
+    x_user: Annotated[XUser, PydanticField(description="Post を投稿したユーザーの情報")]
+    text: Annotated[str, PydanticField(description="Post の本文")]
+    media_details: Annotated[
+        MediaDetails, PydanticField(default_factory=lambda: [], description="Post に含まれるメディア情報のリスト")
+    ]
+    created_at: Annotated[
+        TwitterTimestamp, PydanticField(description="Post の作成日時 (ミリ秒単位の UNIX EPOCH TIMESTAMP)")
+    ]
+    like_count: Annotated[NonNegativeInt, PydanticField(description="Post のいいね数")]
+    repost_count: Annotated[NonNegativeInt, PydanticField(description="Post のリポスト数")]
+    impression_count: Annotated[NonNegativeInt, PydanticField(description="Post の表示回数")]
+    links: Annotated[
+        List[Link], PydanticField(default_factory=lambda: [], description="Post に含まれるリンク情報のリスト")
+    ]
 
+    @computed_field(description="Post を X 上で表示する URL")  # type: ignore[prop-decorator]
     @property
-    @computed_field
     def link(self) -> HttpUrl:
         """
         PostのX上でのURLを返す。
-
-        Examples
-        --------
-        >>> post = Post(post_id="1234567890123456789",
-                        x_user_id="1234567890123456789",
-                        x_user=XUser(user_id="1234567890123456789",
-                                     name="test",
-                                     profile_image="https://x.com/test"),
-                        text="test",
-                        created_at=1288834974657,
-                        like_count=1,
-                        repost_count=1,
-                        impression_count=1)
-        >>> post.link
-        HttpUrl('https://x.com/test/status/1234567890123456789')
         """
-        return HttpUrl(f"https://x.com/{self.x_user.name}/status/{self.post_id}")
+        return Url(f"https://x.com/{self.x_user.name}/status/{self.post_id}")
 
 
 class PaginationMeta(BaseModel):
-    next: Optional[HttpUrl] = None
-    prev: Optional[HttpUrl] = None
+    next: Annotated[
+        Optional[HttpUrl],
+        PydanticField(
+            description="次のページのリクエスト用 URL",
+        ),
+    ] = None
+    prev: Annotated[
+        Optional[HttpUrl],
+        PydanticField(
+            description="前のページのリクエスト用 URL",
+        ),
+    ] = None
