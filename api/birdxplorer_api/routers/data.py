@@ -1,9 +1,12 @@
 from datetime import timezone
-from typing import List, Union
+from typing import List, TypeAlias, Union
 
 from dateutil.parser import parse as dateutil_parse
 from fastapi import APIRouter, HTTPException, Path, Query, Request
+from pydantic import Field as PydanticField
 from pydantic import HttpUrl
+from pydantic_core import Url
+from typing_extensions import Annotated
 
 from birdxplorer_api.openapi_doc import (
     V1DataNotesDocs,
@@ -14,6 +17,7 @@ from birdxplorer_api.openapi_doc import (
 from birdxplorer_common.models import (
     BaseModel,
     LanguageIdentifier,
+    NonNegativeInt,
     Note,
     NoteId,
     PaginationMeta,
@@ -22,23 +26,79 @@ from birdxplorer_common.models import (
     PostId,
     Topic,
     TopicId,
+    TopicLabelString,
     TwitterTimestamp,
     UserEnrollment,
 )
 from birdxplorer_common.storage import Storage
 
+PaginationMetaWithExamples: TypeAlias = Annotated[
+    PaginationMeta,
+    PydanticField(
+        description="ページネーション用情報。 リクエスト時に指定した offset / limit の値に応じて、次のページや前のページのリクエスト用 URL が設定される。",
+        examples=[
+            # TODO: 公開エンドポイントの URL に差し替える
+            PaginationMeta(next=Url("http://127.0.0.1:8000/api/v1/data/posts?offset=100&limit=100"), prev=None)
+        ],
+    ),
+]
+
+TopicListWithExamples: TypeAlias = Annotated[
+    List[Topic],
+    PydanticField(
+        description="推定されたトピックのリスト",
+        examples=[
+            [
+                # TODO: 実データの例に差し替える
+                Topic(
+                    topic_id=TopicId(1),
+                    label={
+                        LanguageIdentifier.EN: TopicLabelString("Technology"),
+                        LanguageIdentifier.JA: TopicLabelString("テクノロジー"),
+                    },
+                    reference_count=NonNegativeInt(123),
+                )
+            ]
+        ],
+    ),
+]
+
+NoteListWithExamples: TypeAlias = Annotated[
+    List[Note],
+    PydanticField(
+        description="コミュニティノートのリスト",
+        examples=[
+            [
+                # TODO: 実データの例に差し替える
+            ]
+        ],
+    ),
+]
+
+PostListWithExamples: TypeAlias = Annotated[
+    List[Post],
+    PydanticField(
+        description="X の Post のリスト",
+        examples=[
+            [
+                # TODO: 実データの例に差し替える
+            ]
+        ],
+    ),
+]
+
 
 class TopicListResponse(BaseModel):
-    data: List[Topic]
+    data: TopicListWithExamples
 
 
 class NoteListResponse(BaseModel):
-    data: List[Note]
+    data: NoteListWithExamples
 
 
 class PostListResponse(BaseModel):
-    data: List[Post]
-    meta: PaginationMeta
+    data: PostListWithExamples
+    meta: PaginationMetaWithExamples
 
 
 def str_to_twitter_timestamp(s: str) -> TwitterTimestamp:
@@ -139,6 +199,7 @@ def gen_router(storage: Storage) -> APIRouter:
                 with_media=media,
             )
         )
+
         total_count = storage.get_number_of_posts(
             post_ids=post_id,
             note_ids=note_id,
