@@ -5,6 +5,12 @@ from dateutil.parser import parse as dateutil_parse
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import HttpUrl
 
+from birdxplorer_api.openapi_doc import (
+    V1DataNotesDocs,
+    V1DataPostsDocs,
+    V1DataTopicsDocs,
+    V1DataUserEnrollmentsDocs,
+)
 from birdxplorer_common.models import (
     BaseModel,
     LanguageIdentifier,
@@ -20,13 +26,6 @@ from birdxplorer_common.models import (
     UserEnrollment,
 )
 from birdxplorer_common.storage import Storage
-
-from .openapi_doc import (
-    V1DataNotesDocs,
-    V1DataPostsDocs,
-    V1DataTopicsDocs,
-    V1DataUserEnrollmentsDocs,
-)
 
 
 class TopicListResponse(BaseModel):
