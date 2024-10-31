@@ -708,11 +708,11 @@ class UserName(NonEmptyTrimmedString): ...
 
 
 class XUser(BaseModel):
-    user_id: UserId
-    name: UserName
-    profile_image: HttpUrl
-    followers_count: NonNegativeInt
-    following_count: NonNegativeInt
+    user_id: Annotated[UserId, PydanticField(description="X ユーザーの ID")]
+    name: Annotated[UserName, PydanticField(description="X ユーザーのスクリーンネーム")]
+    profile_image: Annotated[HttpUrl, PydanticField(description="X ユーザーのプロフィール画像の URL")]
+    followers_count: Annotated[NonNegativeInt, PydanticField(description="X ユーザーのフォロワー数")]
+    following_count: Annotated[NonNegativeInt, PydanticField(description="X ユーザーのフォロー数")]
 
 
 # ref: https://developer.x.com/en/docs/x-api/data-dictionary/object-model/media
@@ -720,12 +720,12 @@ MediaType: TypeAlias = Literal["photo", "video", "animated_gif"]
 
 
 class Media(BaseModel):
-    media_key: str
+    media_key: Annotated[str, PydanticField(description="X 上でメディアを一意に識別できるキー")]
 
-    type: MediaType
-    url: HttpUrl
-    width: NonNegativeInt
-    height: NonNegativeInt
+    type: Annotated[MediaType, PydanticField(description="メディアの種類")]
+    url: Annotated[HttpUrl, PydanticField(description="メディアの URL")]
+    width: Annotated[NonNegativeInt, PydanticField(description="メディアの幅")]
+    height: Annotated[NonNegativeInt, PydanticField(description="メディアの高さ")]
 
 
 MediaDetails: TypeAlias = List[Media]
@@ -794,6 +794,10 @@ class LinkId(UUID):
 
 class Link(BaseModel):
     """
+    X に投稿された Post 内のリンク情報を正規化して保持するためのモデル。
+
+    t.co に短縮される前の URL ごとに一意な ID を持つ。
+
     >>> Link.model_validate_json('{"linkId": "d5d15194-6574-0c01-8f6f-15abd72b2cf6", "url": "https://example.com"}')
     Link(link_id=LinkId('d5d15194-6574-0c01-8f6f-15abd72b2cf6'), url=Url('https://example.com/'))
     >>> Link(url="https://example.com/")
@@ -802,8 +806,8 @@ class Link(BaseModel):
     Link(link_id=LinkId('d5d15194-6574-0c01-8f6f-15abd72b2cf6'), url=Url('https://example.com/'))
     """  # noqa: E501
 
-    link_id: LinkId
-    url: HttpUrl
+    link_id: Annotated[LinkId, PydanticField(description="リンクを識別できる UUID")]
+    url: Annotated[HttpUrl, PydanticField(description="リンクが指す URL")]
 
     @model_validator(mode="before")
     def validate_link_id(cls, values: Dict[str, Any]) -> Dict[str, Any]:
