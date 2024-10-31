@@ -4,7 +4,7 @@ from typing import Dict, Generic
 from fastapi.openapi.models import Example
 from typing_extensions import LiteralString, TypedDict, TypeVar
 
-from birdxplorer_common.models import LanguageIdentifier
+from birdxplorer_common.models import LanguageIdentifier, NoteId, PostId
 
 
 class FastAPIEndpointQueryDocsRequired(TypedDict):
@@ -28,6 +28,9 @@ class FastAPIEndpointDocs(Generic[_KEY]):
     params: Dict[_KEY, FastAPIEndpointParamDocs]
 
 
+SAMPLE_POST_IDS = [PostId("1828261879854309500"), PostId("1828261879854309501")]
+SAMPLE_NOTE_IDS = [NoteId("1726874378217161050"), NoteId("1726922868037198220")]
+
 v1_data_posts_post_id: FastAPIEndpointParamDocs = {
     "description": """
 データを取得する X の Post の ID。
@@ -43,17 +46,21 @@ v1_data_posts_post_id: FastAPIEndpointParamDocs = {
 | https://x.com/CodeforJapan/status/1828261879854309500 | 1828261879854309500 |
 """,
     "openapi_examples": {
+        "default": {
+            "summary": "指定しない (デフォルト)",
+            "value": None,
+        },
         "single": {
             "summary": "Post を 1つ取得する",
-            "value": ["1828261879854309500"],
+            "value": [SAMPLE_POST_IDS[0]],
         },
         "multiple_query": {
             "summary": "Post を複数取得する (クエリパラメータ)",
-            "value": ["1828261879854309500", "1828261879854309501"],
+            "value": SAMPLE_POST_IDS,
         },
         "multiple_comma": {
             "summary": "Post を複数取得する (カンマ区切り)",
-            "value": ["1828261879854309500,1828261879854309501"],
+            "value": [",".join(SAMPLE_POST_IDS)],
         },
     },
 }
@@ -66,17 +73,21 @@ Post のデータ取得に利用する X のコミュニティノートの ID。
 複数回クエリパラメータを指定する / カンマ区切りで複数の ID を指定することで複数の Post を一括で取得できる。
 """,
     "openapi_examples": {
+        "default": {
+            "summary": "指定しない (デフォルト)",
+            "value": None,
+        },
         "single": {
             "summary": "コミュニティノートに紐づいた Post を 1つ取得する",
-            "value": ["1"],
+            "value": [SAMPLE_NOTE_IDS[0]],
         },
         "multiple_query": {
             "summary": "複数のコミュニティノートについて、それぞれに紐づいた Post を取得する (クエリパラメータ)",
-            "value": ["1", "2"],
+            "value": SAMPLE_NOTE_IDS,
         },
         "multiple_comma": {
             "summary": "複数のコミュニティノートについて、それぞれに紐づいた Post を取得する (カンマ区切り)",
-            "value": ["1,2"],
+            "value": [",".join(SAMPLE_NOTE_IDS)],
         },
     },
 }
@@ -187,17 +198,21 @@ v1_data_notes_note_ids: FastAPIEndpointParamDocs = {
 複数回クエリパラメータを指定する / カンマ区切りで複数の ID を指定することで複数のコミュニティノートを一括で取得できる。
 """,
     "openapi_examples": {
+        "default": {
+            "summary": "指定しない (デフォルト)",
+            "value": None,
+        },
         "single": {
             "summary": "コミュニティノートを 1つ取得する",
-            "value": ["1"],
+            "value": [SAMPLE_NOTE_IDS[0]],
         },
         "multiple_query": {
             "summary": "コミュニティノートを複数取得する (クエリパラメータ)",
-            "value": ["1", "2"],
+            "value": SAMPLE_NOTE_IDS,
         },
         "multiple_comma": {
             "summary": "コミュニティノートを複数取得する (カンマ区切り)",
-            "value": ["1,2"],
+            "value": [",".join(SAMPLE_NOTE_IDS)],
         },
     },
 }
@@ -247,6 +262,10 @@ v1_date_notes_topic_ids: FastAPIEndpointParamDocs = {
 複数指定した場合は、 **いずれかのトピックに紐づいたコミュニティノート** を取得する。 (AND 検索ではなく OR 検索になる)
 """,
     "openapi_examples": {
+        "default": {
+            "summary": "指定しない (デフォルト)",
+            "value": None,
+        },
         "single": {
             "summary": "トピックに紐づいたコミュニティノートを取得する",
             "value": [1],
@@ -270,17 +289,21 @@ v1_data_notes_post_ids: FastAPIEndpointParamDocs = {
 複数回クエリパラメータを指定する / カンマ区切りで複数の ID を指定することで複数のコミュニティノートを一括で取得できる。
 """,
     "openapi_examples": {
+        "default": {
+            "summary": "指定しない (デフォルト)",
+            "value": None,
+        },
         "single": {
             "summary": "Post に紐づいたコミュニティノートを 1つ取得する",
-            "value": ["1"],
+            "value": [SAMPLE_POST_IDS[0]],
         },
         "multiple_query": {
             "summary": "複数の Post について、それぞれに紐づいたコミュニティノートを取得する (クエリパラメータ)",
-            "value": ["1", "2"],
+            "value": SAMPLE_POST_IDS,
         },
         "multiple_comma": {
             "summary": "複数の Post について、それぞれに紐づいたコミュニティノートを取得する (カンマ区切り)",
-            "value": ["1,2"],
+            "value": [",".join(SAMPLE_POST_IDS)],
         },
     },
 }
