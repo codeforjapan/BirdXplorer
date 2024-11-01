@@ -146,6 +146,7 @@ def link_samples(link_factory: LinkFactory) -> Generator[List[Link], None, None]
 
 @fixture
 def note_samples(note_factory: NoteFactory, topic_samples: List[Topic]) -> Generator[List[Note], None, None]:
+    topic_samples = [t.model_copy(update={"reference_count": 0}) for t in topic_samples]
     notes = [
         note_factory.build(
             note_id="1234567890123456781",
