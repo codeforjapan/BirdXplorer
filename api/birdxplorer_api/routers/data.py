@@ -94,6 +94,7 @@ class TopicListResponse(BaseModel):
 
 class NoteListResponse(BaseModel):
     data: NoteListWithExamples
+    meta: PaginationMeta
 
 
 class PostListResponse(BaseModel):
@@ -141,29 +142,58 @@ def gen_router(storage: Storage) -> APIRouter:
 
     @router.get("/notes", description=V1DataNotesDocs.description, response_model=NoteListResponse)
     def get_notes(
+        request: Request,
         note_ids: Union[List[NoteId], None] = Query(default=None, **V1DataNotesDocs.params["note_ids"]),
         created_at_from: Union[None, TwitterTimestamp] = Query(
             default=None, **V1DataNotesDocs.params["created_at_from"]
         ),
         created_at_to: Union[None, TwitterTimestamp] = Query(default=None, **V1DataNotesDocs.params["created_at_to"]),
+        offset: int = Query(default=0, ge=0),
+        limit: int = Query(default=100, gt=0, le=1000),
         topic_ids: Union[List[TopicId], None] = Query(default=None, **V1DataNotesDocs.params["topic_ids"]),
         post_ids: Union[List[PostId], None] = Query(default=None, **V1DataNotesDocs.params["post_ids"]),
         current_status: Union[None, List[str]] = Query(default=None, **V1DataNotesDocs.params["current_status"]),
         language: Union[LanguageIdentifier, None] = Query(default=None, **V1DataNotesDocs.params["language"]),
     ) -> NoteListResponse:
-        return NoteListResponse(
-            data=list(
-                storage.get_notes(
-                    note_ids=note_ids,
-                    created_at_from=created_at_from,
-                    created_at_to=created_at_to,
-                    topic_ids=topic_ids,
-                    post_ids=post_ids,
-                    current_status=current_status,
-                    language=language,
-                )
+        if created_at_from is not None and isinstance(created_at_from, str):
+            created_at_from = ensure_twitter_timestamp(created_at_from)
+        if created_at_to is not None and isinstance(created_at_to, str):
+            created_at_to = ensure_twitter_timestamp(created_at_to)
+
+        notes = list(
+            storage.get_notes(
+                note_ids=note_ids,
+                created_at_from=created_at_from,
+                created_at_to=created_at_to,
+                topic_ids=topic_ids,
+                post_ids=post_ids,
+                current_status=current_status,
+                language=language,
+                offset=offset,
+                limit=limit,
             )
         )
+        total_count = storage.get_number_of_notes(
+            note_ids=note_ids,
+            created_at_from=created_at_from,
+            created_at_to=created_at_to,
+            topic_ids=topic_ids,
+            post_ids=post_ids,
+            current_status=current_status,
+            language=language,
+        )
+
+        baseurl = str(request.url).split("?")[0]
+        next_offset = offset + limit
+        prev_offset = max(offset - limit, 0)
+        next_url = None
+        if next_offset < total_count:
+            next_url = f"{baseurl}?offset={next_offset}&limit={limit}"
+        prev_url = None
+        if offset > 0:
+            prev_url = f"{baseurl}?offset={prev_offset}&limit={limit}"
+
+        return NoteListResponse(data=notes, meta=PaginationMeta(next=next_url, prev=prev_url))
 
     @router.get("/posts", description=V1DataPostsDocs.description, response_model=PostListResponse)
     def get_posts(
