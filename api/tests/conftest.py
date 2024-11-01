@@ -321,6 +321,8 @@ def mock_storage(
     def _get_topics() -> Generator[Topic, None, None]:
         yield from topic_samples
 
+    mock.get_topics.side_effect = _get_topics
+
     def _get_notes(
         note_ids: Union[List[NoteId], None] = None,
         created_at_from: Union[None, TwitterTimestamp] = None,
@@ -329,6 +331,8 @@ def mock_storage(
         post_ids: Union[List[PostId], None] = None,
         current_status: Union[None, List[str]] = None,
         language: Union[LanguageIdentifier, None] = None,
+        offset: Union[int, None] = None,
+        limit: Union[int, None] = None,
     ) -> Generator[Note, None, None]:
         for note in note_samples:
             if note_ids is not None and note.note_id not in note_ids:
@@ -347,8 +351,22 @@ def mock_storage(
                 continue
             yield note
 
-    mock.get_topics.side_effect = _get_topics
     mock.get_notes.side_effect = _get_notes
+
+    def _get_number_of_notes(
+        note_ids: Union[List[NoteId], None] = None,
+        created_at_from: Union[None, TwitterTimestamp] = None,
+        created_at_to: Union[None, TwitterTimestamp] = None,
+        topic_ids: Union[List[TopicId], None] = None,
+        post_ids: Union[List[PostId], None] = None,
+        current_status: Union[None, List[str]] = None,
+        language: Union[LanguageIdentifier, None] = None,
+    ) -> int:
+        return len(
+            list(_get_notes(note_ids, created_at_from, created_at_to, topic_ids, post_ids, current_status, language))
+        )
+
+    mock.get_number_of_notes.side_effect = _get_number_of_notes
 
     def _get_posts(
         post_ids: Union[List[PostId], None] = None,

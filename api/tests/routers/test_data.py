@@ -180,7 +180,10 @@ def test_notes_get(client: TestClient, note_samples: List[Note]) -> None:
     response = client.get("/api/v1/data/notes")
     assert response.status_code == 200
     res_json = response.json()
-    assert res_json == {"data": [json.loads(d.model_dump_json()) for d in note_samples]}
+    assert res_json == {
+        "data": [json.loads(d.model_dump_json()) for d in note_samples],
+        "meta": {"next": None, "prev": None},
+    }
 
 
 def test_notes_get_has_note_id_filter(client: TestClient, note_samples: List[Note]) -> None:
@@ -191,7 +194,8 @@ def test_notes_get_has_note_id_filter(client: TestClient, note_samples: List[Not
         "data": [
             json.loads(note_samples[0].model_dump_json()),
             json.loads(note_samples[2].model_dump_json()),
-        ]
+        ],
+        "meta": {"next": None, "prev": None},
     }
 
 
@@ -199,21 +203,30 @@ def test_notes_get_has_created_at_filter_from_and_to(client: TestClient, note_sa
     response = client.get("/api/v1/data/notes/?createdAtFrom=1152921601000&createdAtTo=1152921603000")
     assert response.status_code == 200
     res_json = response.json()
-    assert res_json == {"data": [json.loads(note_samples[i].model_dump_json()) for i in (1, 2, 3)]}
+    assert res_json == {
+        "data": [json.loads(note_samples[i].model_dump_json()) for i in (1, 2, 3)],
+        "meta": {"next": None, "prev": None},
+    }
 
 
 def test_notes_get_has_created_at_filter_from(client: TestClient, note_samples: List[Note]) -> None:
     response = client.get("/api/v1/data/notes/?createdAtFrom=1152921601000")
     assert response.status_code == 200
     res_json = response.json()
-    assert res_json == {"data": [json.loads(note_samples[i].model_dump_json()) for i in (1, 2, 3, 4)]}
+    assert res_json == {
+        "data": [json.loads(note_samples[i].model_dump_json()) for i in (1, 2, 3, 4)],
+        "meta": {"next": None, "prev": None},
+    }
 
 
 def test_notes_get_has_created_at_filter_to(client: TestClient, note_samples: List[Note]) -> None:
     response = client.get("/api/v1/data/notes/?createdAtTo=1152921603000")
     assert response.status_code == 200
     res_json = response.json()
-    assert res_json == {"data": [json.loads(note_samples[i].model_dump_json()) for i in (0, 1, 2, 3)]}
+    assert res_json == {
+        "data": [json.loads(note_samples[i].model_dump_json()) for i in (0, 1, 2, 3)],
+        "meta": {"next": None, "prev": None},
+    }
 
 
 def test_notes_get_has_topic_id_filter(client: TestClient, note_samples: List[Note]) -> None:
@@ -222,5 +235,6 @@ def test_notes_get_has_topic_id_filter(client: TestClient, note_samples: List[No
     assert response.status_code == 200
     res_json = response.json()
     assert res_json == {
-        "data": [json.loads(correct_notes[i].model_dump_json()) for i in range(correct_notes.__len__())]
+        "data": [json.loads(correct_notes[i].model_dump_json()) for i in range(correct_notes.__len__())],
+        "meta": {"next": None, "prev": None},
     }
