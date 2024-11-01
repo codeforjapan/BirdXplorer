@@ -1,5 +1,15 @@
 # BirdXplorer の 使用例
 
+## API仕様の閲覧
+
+API 仕様は、[Swagger UI](https://birdxplorer.onrender.com/docs) で閲覧できます。
+
+また、[OpenAPI Spec](https://birdxplorer.onrender.com/openapi.json) も提供しています。
+
+> [!TIP]
+> OpenAPI Specification から API リクエスト用のコードを生成するライブラリを使用することで、
+> API の入出力をコード上で安全に扱えることがあります。
+
 ## 特定のトピックのコミュニティノートと、そのトピックに関連するツイートを取得する
 
 BirdXplorer では、コミュニティノートのトピックを AI で推定して分類しています。
