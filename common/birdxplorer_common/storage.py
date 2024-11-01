@@ -338,6 +338,8 @@ class Storage:
         post_ids: Union[List[PostId], None] = None,
         current_status: Union[None, List[str]] = None,
         language: Union[LanguageIdentifier, None] = None,
+        offset: Union[int, None] = None,
+        limit: int = 100,
     ) -> Generator[NoteModel, None, None]:
         with Session(self.engine) as sess:
             query = sess.query(NoteRecord)
@@ -363,6 +365,9 @@ class Storage:
                 query = query.filter(NoteRecord.language == language)
             if current_status is not None:
                 query = query.filter(NoteRecord.current_status.in_(current_status))
+            if offset is not None:
+                query = query.offset(offset)
+            query = query.limit(limit)
             for note_record in query.all():
                 yield NoteModel(
                     note_id=note_record.note_id,
@@ -371,10 +376,11 @@ class Storage:
                         TopicModel(
                             topic_id=topic.topic_id,
                             label=topic.topic.label,
-                            reference_count=sess.query(func.count(NoteTopicAssociation.note_id))
-                            .filter(NoteTopicAssociation.topic_id == topic.topic_id)
-                            .scalar()
-                            or 0,
+                            reference_count=0,
+                            # reference_count=sess.query(func.count(NoteTopicAssociation.note_id))
+                            # .filter(NoteTopicAssociation.topic_id == topic.topic_id)
+                            # .scalar()
+                            # or 0,
                         )
                         for topic in note_record.topics
                     ],
@@ -383,6 +389,42 @@ class Storage:
                     current_status=note_record.current_status,
                     created_at=note_record.created_at,
                 )
+
+    def get_number_of_notes(
+        self,
+        note_ids: Union[List[NoteId], None] = None,
+        created_at_from: Union[None, TwitterTimestamp] = None,
+        created_at_to: Union[None, TwitterTimestamp] = None,
+        topic_ids: Union[List[TopicId], None] = None,
+        post_ids: Union[List[PostId], None] = None,
+        current_status: Union[None, List[str]] = None,
+        language: Union[LanguageIdentifier, None] = None,
+    ) -> int:
+        with Session(self.engine) as sess:
+            query = sess.query(NoteRecord)
+            if note_ids is not None:
+                query = query.filter(NoteRecord.note_id.in_(note_ids))
+            if created_at_from is not None:
+                query = query.filter(NoteRecord.created_at >= created_at_from)
+            if created_at_to is not None:
+                query = query.filter(NoteRecord.created_at <= created_at_to)
+            if topic_ids is not None:
+                # 同じトピックIDを持つノートを取得するためのサブクエリ
+                # とりあえずANDを実装
+                subq = (
+                    select(NoteTopicAssociation.note_id)
+                    .group_by(NoteTopicAssociation.note_id)
+                    .having(func.bool_or(NoteTopicAssociation.topic_id.in_(topic_ids)))
+                    .subquery()
+                )
+                query = query.join(subq, NoteRecord.note_id == subq.c.note_id)
+            if post_ids is not None:
+                query = query.filter(NoteRecord.post_id.in_(post_ids))
+            if language is not None:
+                query = query.filter(NoteRecord.language == language)
+            if current_status is not None:
+                query = query.filter(NoteRecord.current_status.in_(current_status))
+            return query.count()
 
     def get_posts(
         self,
