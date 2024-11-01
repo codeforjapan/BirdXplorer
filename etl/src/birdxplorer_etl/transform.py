@@ -17,8 +17,8 @@ from birdxplorer_common.storage import (
     RowPostRecord,
     RowUserRecord,
 )
-from birdxplorer_etl.lib.ai_model.ai_model_interface import get_ai_service
-from birdxplorer_etl.settings import (
+from lib.ai_model.ai_model_interface import get_ai_service
+from settings import (
     TARGET_NOTE_ESTIMATE_TOPIC_END_UNIX_MILLISECOND,
     TARGET_NOTE_ESTIMATE_TOPIC_START_UNIX_MILLISECOND,
 )
@@ -65,6 +65,12 @@ def transform_data(sqlite: Session, postgresql: Session):
                     RowNoteStatusRecord.current_status,
                     func.cast(RowNoteRecord.created_at_millis, Integer).label("created_at"),
                 )
+                .filter(
+                    and_(
+                        RowNoteRecord.created_at_millis <= TARGET_NOTE_ESTIMATE_TOPIC_END_UNIX_MILLISECOND,
+                        RowNoteRecord.created_at_millis >= TARGET_NOTE_ESTIMATE_TOPIC_START_UNIX_MILLISECOND,
+                    )
+                )
                 .join(RowNoteStatusRecord, RowNoteRecord.note_id == RowNoteStatusRecord.note_id)
                 .limit(limit)
                 .offset(offset)
@@ -73,6 +79,7 @@ def transform_data(sqlite: Session, postgresql: Session):
             for note in notes:
                 note_as_list = list(note)
                 note_as_list.append(ai_service.detect_language(note[2]))
+                note_as_list.append("ja")
                 writer = csv.writer(file)
                 writer.writerow(note_as_list)
             offset += limit
@@ -156,28 +163,7 @@ def transform_data(sqlite: Session, postgresql: Session):
     generate_post_link(postgresql)
 
     # Transform row post embed url data and generate post_embed_url.csv
-    csv_seed_file_path = "./seed/topic_seed.csv"
-    output_csv_file_path = "./data/transformed/topic.csv"
-    records = []
-
-    if os.path.exists(output_csv_file_path):
-        return
-
-    with open(csv_seed_file_path, newline="", encoding="utf-8") as csvfile:
-        reader = csv.DictReader(csvfile)
-        for index, row in enumerate(reader):
-            if "ja" in row and row["ja"]:
-                topic_id = index + 1
-                label = {"ja": row["ja"], "en": row["en"]}  # Assuming the label is in Japanese
-                record = {"topic_id": topic_id, "label": label}
-                records.append(record)
-
-    with open(output_csv_file_path, "a", newline="", encoding="utf-8") as file:
-        fieldnames = ["topic_id", "label"]
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
-        writer.writeheader()
-        for record in records:
-            writer.writerow({"topic_id": record["topic_id"], "label": {k: v for k, v in record["label"].items()}})
+    generate_topic()
 
     generate_note_topic(sqlite)
 
@@ -270,6 +256,31 @@ def generate_post_link(postgresql: Session):
                 writer = csv.DictWriter(file, fieldnames=fieldnames)
                 writer.writerow({"post_id": link.post_id, "link_id": link_id})
         offset += limit
+
+
+def generate_topic():
+    csv_seed_file_path = "./seed/topic_seed.csv"
+    output_csv_file_path = "./data/transformed/topic.csv"
+    records = []
+
+    if os.path.exists(output_csv_file_path):
+        return
+
+    with open(csv_seed_file_path, newline="", encoding="utf-8") as csvfile:
+        reader = csv.DictReader(csvfile)
+        for index, row in enumerate(reader):
+            if "ja" in row and row["ja"]:
+                topic_id = index + 1
+                label = {"ja": row["ja"], "en": row["en"]}  # Assuming the label is in Japanese
+                record = {"topic_id": topic_id, "label": label}
+                records.append(record)
+
+    with open(output_csv_file_path, "a", newline="", encoding="utf-8") as file:
+        fieldnames = ["topic_id", "label"]
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        for record in records:
+            writer.writerow({"topic_id": record["topic_id"], "label": {k: v for k, v in record["label"].items()}})
 
 
 def generate_note_topic(sqlite: Session):
