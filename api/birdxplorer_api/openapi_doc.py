@@ -29,7 +29,7 @@ class FastAPIEndpointDocs(Generic[_KEY]):
 
 
 SAMPLE_POST_IDS = [PostId("1828261879854309500"), PostId("1828261879854309501")]
-SAMPLE_NOTE_IDS = [NoteId("1726874378217161050"), NoteId("1726922868037198220")]
+SAMPLE_NOTE_IDS = [NoteId("1845672983001710655"), NoteId("1845776988935770187")]
 
 v1_data_posts_post_id: FastAPIEndpointParamDocs = {
     "description": """
@@ -170,7 +170,7 @@ v1_data_posts_limit: FastAPIEndpointParamDocs = {
 
 v1_data_posts_search_text: FastAPIEndpointParamDocs = {
     "description": """
-指定した文字列を含む Post を検索して取得する。検索は Post の本文に対して**完全一致**で行われる。
+指定した文字列を含む Post を検索して取得する。検索は Post の**本文に対して**行われる。
 """,
     "openapi_examples": {
         "default": {
@@ -458,7 +458,7 @@ V1DataNotesDocs = FastAPIEndpointDocs(
 # 第2引数を空の辞書にすると mypy に怒られる
 # が、第2引数が空の辞書でも怒られない実装にすると param 辞書の補完が効かなくなるので、エラーを無視する
 V1DataTopicsDocs = FastAPIEndpointDocs(
-    "自動分類されたコミュニティノートのトピックを取得するエンドポイント",
+    "自動分類されたコミュニティノートのトピック一覧を取得するエンドポイント",
     {},  # type: ignore[var-annotated]
 )
 

@@ -5,7 +5,6 @@ from dateutil.parser import parse as dateutil_parse
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import Field as PydanticField
 from pydantic import HttpUrl
-from pydantic_core import Url
 from typing_extensions import Annotated
 
 from birdxplorer_api.openapi_doc import (
@@ -17,7 +16,6 @@ from birdxplorer_api.openapi_doc import (
 from birdxplorer_common.models import (
     BaseModel,
     LanguageIdentifier,
-    NonNegativeInt,
     Note,
     NoteId,
     PaginationMeta,
@@ -26,20 +24,32 @@ from birdxplorer_common.models import (
     PostId,
     Topic,
     TopicId,
-    TopicLabelString,
     TwitterTimestamp,
     UserEnrollment,
 )
 from birdxplorer_common.storage import Storage
 
-PaginationMetaWithExamples: TypeAlias = Annotated[
+PostsPaginationMetaWithExamples: TypeAlias = Annotated[
     PaginationMeta,
     PydanticField(
         description="ページネーション用情報。 リクエスト時に指定した offset / limit の値に応じて、次のページや前のページのリクエスト用 URL が設定される。",
-        examples=[
-            # TODO: 公開エンドポイントの URL に差し替える
-            PaginationMeta(next=Url("http://127.0.0.1:8000/api/v1/data/posts?offset=100&limit=100"), prev=None)
-        ],
+        json_schema_extra={
+            "examples": [
+                {"next": "http://birdxplorer.onrender.com/api/v1/data/posts?offset=100&limit=100", "prev": "null"}
+            ]
+        },
+    ),
+]
+
+NotesPaginationMetaWithExamples: TypeAlias = Annotated[
+    PaginationMeta,
+    PydanticField(
+        description="ページネーション用情報。 リクエスト時に指定した offset / limit の値に応じて、次のページや前のページのリクエスト用 URL が設定される。",
+        json_schema_extra={
+            "examples": [
+                {"next": "http://birdxplorer.onrender.com/api/v1/data/notes?offset=100&limit=100", "prev": "null"}
+            ]
+        },
     ),
 ]
 
@@ -47,19 +57,14 @@ TopicListWithExamples: TypeAlias = Annotated[
     List[Topic],
     PydanticField(
         description="推定されたトピックのリスト",
-        examples=[
-            [
-                # TODO: 実データの例に差し替える
-                Topic(
-                    topic_id=TopicId(1),
-                    label={
-                        LanguageIdentifier.EN: TopicLabelString("Technology"),
-                        LanguageIdentifier.JA: TopicLabelString("テクノロジー"),
-                    },
-                    reference_count=NonNegativeInt(123),
-                )
+        json_schema_extra={
+            "examples": [
+                [
+                    {"label": {"en": "Human rights", "ja": "人権"}, "referenceCount": 5566, "topicId": 28},
+                    {"label": {"en": "Media", "ja": "メディア"}, "referenceCount": 3474, "topicId": 25},
+                ]
             ]
-        ],
+        },
     ),
 ]
 
@@ -67,11 +72,27 @@ NoteListWithExamples: TypeAlias = Annotated[
     List[Note],
     PydanticField(
         description="コミュニティノートのリスト",
-        examples=[
-            [
-                # TODO: 実データの例に差し替える
+        json_schema_extra={
+            "examples": [
+                {
+                    "noteId": "1845672983001710655",
+                    "postId": "1842116937066955027",
+                    "language": "ja",
+                    "topics": [
+                        {
+                            "topicId": 26,
+                            "label": {"ja": "セキュリティ上の脅威", "en": "security threat"},
+                            "referenceCount": 0,
+                        },
+                        {"topicId": 47, "label": {"ja": "検閲", "en": "Censorship"}, "referenceCount": 0},
+                        {"topicId": 51, "label": {"ja": "テクノロジー", "en": "technology"}, "referenceCount": 0},
+                    ],
+                    "summary": "Content Security Policyは情報の持ち出しを防止する仕組みではありません。コンテンツインジェクションの脆弱性のリスクを軽減する仕組みです。適切なContent Security Policyがレスポンスヘッダーに設定されている場合でも、外部への通信をブロックできない点に注意が必要です。    Content Security Policy Level 3  https://w3c.github.io/webappsec-csp/",
+                    "currentStatus": "NEEDS_MORE_RATINGS",
+                    "createdAt": 1728877704750,
+                },
             ]
-        ],
+        },
     ),
 ]
 
@@ -79,11 +100,42 @@ PostListWithExamples: TypeAlias = Annotated[
     List[Post],
     PydanticField(
         description="X の Post のリスト",
-        examples=[
-            [
-                # TODO: 実データの例に差し替える
+        json_schema_extra={
+            "examples": [
+                {
+                    "postId": "1846718284369912064",
+                    "xUserId": "90954365",
+                    "xUser": {
+                        "userId": "90954365",
+                        "name": "earthquakejapan",
+                        "profileImage": "https://pbs.twimg.com/profile_images/1638600342/japan_rel96_normal.jpg",
+                        "followersCount": 162934,
+                        "followingCount": 6,
+                    },
+                    "text": "今後48時間以内に日本ではマグニチュード6.0の地震が発生する可能性があります。地図をご覧ください。（10月17日～10月18日） - https://t.co/nuyiVdM4FW https://t.co/Xd6U9XkpbL",
+                    "mediaDetails": [
+                        {
+                            "mediaKey": "3_1846718279236177920-1846718284369912064",
+                            "type": "photo",
+                            "url": "https://pbs.twimg.com/media/GaDcfZoX0AAko2-.jpg",
+                            "width": 900,
+                            "height": 738,
+                        }
+                    ],
+                    "createdAt": 1729094524000,
+                    "likeCount": 451,
+                    "repostCount": 104,
+                    "impressionCount": 82378,
+                    "links": [
+                        {
+                            "linkId": "9c139b99-8111-e4f0-ad41-fc9e40d08722",
+                            "url": "https://www.quakeprediction.com/Earthquake%20Forecast%20Japan.html",
+                        }
+                    ],
+                    "link": "https://x.com/earthquakejapan/status/1846718284369912064",
+                },
             ]
-        ],
+        },
     ),
 ]
 
@@ -94,12 +146,12 @@ class TopicListResponse(BaseModel):
 
 class NoteListResponse(BaseModel):
     data: NoteListWithExamples
-    meta: PaginationMeta
+    meta: NotesPaginationMetaWithExamples
 
 
 class PostListResponse(BaseModel):
     data: PostListWithExamples
-    meta: PaginationMetaWithExamples
+    meta: PostsPaginationMetaWithExamples
 
 
 def str_to_twitter_timestamp(s: str) -> TwitterTimestamp:
