@@ -55,7 +55,9 @@ def extract_data(sqlite: Session, postgresql: Session):
             for index, row in enumerate(reader):
                 if sqlite.query(RowNoteRecord).filter(RowNoteRecord.note_id == row["note_id"]).first():
                     continue
-                rows_to_add.append(RowNoteRecord(**row))
+                row_note = RowNoteRecord(**row)
+                row_note.row_post_id = row["tweet_id"]
+                rows_to_add.append(row_note)
                 if index % 1000 == 0:
                     sqlite.bulk_save_objects(rows_to_add)
                     rows_to_add = []
@@ -96,11 +98,18 @@ def extract_data(sqlite: Session, postgresql: Session):
     sqlite.commit()
 
     # Noteに紐づくtweetデータを取得
+    targetStartDate = int(settings.TARGET_TWITTER_POST_START_UNIX_MILLISECOND) or int(
+        datetime.combine(datetime.now() - timedelta(days=2), datetime.min.time()).timestamp() * 1000
+    )
+    default_end_time = int(settings.TARGET_TWITTER_POST_END_UNIX_MILLISECOND) or int(
+        datetime.combine(datetime.now() - timedelta(days=1) - timedelta(hours=20), datetime.min.time()).timestamp()
+        * 1000
+    )
     postExtract_targetNotes = (
         sqlite.query(RowNoteRecord)
         .filter(RowNoteRecord.tweet_id != None)
-        .filter(RowNoteRecord.created_at_millis >= settings.TARGET_TWITTER_POST_START_UNIX_MILLISECOND)
-        .filter(RowNoteRecord.created_at_millis <= settings.TARGET_TWITTER_POST_END_UNIX_MILLISECOND)
+        .filter(RowNoteRecord.created_at_millis >= targetStartDate)
+        .filter(RowNoteRecord.created_at_millis <= default_end_time)
         .all()
     )
     logging.info(f"Target notes: {len(postExtract_targetNotes)}")

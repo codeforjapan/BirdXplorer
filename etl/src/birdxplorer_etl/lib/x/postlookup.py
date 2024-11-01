@@ -34,7 +34,11 @@ def connect_to_endpoint(url):
     if response.status_code == 429:
         limit = response.headers["x-rate-limit-reset"]
         logging.info("Waiting for rate limit reset...")
-        time.sleep(int(limit) - int(time.time()) + 1)
+        logging.info("Time now: {}".format(int(limit)))
+        logging.info("Time to wait: {}".format(int(time.time())))
+        wait_time = int(limit) - int(time.time()) + 1
+        if (wait_time) > 0:
+            time.sleep(int(limit) - int(time.time()) + 1)
         data = connect_to_endpoint(url)
         return data
     elif response.status_code != 200:
