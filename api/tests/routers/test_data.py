@@ -44,7 +44,7 @@ def test_posts_get_limit_and_offset(client: TestClient, post_samples: List[Post]
 
 
 def test_posts_get_has_post_id_filter(client: TestClient, post_samples: List[Post]) -> None:
-    response = client.get(f"/api/v1/data/posts/?postId={post_samples[0].post_id},{post_samples[2].post_id}")
+    response = client.get(f"/api/v1/data/posts/?postIds={post_samples[0].post_id},{post_samples[2].post_id}")
     assert response.status_code == 200
     res_json = response.json()
     assert res_json == {
@@ -57,7 +57,7 @@ def test_posts_get_has_post_id_filter(client: TestClient, post_samples: List[Pos
 
 
 def test_posts_get_has_note_id_filter(client: TestClient, post_samples: List[Post], note_samples: List[Note]) -> None:
-    response = client.get(f"/api/v1/data/posts/?noteId={','.join([n.note_id for n in note_samples])}")
+    response = client.get(f"/api/v1/data/posts/?noteIds={','.join([n.note_id for n in note_samples])}")
     assert response.status_code == 200
     res_json = response.json()
     assert res_json == {"data": [json.loads(post_samples[0].model_dump_json())], "meta": {"next": None, "prev": None}}
@@ -123,7 +123,7 @@ def test_posts_get_timestamp_out_of_range(client: TestClient, post_samples: List
 
 
 def test_posts_get_with_media_by_default(client: TestClient, post_samples: List[Post]) -> None:
-    response = client.get("/api/v1/data/posts/?postId=2234567890123456791")
+    response = client.get("/api/v1/data/posts/?postIds=2234567890123456791")
 
     assert response.status_code == 200
     res_json_default = response.json()
@@ -134,7 +134,7 @@ def test_posts_get_with_media_by_default(client: TestClient, post_samples: List[
 
 
 def test_posts_get_with_media_true(client: TestClient, post_samples: List[Post]) -> None:
-    response = client.get("/api/v1/data/posts/?postId=2234567890123456791&media=true")
+    response = client.get("/api/v1/data/posts/?postIds=2234567890123456791&media=true")
 
     assert response.status_code == 200
     res_json_default = response.json()
@@ -146,7 +146,7 @@ def test_posts_get_with_media_true(client: TestClient, post_samples: List[Post])
 
 def test_posts_get_with_media_false(client: TestClient, post_samples: List[Post]) -> None:
     expected_post = post_samples[1].model_copy(update={"media_details": []})
-    response = client.get("/api/v1/data/posts/?postId=2234567890123456791&media=false")
+    response = client.get("/api/v1/data/posts/?postIds=2234567890123456791&media=false")
 
     assert response.status_code == 200
     res_json_default = response.json()
