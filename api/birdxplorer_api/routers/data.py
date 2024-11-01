@@ -87,7 +87,7 @@ NoteListWithExamples: TypeAlias = Annotated[
                         {"topicId": 47, "label": {"ja": "検閲", "en": "Censorship"}, "referenceCount": 0},
                         {"topicId": 51, "label": {"ja": "テクノロジー", "en": "technology"}, "referenceCount": 0},
                     ],
-                    "summary": "Content Security Policyは情報の持ち出しを防止する仕組みではありません。コンテンツインジェクションの脆弱性のリスクを軽減する仕組みです。適切なContent Security Policyがレスポンスヘッダーに設定されている場合でも、外部への通信をブロックできない点に注意が必要です。    Content Security Policy Level 3  https://w3c.github.io/webappsec-csp/",
+                    "summary": "Content Security Policyは情報の持ち出しを防止する仕組みではありません。コンテンツインジェクションの脆弱性のリスクを軽減する仕組みです。適切なContent Security Policyがレスポンスヘッダーに設定されている場合でも、外部への通信をブロックできない点に注意が必要です。    Content Security Policy Level 3  https://w3c.github.io/webappsec-csp/",  # noqa: E501
                     "currentStatus": "NEEDS_MORE_RATINGS",
                     "createdAt": 1728877704750,
                 },
@@ -112,7 +112,7 @@ PostListWithExamples: TypeAlias = Annotated[
                         "followersCount": 162934,
                         "followingCount": 6,
                     },
-                    "text": "今後48時間以内に日本ではマグニチュード6.0の地震が発生する可能性があります。地図をご覧ください。（10月17日～10月18日） - https://t.co/nuyiVdM4FW https://t.co/Xd6U9XkpbL",
+                    "text": "今後48時間以内に日本ではマグニチュード6.0の地震が発生する可能性があります。地図をご覧ください。（10月17日～10月18日） - https://t.co/nuyiVdM4FW https://t.co/Xd6U9XkpbL",  # noqa: E501
                     "mediaDetails": [
                         {
                             "mediaKey": "3_1846718279236177920-1846718284369912064",
