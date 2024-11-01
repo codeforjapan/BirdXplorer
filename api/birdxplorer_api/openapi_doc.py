@@ -128,6 +128,46 @@ v1_data_posts_created_at_to: FastAPIEndpointParamDocs = {
     },
 }
 
+v1_data_posts_offset: FastAPIEndpointParamDocs = {
+    "description": """
+取得する Post のリストの先頭からのオフセット。ページネーションに利用される。
+
+
+ただし、レスポンスの `meta.next` や `meta.prev` で次のページや前のページのリクエスト用 URL が提供されるため、
+そちらを利用したほうが良い場合もある。
+""",
+    "openapi_examples": {
+        "default": {
+            "summary": "0 (デフォルト)",
+            "value": 0,
+        },
+        "offset_100": {
+            "summary": "100",
+            "value": 100,
+        },
+    },
+}
+
+v1_data_posts_limit: FastAPIEndpointParamDocs = {
+    "description": """
+取得する Post のリストの最大数。 0 ～ 1000 まで指定できる。ページネーションに利用される。
+
+
+ただし、 `meta.next` や `meta.prev` で次のページや前のページのリクエスト用 URL が提供されるため、
+そちらを利用したほうが良い場合もある。
+""",
+    "openapi_examples": {
+        "default": {
+            "summary": "100 (デフォルト)",
+            "value": 100,
+        },
+        "limit_50": {
+            "summary": "50",
+            "value": 50,
+        },
+    },
+}
+
 v1_data_posts_search_text: FastAPIEndpointParamDocs = {
     "description": """
 指定した文字列を含む Post を検索して取得する。検索は Post の本文に対して**完全一致**で行われる。
@@ -185,6 +225,8 @@ V1DataPostsDocs = FastAPIEndpointDocs(
         "note_id": v1_data_posts_note_id,
         "created_at_from": v1_data_posts_created_at_from,
         "created_at_to": v1_data_posts_created_at_to,
+        "offset": v1_data_posts_offset,
+        "limit": v1_data_posts_limit,
         "search_text": v1_data_posts_search_text,
         "search_url": v1_data_posts_search_url,
         "media": v1_data_posts_media,
@@ -249,6 +291,46 @@ v1_data_notes_created_at_to: FastAPIEndpointParamDocs = {
         "normal": {
             "summary": "2024 / 7 / 1 00:00 (JST) より前のコミュニティノートを取得する",
             "value": 1719759600000,
+        },
+    },
+}
+
+v1_data_notes_offset: FastAPIEndpointParamDocs = {
+    "description": """
+取得するコミュニティノートのリストの先頭からのオフセット。ページネーションに利用される。
+
+
+ただし、レスポンスの `meta.next` や `meta.prev` で次のページや前のページのリクエスト用 URL が提供されるため、
+そちらを利用したほうが良い場合もある。
+""",
+    "openapi_examples": {
+        "default": {
+            "summary": "0 (デフォルト)",
+            "value": 0,
+        },
+        "offset_100": {
+            "summary": "100",
+            "value": 100,
+        },
+    },
+}
+
+v1_data_notes_limit: FastAPIEndpointParamDocs = {
+    "description": """
+取得するコミュニティノートのリストの最大数。 0 ～ 1000 まで指定できる。ページネーションに利用される。
+
+
+ただし、レスポンスの `meta.next` や `meta.prev` で次のページや前のページのリクエスト用 URL が提供されるため、
+そちらを利用したほうが良い場合もある。
+""",
+    "openapi_examples": {
+        "default": {
+            "summary": "100 (デフォルト)",
+            "value": 100,
+        },
+        "limit_50": {
+            "summary": "50",
+            "value": 50,
         },
     },
 }
@@ -364,6 +446,8 @@ V1DataNotesDocs = FastAPIEndpointDocs(
         "note_ids": v1_data_notes_note_ids,
         "created_at_from": v1_data_notes_created_at_from,
         "created_at_to": v1_data_notes_created_at_to,
+        "offset": v1_data_notes_offset,
+        "limit": v1_data_notes_limit,
         "topic_ids": v1_date_notes_topic_ids,
         "post_ids": v1_data_notes_post_ids,
         "current_status": v1_data_notes_current_status,

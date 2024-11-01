@@ -148,8 +148,8 @@ def gen_router(storage: Storage) -> APIRouter:
             default=None, **V1DataNotesDocs.params["created_at_from"]
         ),
         created_at_to: Union[None, TwitterTimestamp] = Query(default=None, **V1DataNotesDocs.params["created_at_to"]),
-        offset: int = Query(default=0, ge=0),
-        limit: int = Query(default=100, gt=0, le=1000),
+        offset: int = Query(default=0, ge=0, **V1DataNotesDocs.params["offset"]),
+        limit: int = Query(default=100, gt=0, le=1000, **V1DataNotesDocs.params["limit"]),
         topic_ids: Union[List[TopicId], None] = Query(default=None, **V1DataNotesDocs.params["topic_ids"]),
         post_ids: Union[List[PostId], None] = Query(default=None, **V1DataNotesDocs.params["post_ids"]),
         current_status: Union[None, List[str]] = Query(default=None, **V1DataNotesDocs.params["current_status"]),
@@ -206,8 +206,8 @@ def gen_router(storage: Storage) -> APIRouter:
         created_at_to: Union[None, TwitterTimestamp, str] = Query(
             default=None, **V1DataPostsDocs.params["created_at_to"]
         ),
-        offset: int = Query(default=0, ge=0),
-        limit: int = Query(default=100, gt=0, le=1000),
+        offset: int = Query(default=0, ge=0, **V1DataPostsDocs.params["offset"]),
+        limit: int = Query(default=100, gt=0, le=1000, **V1DataPostsDocs.params["limit"]),
         search_text: Union[None, str] = Query(default=None, **V1DataPostsDocs.params["search_text"]),
         search_url: Union[None, HttpUrl] = Query(default=None, **V1DataPostsDocs.params["search_url"]),
         media: bool = Query(default=True, **V1DataPostsDocs.params["media"]),
