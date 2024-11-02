@@ -5,6 +5,10 @@
 BirdXplorer is software that helps users explore community notes data on X
 (formerly known as Twitter).
 
+## Example Usecase
+
+See [example](./docs/example.md)
+
 ## Development
 
 ### Requirements
