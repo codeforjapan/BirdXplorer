@@ -250,8 +250,8 @@ def gen_router(storage: Storage) -> APIRouter:
     @router.get("/posts", description=V1DataPostsDocs.description, response_model=PostListResponse)
     def get_posts(
         request: Request,
-        post_id: Union[List[PostId], None] = Query(default=None, **V1DataPostsDocs.params["post_id"]),
-        note_id: Union[List[NoteId], None] = Query(default=None, **V1DataPostsDocs.params["note_id"]),
+        post_ids: Union[List[PostId], None] = Query(default=None),
+        note_ids: Union[List[NoteId], None] = Query(default=None),
         created_at_from: Union[None, TwitterTimestamp, str] = Query(
             default=None, **V1DataPostsDocs.params["created_at_from"]
         ),
@@ -270,8 +270,8 @@ def gen_router(storage: Storage) -> APIRouter:
             created_at_to = ensure_twitter_timestamp(created_at_to)
         posts = list(
             storage.get_posts(
-                post_ids=post_id,
-                note_ids=note_id,
+                post_ids=post_ids,
+                note_ids=note_ids,
                 start=created_at_from,
                 end=created_at_to,
                 search_text=search_text,
@@ -283,8 +283,8 @@ def gen_router(storage: Storage) -> APIRouter:
         )
 
         total_count = storage.get_number_of_posts(
-            post_ids=post_id,
-            note_ids=note_id,
+            post_ids=post_ids,
+            note_ids=note_ids,
             start=created_at_from,
             end=created_at_to,
             search_text=search_text,
