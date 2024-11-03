@@ -436,6 +436,7 @@ class Storage:
         self,
         post_ids: Union[List[PostId], None] = None,
         note_ids: Union[List[NoteId], None] = None,
+        user_ids: Union[List[UserId], None] = None,
         start: Union[TwitterTimestamp, None] = None,
         end: Union[TwitterTimestamp, None] = None,
         search_text: Union[str, None] = None,
@@ -452,6 +453,8 @@ class Storage:
                 query = query.join(NoteRecord, NoteRecord.post_id == PostRecord.post_id).filter(
                     NoteRecord.note_id.in_(note_ids)
                 )
+            if user_ids is not None:
+                query = query.filter(PostRecord.user_id.in_(user_ids))
             if start is not None:
                 query = query.filter(PostRecord.created_at >= start)
             if end is not None:
@@ -474,6 +477,7 @@ class Storage:
         self,
         post_ids: Union[List[PostId], None] = None,
         note_ids: Union[List[NoteId], None] = None,
+        user_ids: Union[List[UserId], None] = None,
         start: Union[TwitterTimestamp, None] = None,
         end: Union[TwitterTimestamp, None] = None,
         search_text: Union[str, None] = None,
@@ -487,6 +491,8 @@ class Storage:
                 query = query.join(NoteRecord, NoteRecord.post_id == PostRecord.post_id).filter(
                     NoteRecord.note_id.in_(note_ids)
                 )
+            if user_ids is not None:
+                query = query.filter(PostRecord.user_id.in_(user_ids))
             if start is not None:
                 query = query.filter(PostRecord.created_at >= start)
             if end is not None:
