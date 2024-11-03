@@ -206,7 +206,7 @@ def gen_router(storage: Storage) -> APIRouter:
         post_ids: Union[List[PostId], None] = Query(default=None, **V1DataNotesDocs.params["post_ids"]),
         current_status: Union[None, List[str]] = Query(default=None, **V1DataNotesDocs.params["current_status"]),
         language: Union[LanguageIdentifier, None] = Query(default=None, **V1DataNotesDocs.params["language"]),
-        search_text: Union[None, str] = Query(default=None, **V1DataPostsDocs.params["search_text"]),
+        search_text: Union[None, str] = Query(default=None, **V1DataNotesDocs.params["search_text"]),
     ) -> NoteListResponse:
         if created_at_from is not None and isinstance(created_at_from, str):
             created_at_from = ensure_twitter_timestamp(created_at_from)
