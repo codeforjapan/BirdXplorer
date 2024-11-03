@@ -331,6 +331,7 @@ def mock_storage(
         post_ids: Union[List[PostId], None] = None,
         current_status: Union[None, List[str]] = None,
         language: Union[LanguageIdentifier, None] = None,
+        search_text: Union[str, None] = None,
         offset: Union[int, None] = None,
         limit: Union[int, None] = None,
     ) -> Generator[Note, None, None]:
@@ -349,6 +350,8 @@ def mock_storage(
                 continue
             if language is not None and note.language != language:
                 continue
+            if search_text is not None and search_text not in note.summary:
+                continue
             yield note
 
     mock.get_notes.side_effect = _get_notes
@@ -361,9 +364,14 @@ def mock_storage(
         post_ids: Union[List[PostId], None] = None,
         current_status: Union[None, List[str]] = None,
         language: Union[LanguageIdentifier, None] = None,
+        search_text: Union[str, None] = None,
     ) -> int:
         return len(
-            list(_get_notes(note_ids, created_at_from, created_at_to, topic_ids, post_ids, current_status, language))
+            list(
+                _get_notes(
+                    note_ids, created_at_from, created_at_to, topic_ids, post_ids, current_status, language, search_text
+                )
+            )
         )
 
     mock.get_number_of_notes.side_effect = _get_number_of_notes
