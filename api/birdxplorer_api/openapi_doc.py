@@ -438,6 +438,22 @@ ISO 639-1 に準拠した 2 文字の言語コードを指定することで、�
     },
 }
 
+v1_data_notes_search_text: FastAPIEndpointParamDocs = {
+    "description": """
+指定した文字列を含む Note を検索して取得する。検索は Note の**Summaryに対して**行われる。
+""",
+    "openapi_examples": {
+        "default": {
+            "summary": "指定しない (デフォルト)",
+            "value": None,
+        },
+        "python": {
+            "summary": "「Python」を含む Post を取得する",
+            "value": "Python",
+        },
+    },
+}
+
 
 # GET /api/v1/data/notes のクエリパラメータの OpenAPI ドキュメント
 V1DataNotesDocs = FastAPIEndpointDocs(
@@ -452,6 +468,7 @@ V1DataNotesDocs = FastAPIEndpointDocs(
         "post_ids": v1_data_notes_post_ids,
         "current_status": v1_data_notes_current_status,
         "language": v1_data_notes_language,
+        "search_text": v1_data_notes_search_text,
     },
 )
 
