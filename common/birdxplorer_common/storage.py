@@ -338,6 +338,7 @@ class Storage:
         post_ids: Union[List[PostId], None] = None,
         current_status: Union[None, List[str]] = None,
         language: Union[LanguageIdentifier, None] = None,
+        search_text: Union[str, None] = None,
         offset: Union[int, None] = None,
         limit: int = 100,
     ) -> Generator[NoteModel, None, None]:
@@ -365,6 +366,8 @@ class Storage:
                 query = query.filter(NoteRecord.language == language)
             if current_status is not None:
                 query = query.filter(NoteRecord.current_status.in_(current_status))
+            if search_text is not None:
+                query = query.filter(NoteRecord.summary.like(f"%{search_text}%"))
             if offset is not None:
                 query = query.offset(offset)
             query = query.limit(limit)
@@ -399,6 +402,7 @@ class Storage:
         post_ids: Union[List[PostId], None] = None,
         current_status: Union[None, List[str]] = None,
         language: Union[LanguageIdentifier, None] = None,
+        search_text: Union[str, None] = None,
     ) -> int:
         with Session(self.engine) as sess:
             query = sess.query(NoteRecord)
@@ -424,6 +428,8 @@ class Storage:
                 query = query.filter(NoteRecord.language == language)
             if current_status is not None:
                 query = query.filter(NoteRecord.current_status.in_(current_status))
+            if search_text is not None:
+                query = query.filter(NoteRecord.summary.like(f"%{search_text}%"))
             return query.count()
 
     def get_posts(
