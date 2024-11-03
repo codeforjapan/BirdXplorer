@@ -379,6 +379,7 @@ def mock_storage(
     def _get_posts(
         post_ids: Union[List[PostId], None] = None,
         note_ids: Union[List[NoteId], None] = None,
+        user_ids: Union[List[str], None] = None,
         start: Union[TwitterTimestamp, None] = None,
         end: Union[TwitterTimestamp, None] = None,
         search_text: Union[str, None] = None,
@@ -403,6 +404,8 @@ def mock_storage(
                 note.note_id in note_ids and note.post_id == post.post_id for note in note_samples
             ):
                 continue
+            if user_ids is not None and post.x_user_id not in user_ids:
+                continue
             if start is not None and post.created_at < start:
                 continue
             if end is not None and post.created_at >= end:
@@ -426,12 +429,13 @@ def mock_storage(
     def _get_number_of_posts(
         post_ids: Union[List[PostId], None] = None,
         note_ids: Union[List[NoteId], None] = None,
+        user_ids: Union[List[str], None] = None,
         start: Union[TwitterTimestamp, None] = None,
         end: Union[TwitterTimestamp, None] = None,
         search_text: Union[str, None] = None,
         search_url: Union[HttpUrl, None] = None,
     ) -> int:
-        return len(list(_get_posts(post_ids, note_ids, start, end, search_text, search_url)))
+        return len(list(_get_posts(post_ids, note_ids, user_ids, start, end, search_text, search_url)))
 
     mock.get_number_of_posts.side_effect = _get_number_of_posts
 
