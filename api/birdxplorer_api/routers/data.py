@@ -26,6 +26,7 @@ from birdxplorer_common.models import (
     TopicId,
     TwitterTimestamp,
     UserEnrollment,
+    UserId,
 )
 from birdxplorer_common.storage import Storage
 
@@ -255,6 +256,7 @@ def gen_router(storage: Storage) -> APIRouter:
         request: Request,
         post_ids: Union[List[PostId], None] = Query(default=None),
         note_ids: Union[List[NoteId], None] = Query(default=None),
+        user_ids: Union[List[UserId], None] = Query(default=None),
         created_at_from: Union[None, TwitterTimestamp, str] = Query(
             default=None, **V1DataPostsDocs.params["created_at_from"]
         ),
@@ -275,6 +277,7 @@ def gen_router(storage: Storage) -> APIRouter:
             storage.get_posts(
                 post_ids=post_ids,
                 note_ids=note_ids,
+                user_ids=user_ids,
                 start=created_at_from,
                 end=created_at_to,
                 search_text=search_text,
@@ -288,6 +291,7 @@ def gen_router(storage: Storage) -> APIRouter:
         total_count = storage.get_number_of_posts(
             post_ids=post_ids,
             note_ids=note_ids,
+            user_ids=user_ids,
             start=created_at_from,
             end=created_at_to,
             search_text=search_text,
