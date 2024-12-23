@@ -496,3 +496,98 @@ V1DataUserEnrollmentsDocs = FastAPIEndpointDocs(
         "participant_id": v1_data_user_enrollments_participant_id,
     },
 )
+
+v1_data_x_user_name = FastAPIEndpointParamDocs(
+    description="Xのユーザー名",
+    openapi_examples={
+        "single": {
+            "summary": "@以降のユーザ名",
+            "value": "elonmusk",
+        },
+    },
+)
+
+v1_data_x_user_follower_count = FastAPIEndpointParamDocs(
+    description="Xのユーザーのフォロワー数。",
+    openapi_examples={
+        "single": {
+            "summary": "フォロワー数",
+            "value": 100,
+        },
+    },
+)
+
+v1_data_x_user_follow_count = FastAPIEndpointParamDocs(
+    description="Xのユーザーのフォロー数。",
+    openapi_examples={
+        "single": {
+            "summary": "フォロー数",
+            "value": 100,
+        },
+    },
+)
+
+v1_data_post_favorite_count = FastAPIEndpointParamDocs(
+    description="Postのお気に入り数。",
+    openapi_examples={
+        "single": {
+            "summary": "お気に入り数",
+            "value": 100,
+        },
+    },
+)
+
+v1_data_post_repost_count = FastAPIEndpointParamDocs(
+    description="Postのリポスト数。",
+    openapi_examples={
+        "single": {
+            "summary": "リポスト数",
+            "value": 100,
+        },
+    },
+)
+
+v1_data_post_impression_count = FastAPIEndpointParamDocs(
+    description="Postのインプレッション数。",
+    openapi_examples={
+        "single": {
+            "summary": "インプレッション数",
+            "value": 100,
+        },
+    },
+)
+
+v1_data_post_includes_media = FastAPIEndpointParamDocs(
+    description="メディア情報を含んでいるか。",
+    openapi_examples={
+        "single": {
+            "summary": "メディア情報を含める",
+            "value": True,
+        },
+    },
+)
+
+# Get /api/v1/data/search の OpenAPI ドキュメント
+V1DataSearchDocs = FastAPIEndpointDocs(
+    "アドバンスドサーチでデータを取得するエンドポイント",
+    {
+        "note_includes_text": v1_data_notes_search_text,
+        "note_excludes_text": v1_data_notes_search_text,
+        "post_includes_text": v1_data_posts_search_text,
+        "post_excludes_text": v1_data_posts_search_text,
+        "language": v1_data_notes_language,
+        "topic_ids": v1_date_notes_topic_ids,
+        "note_status": v1_data_notes_current_status,
+        "note_created_at_from": v1_data_notes_created_at_from,
+        "note_created_at_to": v1_data_notes_created_at_to,
+        "x_user_name": v1_data_x_user_name,
+        "x_user_followers_count_from": v1_data_x_user_follower_count,
+        "x_user_follow_count_from": v1_data_x_user_follow_count,
+        "post_favorite_count_from": v1_data_post_favorite_count,
+        "post_repost_count_from": v1_data_post_repost_count,
+        "post_impression_count_from": v1_data_post_impression_count,
+        "post_includes_media": v1_data_post_includes_media,
+        "offset": v1_data_posts_offset,
+        "limit": v1_data_posts_limit,
+    },
+)
