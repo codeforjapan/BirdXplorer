@@ -9,6 +9,8 @@ from typing import Generator
 from sqlalchemy import Integer, Numeric, and_, func, select
 from sqlalchemy.orm import Session
 
+import asyncio
+
 from birdxplorer_common.storage import (
     RowNoteRecord,
     RowNoteStatusRecord,
@@ -17,14 +19,14 @@ from birdxplorer_common.storage import (
     RowPostRecord,
     RowUserRecord,
 )
-from lib.ai_model.ai_model_interface import get_ai_service
+from lib.ai_model.ai_model_interface import get_ai_service, AIModelInterface
 from settings import (
     TARGET_NOTE_ESTIMATE_TOPIC_END_UNIX_MILLISECOND,
     TARGET_NOTE_ESTIMATE_TOPIC_START_UNIX_MILLISECOND,
 )
 
 
-def transform_data(sqlite: Session, postgresql: Session):
+async def transform_data(sqlite: Session, postgresql: Session):
 
     logging.info("Transforming data")
 
@@ -36,7 +38,7 @@ def transform_data(sqlite: Session, postgresql: Session):
         os.remove("./data/transformed/note.csv")
     with open("./data/transformed/note.csv", "a") as file:
         writer = csv.writer(file)
-        writer.writerow(["note_id", "post_id", "summary", "current_status", "created_at", "language"])
+        writer.writerow(["note_id", "post_id", "summary", "current_status", "locked_status", "created_at", "language"])
 
     offset = 0
     limit = 1000
@@ -63,6 +65,7 @@ def transform_data(sqlite: Session, postgresql: Session):
                     RowNoteRecord.row_post_id,
                     RowNoteRecord.summary,
                     RowNoteStatusRecord.current_status,
+                    RowNoteStatusRecord.locked_status,
                     func.cast(RowNoteRecord.created_at_millis, Integer).label("created_at"),
                 )
                 .filter(
@@ -76,12 +79,18 @@ def transform_data(sqlite: Session, postgresql: Session):
                 .offset(offset)
             )
 
-            for note in notes:
-                note_as_list = list(note)
-                note_as_list.append(ai_service.detect_language(note[2]))
-                note_as_list.append("ja")
-                writer = csv.writer(file)
-                writer.writerow(note_as_list)
+            notes_list = list(notes)
+            note_chunks = [notes_list[i : i + 10] for i in range(0, len(notes_list), 10)]
+            writer = csv.writer(file)
+            for chunk in note_chunks:
+                estimated_notes_list = await asyncio.gather(
+                    *[estimate_language_of_note(ai_service, note) for note in chunk]
+                )
+
+                for note_as_list in estimated_notes_list:
+                    writer.writerow(note_as_list)
+
+                await asyncio.sleep(1)
             offset += limit
 
     # Transform row post data and generate post.csv
@@ -165,9 +174,16 @@ def transform_data(sqlite: Session, postgresql: Session):
     # Transform row post embed url data and generate post_embed_url.csv
     generate_topic()
 
-    generate_note_topic(sqlite)
+    await generate_note_topic(sqlite)
 
     return
+
+
+async def estimate_language_of_note(ai_service: AIModelInterface, note: RowNoteRecord) -> list:
+    note_list = list(note)
+    language = await asyncio.to_thread(ai_service.detect_language, note[2])
+    note_list.append(language)
+    return note_list
 
 
 def write_media_csv(postgresql: Session) -> None:
@@ -283,7 +299,7 @@ def generate_topic():
             writer.writerow({"topic_id": record["topic_id"], "label": {k: v for k, v in record["label"].items()}})
 
 
-def generate_note_topic(sqlite: Session):
+async def generate_note_topic(sqlite: Session):
     output_csv_file_path = "./data/transformed/note_topic_association.csv"
     ai_service = get_ai_service()
 
@@ -299,7 +315,18 @@ def generate_note_topic(sqlite: Session):
         offset = 0
         limit = 1000
 
-        num_of_notes = sqlite.query(func.count(RowNoteRecord.row_post_id)).scalar()
+        num_of_notes = (
+            sqlite.query(func.count(RowNoteRecord.note_id))
+            .filter(
+                and_(
+                    RowNoteRecord.created_at_millis <= TARGET_NOTE_ESTIMATE_TOPIC_END_UNIX_MILLISECOND,
+                    RowNoteRecord.created_at_millis >= TARGET_NOTE_ESTIMATE_TOPIC_START_UNIX_MILLISECOND,
+                )
+            )
+            .scalar()
+        )
+
+        logging.info(f"Transforming note data: {num_of_notes}")
 
         while offset < num_of_notes:
             topicEstimationTargetNotes = sqlite.execute(
@@ -315,24 +342,32 @@ def generate_note_topic(sqlite: Session):
                 .offset(offset)
             )
 
-            for index, note in enumerate(topicEstimationTargetNotes):
-                note_id = note.note_id
-                summary = note.summary
-                topics_info = ai_service.detect_topic(note_id, summary)
-                if topics_info:
-                    for topic in topics_info.get("topics", []):
-                        record = {"note_id": note_id, "topic_id": topic}
-                        records.append(record)
-                if index % 100 == 0:
-                    for record in records:
-                        writer.writerow(
-                            {
-                                "note_id": record["note_id"],
-                                "topic_id": record["topic_id"],
-                            }
-                        )
-                    records = []
-                print(index)
+            topicEstimationTargetNotes_list = list(topicEstimationTargetNotes)
+            note_chunks = [
+                topicEstimationTargetNotes_list[i : i + 10] for i in range(0, len(topicEstimationTargetNotes_list), 10)
+            ]
+
+            for index, chunk in enumerate(note_chunks):
+                logging.info(f"Processing chunk {index}")
+                topic_info_list = await asyncio.gather(*[estimate_topic_of_note(ai_service, note) for note in chunk])
+
+                for topic_info in topic_info_list:
+                    if topic_info:
+                        for topic in topic_info.get("topics", []):
+                            record = {"note_id": topic_info["note_id"], "topic_id": topic}
+                            records.append(record)
+
+                    if index % 10 == 0:
+                        for record in records:
+                            writer.writerow(
+                                {
+                                    "note_id": record["note_id"],
+                                    "topic_id": record["topic_id"],
+                                }
+                            )
+                        records = []
+                await asyncio.sleep(1)
+
             offset += limit
 
         for record in records:
@@ -344,6 +379,11 @@ def generate_note_topic(sqlite: Session):
             )
 
     print(f"New CSV file has been created at {output_csv_file_path}")
+
+
+async def estimate_topic_of_note(ai_service: AIModelInterface, note: RowNoteRecord) -> dict:
+    res = await asyncio.to_thread(ai_service.detect_topic, note[0], note[2])
+    return {"note_id": note[0], "topics": res["topics"]}
 
 
 if __name__ == "__main__":

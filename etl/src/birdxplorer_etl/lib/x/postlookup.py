@@ -29,6 +29,31 @@ def bearer_oauth(r):
     return r
 
 
+# def connect_to_endpoint(url, current_token_index=0, wait_until=0):
+#     tokens = settings.X_BEARER_TOKEN.split(",")
+#     token_max_index = len(tokens) - 1
+
+#     logging.info(f"token_max_index: {token_max_index}")
+#     logging.info(f"current_token_index: {current_token_index}")
+
+#     response = requests.request("GET", url, auth=lambda r: bearer_oauth(r, tokens[current_token_index]))
+#     if response.status_code == 429:
+#         if current_token_index == token_max_index:
+#             logging.warning(f"Rate limit exceeded. Waiting until: {wait_until - int(time.time()) + 1}")
+#             time.sleep(wait_until - int(time.time()) + 1)
+#             data = connect_to_endpoint(url, 0, 0)
+#             return data
+#         else:
+#             reset_time = int(response.headers["x-rate-limit-reset"])
+#             fastestReset = wait_until == 0 and reset_time or min(wait_until, reset_time)
+#             logging.warning("Rate limit exceeded. Waiting until: {}".format(fastestReset))
+#             data = connect_to_endpoint(url, current_token_index + 1, fastestReset)
+#             return data
+#     elif response.status_code != 200:
+#         raise Exception("Request returned an error: {} {}".format(response.status_code, response.text))
+#     return response.json()
+
+
 def connect_to_endpoint(url):
     response = requests.request("GET", url, auth=bearer_oauth)
     if response.status_code == 429:
