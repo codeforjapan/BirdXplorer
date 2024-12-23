@@ -29,14 +29,14 @@ class OpenAIService(AIModelInterface):
                 #         topics[label] = topic_id
         return topics
 
-    def detect_language(self, text: str) -> str:
+    async def detect_language(self, text: str) -> str:
         prompt = (
             "Detect the language of the following text and return only the language code "
             f"from this list: en, es, ja, pt, de, fr. Text: {text}. "
             "Respond with only the language code, nothing else."
         )
 
-        response = self.client.chat.completions.create(
+        response = await self.client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},

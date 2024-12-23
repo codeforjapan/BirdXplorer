@@ -83,9 +83,9 @@ def extract_data(sqlite: Session, postgresql: Session):
                     status = (
                         sqlite.query(RowNoteStatusRecord).filter(RowNoteStatusRecord.note_id == row["note_id"]).first()
                     )
-                    if status is None or status.created_at_millis > int(datetime.now().timestamp() * 1000):
+                    if status is not None:
                         sqlite.query(RowNoteStatusRecord).filter(RowNoteStatusRecord.note_id == row["note_id"]).delete()
-                        rows_to_add.append(RowNoteStatusRecord(**row))
+                    rows_to_add.append(RowNoteStatusRecord(**row))
                     if index % 1000 == 0:
                         sqlite.bulk_save_objects(rows_to_add)
                         rows_to_add = []
@@ -184,18 +184,21 @@ def extract_data(sqlite: Session, postgresql: Session):
             logging.error(f"Error: {e}")
             postgresql.rollback()
 
-        media_recs = [
-            RowPostMediaRecord(
-                media_key=f"{m['media_key']}-{post['data']['id']}",
-                type=m["type"],
-                url=m.get("url") or (m["variants"][0]["url"] if "variants" in m and m["variants"] else ""),
-                width=m["width"],
-                height=m["height"],
-                post_id=post["data"]["id"],
+        for m in media_data:
+            media_key = f"{m['media_key']}-{post['data']['id']}"
+            is_media_exist = (
+                postgresql.query(RowPostMediaRecord).filter(RowPostMediaRecord.media_key == media_key).first()
             )
-            for m in media_data
-        ]
-        postgresql.add_all(media_recs)
+            if is_media_exist is None:
+                media_rec = RowPostMediaRecord(
+                    media_key=media_key,
+                    type=m["type"],
+                    url=m.get("url") or (m["variants"][0]["url"] if "variants" in m and m["variants"] else ""),
+                    width=m["width"],
+                    height=m["height"],
+                    post_id=post["data"]["id"],
+                )
+                postgresql.add(media_rec)
 
         if "entities" in post["data"] and "urls" in post["data"]["entities"]:
             for url in post["data"]["entities"]["urls"]:
