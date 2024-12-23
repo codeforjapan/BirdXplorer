@@ -30,7 +30,7 @@ from pydantic import (
 from pydantic.alias_generators import to_camel
 from pydantic.json_schema import JsonSchemaValue
 from pydantic.main import IncEx
-from pydantic_core import Url, core_schema
+from pydantic_core import core_schema
 
 StrT = TypeVar("StrT", bound="BaseString")
 IntT = TypeVar("IntT", bound="BaseInt")
@@ -799,11 +799,11 @@ class Link(BaseModel):
     t.co に短縮される前の URL ごとに一意な ID を持つ。
 
     >>> Link.model_validate_json('{"linkId": "d5d15194-6574-0c01-8f6f-15abd72b2cf6", "url": "https://example.com"}')
-    Link(link_id=LinkId('d5d15194-6574-0c01-8f6f-15abd72b2cf6'), url=Url('https://example.com/'))
+    Link(link_id=LinkId('d5d15194-6574-0c01-8f6f-15abd72b2cf6'), url=HttpUrl('https://example.com/'))
     >>> Link(url="https://example.com/")
-    Link(link_id=LinkId('d5d15194-6574-0c01-8f6f-15abd72b2cf6'), url=Url('https://example.com/'))
+    Link(link_id=LinkId('d5d15194-6574-0c01-8f6f-15abd72b2cf6'), url=HttpUrl('https://example.com/'))
     >>> Link(link_id=UUID("d5d15194-6574-0c01-8f6f-15abd72b2cf6"), url="https://example.com/")
-    Link(link_id=LinkId('d5d15194-6574-0c01-8f6f-15abd72b2cf6'), url=Url('https://example.com/'))
+    Link(link_id=LinkId('d5d15194-6574-0c01-8f6f-15abd72b2cf6'), url=HttpUrl('https://example.com/'))
     """  # noqa: E501
 
     link_id: Annotated[LinkId, PydanticField(description="リンクを識別できる UUID")]
@@ -840,7 +840,7 @@ class Post(BaseModel):
         """
         PostのX上でのURLを返す。
         """
-        return Url(f"https://x.com/{self.x_user.name}/status/{self.post_id}")
+        return HttpUrl(f"https://x.com/{self.x_user.name}/status/{self.post_id}")
 
 
 class PaginationMeta(BaseModel):
