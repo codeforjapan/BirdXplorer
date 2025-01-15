@@ -1,4 +1,4 @@
-from typing import Generator, List, Union
+from typing import Generator, List, Tuple, Union
 
 from psycopg2.extensions import AsIs, register_adapter
 from pydantic import AnyUrl, HttpUrl
@@ -505,6 +505,168 @@ class Storage:
                     .join(LinkRecord, LinkRecord.link_id == PostLinkAssociation.link_id)
                     .filter(LinkRecord.url == search_url)
                 )
+            return query.count()
+
+    def search_notes_with_posts(
+        self,
+        note_includes_text: Union[str, None] = None,
+        note_excludes_text: Union[str, None] = None,
+        post_includes_text: Union[str, None] = None,
+        post_excludes_text: Union[str, None] = None,
+        language: Union[LanguageIdentifier, None] = None,
+        topic_ids: Union[List[TopicId], None] = None,
+        note_status: Union[List[str], None] = None,
+        note_created_at_from: Union[TwitterTimestamp, None] = None,
+        note_created_at_to: Union[TwitterTimestamp, None] = None,
+        x_user_names: Union[List[str], None] = None,
+        x_user_followers_count_from: Union[int, None] = None,
+        x_user_follow_count_from: Union[int, None] = None,
+        post_like_count_from: Union[int, None] = None,
+        post_repost_count_from: Union[int, None] = None,
+        post_impression_count_from: Union[int, None] = None,
+        post_includes_media: bool = True,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> Generator[Tuple[NoteModel, PostModel], None, None]:
+        with Session(self.engine) as sess:
+            # Base query joining notes, posts and users
+            query = (
+                sess.query(NoteRecord, PostRecord)
+                .outerjoin(PostRecord, NoteRecord.post_id == PostRecord.post_id)
+                .outerjoin(XUserRecord, PostRecord.user_id == XUserRecord.user_id)
+            )
+
+            # Apply note filters
+            if note_includes_text:
+                query = query.filter(NoteRecord.summary.like(f"%{note_includes_text}%"))
+            if note_excludes_text:
+                query = query.filter(~NoteRecord.summary.like(f"%{note_excludes_text}%"))
+            if language:
+                query = query.filter(NoteRecord.language == language)
+            if topic_ids:
+                subq = (
+                    select(NoteTopicAssociation.note_id)
+                    .filter(NoteTopicAssociation.topic_id.in_(topic_ids))
+                    .group_by(NoteTopicAssociation.note_id)
+                    .subquery()
+                )
+                query = query.join(subq, NoteRecord.note_id == subq.c.note_id)
+            if note_status:
+                query = query.filter(NoteRecord.current_status.in_(note_status))
+            if note_created_at_from:
+                query = query.filter(NoteRecord.created_at >= note_created_at_from)
+            if note_created_at_to:
+                query = query.filter(NoteRecord.created_at <= note_created_at_to)
+
+            # Apply post filters
+            if post_includes_text:
+                query = query.filter(PostRecord.text.like(f"%{post_includes_text}%"))
+            if post_excludes_text:
+                query = query.filter(~PostRecord.text.like(f"%{post_excludes_text}%"))
+            if x_user_names:
+                query = query.filter(XUserRecord.name.in_(x_user_names))
+            if x_user_followers_count_from:
+                query = query.filter(XUserRecord.followers_count >= x_user_followers_count_from)
+            if x_user_follow_count_from:
+                query = query.filter(XUserRecord.following_count >= x_user_follow_count_from)
+            if post_like_count_from:
+                query = query.filter(PostRecord.like_count >= post_like_count_from)
+            if post_repost_count_from:
+                query = query.filter(PostRecord.repost_count >= post_repost_count_from)
+            if post_impression_count_from:
+                query = query.filter(PostRecord.impression_count >= post_impression_count_from)
+            if not post_includes_media:
+                query = query.filter(~PostRecord.media_details.any())
+
+            # Pagination
+            query = query.offset(offset).limit(limit)
+
+            # Execute query and yield results
+            for note_record, post_record in query.all():
+                note = NoteModel(
+                    note_id=note_record.note_id,
+                    post_id=note_record.post_id,
+                    topics=[
+                        TopicModel(topic_id=topic.topic_id, label=topic.topic.label, reference_count=0)
+                        for topic in note_record.topics
+                    ],
+                    language=note_record.language,
+                    summary=note_record.summary,
+                    current_status=note_record.current_status,
+                    created_at=note_record.created_at,
+                )
+
+                post = self._post_record_to_model(post_record, with_media=post_includes_media) if post_record else None
+                yield note, post
+
+    def count_search_results(
+        self,
+        note_includes_text: Union[str, None] = None,
+        note_excludes_text: Union[str, None] = None,
+        post_includes_text: Union[str, None] = None,
+        post_excludes_text: Union[str, None] = None,
+        language: Union[LanguageIdentifier, None] = None,
+        topic_ids: Union[List[TopicId], None] = None,
+        note_status: Union[List[str], None] = None,
+        note_created_at_from: Union[TwitterTimestamp, None] = None,
+        note_created_at_to: Union[TwitterTimestamp, None] = None,
+        x_user_names: Union[List[str], None] = None,
+        x_user_followers_count_from: Union[int, None] = None,
+        x_user_follow_count_from: Union[int, None] = None,
+        post_like_count_from: Union[int, None] = None,
+        post_repost_count_from: Union[int, None] = None,
+        post_impression_count_from: Union[int, None] = None,
+        post_includes_media: bool = True,
+    ) -> int:
+        with Session(self.engine) as sess:
+            query = (
+                sess.query(NoteRecord)
+                .join(PostRecord, NoteRecord.post_id == PostRecord.post_id)
+                .join(XUserRecord, PostRecord.user_id == XUserRecord.user_id)
+            )
+
+            # Apply note filters
+            if note_includes_text:
+                query = query.filter(NoteRecord.summary.like(f"%{note_includes_text}%"))
+            if note_excludes_text:
+                query = query.filter(~NoteRecord.summary.like(f"%{note_excludes_text}%"))
+            if language:
+                query = query.filter(NoteRecord.language == language)
+            if topic_ids:
+                subq = (
+                    select(NoteTopicAssociation.note_id)
+                    .filter(NoteTopicAssociation.topic_id.in_(topic_ids))
+                    .group_by(NoteTopicAssociation.note_id)
+                    .subquery()
+                )
+                query = query.join(subq, NoteRecord.note_id == subq.c.note_id)
+            if note_status:
+                query = query.filter(NoteRecord.current_status.in_(note_status))
+            if note_created_at_from:
+                query = query.filter(NoteRecord.created_at >= note_created_at_from)
+            if note_created_at_to:
+                query = query.filter(NoteRecord.created_at <= note_created_at_to)
+
+            # Apply post filters
+            if post_includes_text:
+                query = query.filter(PostRecord.text.like(f"%{post_includes_text}%"))
+            if post_excludes_text:
+                query = query.filter(~PostRecord.text.like(f"%{post_excludes_text}%"))
+            if x_user_names:
+                query = query.filter(XUserRecord.name.in_(x_user_names))
+            if x_user_followers_count_from:
+                query = query.filter(XUserRecord.followers_count >= x_user_followers_count_from)
+            if x_user_follow_count_from:
+                query = query.filter(XUserRecord.following_count >= x_user_follow_count_from)
+            if post_like_count_from:
+                query = query.filter(PostRecord.like_count >= post_like_count_from)
+            if post_repost_count_from:
+                query = query.filter(PostRecord.repost_count >= post_repost_count_from)
+            if post_impression_count_from:
+                query = query.filter(PostRecord.impression_count >= post_impression_count_from)
+            if not post_includes_media:
+                query = query.filter(~PostRecord.media_details.any())
+
             return query.count()
 
 
