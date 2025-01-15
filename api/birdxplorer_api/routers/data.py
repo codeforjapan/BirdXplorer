@@ -417,6 +417,7 @@ def gen_router(storage: Storage) -> APIRouter:
 
     @router.get("/search", description=V1DataSearchDocs.description, response_model=SearchResponse)
     def search(
+        request: Request,
         note_includes_text: Union[None, str] = Query(default=None, **V1DataSearchDocs.params["note_includes_text"]),
         note_excludes_text: Union[None, str] = Query(default=None, **V1DataSearchDocs.params["note_excludes_text"]),
         post_includes_text: Union[None, str] = Query(default=None, **V1DataSearchDocs.params["post_includes_text"]),
@@ -437,9 +438,7 @@ def gen_router(storage: Storage) -> APIRouter:
         x_user_follow_count_from: Union[None, int] = Query(
             default=None, **V1DataSearchDocs.params["x_user_follow_count_from"]
         ),
-        post_favorite_count_from: Union[None, int] = Query(
-            default=None, **V1DataSearchDocs.params["post_favorite_count_from"]
-        ),
+        post_like_count_from: Union[None, int] = Query(default=None, **V1DataSearchDocs.params["post_like_count_from"]),
         post_repost_count_from: Union[None, int] = Query(
             default=None, **V1DataSearchDocs.params["post_repost_count_from"]
         ),
@@ -450,59 +449,78 @@ def gen_router(storage: Storage) -> APIRouter:
         offset: int = Query(default=0, ge=0, **V1DataSearchDocs.params["offset"]),
         limit: int = Query(default=100, gt=0, le=1000, **V1DataSearchDocs.params["limit"]),
     ) -> SearchResponse:
-        return SearchResponse(
-            data=[
+        # Convert timestamp strings to TwitterTimestamp objects
+        if note_created_at_from is not None and isinstance(note_created_at_from, str):
+            note_created_at_from = ensure_twitter_timestamp(note_created_at_from)
+        if note_created_at_to is not None and isinstance(note_created_at_to, str):
+            note_created_at_to = ensure_twitter_timestamp(note_created_at_to)
+
+        # Get search results using the optimized storage method
+        results = []
+        for note, post in storage.search_notes_with_posts(
+            note_includes_text=note_includes_text,
+            note_excludes_text=note_excludes_text,
+            post_includes_text=post_includes_text,
+            post_excludes_text=post_excludes_text,
+            language=language,
+            topic_ids=topic_ids,
+            note_status=note_status,
+            note_created_at_from=note_created_at_from,
+            note_created_at_to=note_created_at_to,
+            x_user_names=x_user_names,
+            x_user_followers_count_from=x_user_followers_count_from,
+            x_user_follow_count_from=x_user_follow_count_from,
+            post_like_count_from=post_like_count_from,
+            post_repost_count_from=post_repost_count_from,
+            post_impression_count_from=post_impression_count_from,
+            post_includes_media=post_includes_media,
+            offset=offset,
+            limit=limit,
+        ):
+            results.append(
                 SearchedNote(
-                    noteId="1845672983001710655",
-                    language="ja",
-                    topics=[
-                        {
-                            "topicId": 26,
-                            "label": {"ja": "セキュリティ上の脅威", "en": "security threat"},
-                            "referenceCount": 0,
-                        },
-                        {"topicId": 47, "label": {"ja": "検閲", "en": "Censorship"}, "referenceCount": 0},
-                        {"topicId": 51, "label": {"ja": "テクノロジー", "en": "technology"}, "referenceCount": 0},
-                    ],
-                    postId="1846718284369912064",
-                    summary="Content Security Policyは情報の持ち出しを防止する仕組みではありません。コンテンツインジェクションの脆弱性のリスクを軽減する仕組みです。適切なContent Security Policyがレスポンスヘッダーに設定されている場合でも、外部への通信をブロックできない点に注意が必要です。    Content Security Policy Level 3  https://w3c.github.io/webappsec-csp/",  # noqa: E501
-                    current_status="NEEDS_MORE_RATINGS",
-                    created_at=1728877704750,
-                    post={
-                        "postId": "1846718284369912064",
-                        "xUserId": "90954365",
-                        "xUser": {
-                            "userId": "90954365",
-                            "name": "earthquakejapan",
-                            "profileImage": "https://pbs.twimg.com/profile_images/1638600342/japan_rel96_normal.jpg",
-                            "followersCount": 162934,
-                            "followingCount": 6,
-                        },
-                        "text": "今後48時間以内に日本ではマグニチュード6.0の地震が発生する可能性があります。地図をご覧ください。",
-                        "mediaDetails": [
-                            {
-                                "mediaKey": "3_1846718279236177920-1846718284369912064",
-                                "type": "photo",
-                                "url": "https://pbs.twimg.com/media/GaDcfZoX0AAko2-.jpg",
-                                "width": 900,
-                                "height": 738,
-                            }
-                        ],
-                        "createdAt": 1729094524000,
-                        "likeCount": 451,
-                        "repostCount": 104,
-                        "impressionCount": 82378,
-                        "links": [
-                            {
-                                "linkId": "9c139b99-8111-e4f0-ad41-fc9e40d08722",
-                                "url": "https://www.quakeprediction.com/Earthquake%20Forecast%20Japan.html",
-                            }
-                        ],
-                        "link": "https://x.com/earthquakejapan/status/1846718284369912064",
-                    },
+                    noteId=note.note_id,
+                    language=note.language,
+                    topics=note.topics,
+                    postId=note.post_id,
+                    summary=note.summary,
+                    current_status=note.current_status,
+                    created_at=note.created_at,
+                    post=post,
                 )
-            ],
-            meta=PaginationMeta(next=None, prev=None),
+            )
+
+        # Get total count for pagination
+        total_count = storage.count_search_results(
+            note_includes_text=note_includes_text,
+            note_excludes_text=note_excludes_text,
+            post_includes_text=post_includes_text,
+            post_excludes_text=post_excludes_text,
+            language=language,
+            topic_ids=topic_ids,
+            note_status=note_status,
+            note_created_at_from=note_created_at_from,
+            note_created_at_to=note_created_at_to,
+            x_user_names=x_user_names,
+            x_user_followers_count_from=x_user_followers_count_from,
+            x_user_follow_count_from=x_user_follow_count_from,
+            post_like_count_from=post_like_count_from,
+            post_repost_count_from=post_repost_count_from,
+            post_impression_count_from=post_impression_count_from,
+            post_includes_media=post_includes_media,
         )
+
+        # Generate pagination URLs
+        base_url = str(request.url).split("?")[0]
+        next_offset = offset + limit
+        prev_offset = max(offset - limit, 0)
+        next_url = None
+        if next_offset < total_count:
+            next_url = f"{base_url}?offset={next_offset}&limit={limit}"
+        prev_url = None
+        if offset > 0:
+            prev_url = f"{base_url}?offset={prev_offset}&limit={limit}"
+
+        return SearchResponse(data=results, meta=PaginationMeta(next=next_url, prev=prev_url))
 
     return router
