@@ -32,7 +32,7 @@ class CORSSettings(BaseSettings):
     allow_methods: list[str] = ["GET"]
     allow_headers: list[str] = ["*"]
 
-    allow_origins: list[str] = []
+    allow_origins: list[str] = ["*"]
 
 
 class GlobalSettings(BaseSettings):
