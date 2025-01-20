@@ -524,7 +524,7 @@ class Storage:
         post_like_count_from: Union[int, None] = None,
         post_repost_count_from: Union[int, None] = None,
         post_impression_count_from: Union[int, None] = None,
-        post_includes_media: bool = True,
+        post_includes_media: Union[bool, None] = None,
         offset: int = 0,
         limit: int = 100,
     ) -> Generator[Tuple[NoteModel, PostModel], None, None]:
@@ -575,7 +575,11 @@ class Storage:
                 query = query.filter(PostRecord.repost_count >= post_repost_count_from)
             if post_impression_count_from:
                 query = query.filter(PostRecord.impression_count >= post_impression_count_from)
-            if not post_includes_media:
+            if post_includes_media:
+                # Only include posts that have media
+                query = query.filter(PostRecord.media_details.any())
+            if post_includes_media is False:
+                # Only include posts that don't have media
                 query = query.filter(~PostRecord.media_details.any())
 
             # Pagination
@@ -664,7 +668,11 @@ class Storage:
                 query = query.filter(PostRecord.repost_count >= post_repost_count_from)
             if post_impression_count_from:
                 query = query.filter(PostRecord.impression_count >= post_impression_count_from)
-            if not post_includes_media:
+            if post_includes_media:
+                # Only include posts that have media
+                query = query.filter(PostRecord.media_details.any())
+            if post_includes_media is False:
+                # Only include posts that don't have media
                 query = query.filter(~PostRecord.media_details.any())
 
             return query.count()
