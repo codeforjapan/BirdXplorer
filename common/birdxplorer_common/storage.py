@@ -576,10 +576,8 @@ class Storage:
             if post_impression_count_from:
                 query = query.filter(PostRecord.impression_count >= post_impression_count_from)
             if post_includes_media:
-                # Only include posts that have media
                 query = query.filter(PostRecord.media_details.any())
             if post_includes_media is False:
-                # Only include posts that don't have media
                 query = query.filter(~PostRecord.media_details.any())
 
             # Pagination
@@ -669,10 +667,8 @@ class Storage:
             if post_impression_count_from:
                 query = query.filter(PostRecord.impression_count >= post_impression_count_from)
             if post_includes_media:
-                # Only include posts that have media
                 query = query.filter(PostRecord.media_details.any())
             if post_includes_media is False:
-                # Only include posts that don't have media
                 query = query.filter(~PostRecord.media_details.any())
 
             return query.count()
