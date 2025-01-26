@@ -623,8 +623,8 @@ class Storage:
         with Session(self.engine) as sess:
             query = (
                 sess.query(NoteRecord)
-                .join(PostRecord, NoteRecord.post_id == PostRecord.post_id)
-                .join(XUserRecord, PostRecord.user_id == XUserRecord.user_id)
+                .outerjoin(PostRecord, NoteRecord.post_id == PostRecord.post_id)
+                .outerjoin(XUserRecord, PostRecord.user_id == XUserRecord.user_id)
             )
 
             # Apply note filters
