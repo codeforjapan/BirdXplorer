@@ -286,7 +286,7 @@ class Storage:
         return [cls._media_record_to_model(post_media.media) for post_media in post_record.media_details]
 
     @classmethod
-    def _post_record_to_model(cls, post_record: PostRecord, *, with_media: bool) -> PostModel:
+    def _post_record_to_model(cls, post_record: PostRecord, *, with_media: Union[bool, None]) -> PostModel:
         # post_record.media_detailsにアクセスしたタイミングでメディア情報を一気に引っ張るクエリが発行される
         # media情報がいらない場合はクエリを発行したくないので先にwith_mediaをチェック
         media_details = cls._post_record_media_details_to_model(post_record) if with_media else []
@@ -527,7 +527,7 @@ class Storage:
         post_includes_media: Union[bool, None] = None,
         offset: int = 0,
         limit: int = 100,
-    ) -> Generator[Tuple[NoteModel, PostModel], None, None]:
+    ) -> Generator[Tuple[NoteModel, PostModel | None], None, None]:
         with Session(self.engine) as sess:
             # Base query joining notes, posts and users
             query = (
