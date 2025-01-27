@@ -618,11 +618,11 @@ class Storage:
         post_like_count_from: Union[int, None] = None,
         post_repost_count_from: Union[int, None] = None,
         post_impression_count_from: Union[int, None] = None,
-        post_includes_media: bool = True,
+        post_includes_media: Union[bool, None] = None,
     ) -> int:
         with Session(self.engine) as sess:
             query = (
-                sess.query(NoteRecord)
+                sess.query(func.count(NoteRecord.note_id))
                 .outerjoin(PostRecord, NoteRecord.post_id == PostRecord.post_id)
                 .outerjoin(XUserRecord, PostRecord.user_id == XUserRecord.user_id)
             )
@@ -668,10 +668,10 @@ class Storage:
                 query = query.filter(PostRecord.impression_count >= post_impression_count_from)
             if post_includes_media:
                 query = query.filter(PostRecord.media_details.any())
-            if post_includes_media is False:
+            elif post_includes_media is False:
                 query = query.filter(~PostRecord.media_details.any())
 
-            return query.count()
+            return query.scalar() or 0
 
 
 def gen_storage(settings: GlobalSettings) -> Storage:
