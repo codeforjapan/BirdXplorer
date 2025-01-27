@@ -2,12 +2,7 @@ from typing import List
 
 from sqlalchemy.engine import Engine
 
-from birdxplorer_common.models import (
-    LanguageIdentifier,
-    Note,
-    Post,
-    TopicId,
-)
+from birdxplorer_common.models import LanguageIdentifier, Note, Post, TopicId
 from birdxplorer_common.storage import NoteRecord, PostRecord, Storage, TopicRecord
 
 
