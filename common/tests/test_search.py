@@ -1,15 +1,12 @@
 from typing import List
 
-import pytest
 from sqlalchemy.engine import Engine
 
 from birdxplorer_common.models import (
     LanguageIdentifier,
     Note,
     Post,
-    Topic,
     TopicId,
-    TwitterTimestamp,
 )
 from birdxplorer_common.storage import NoteRecord, PostRecord, Storage, TopicRecord
 
