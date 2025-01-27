@@ -61,7 +61,7 @@ dev=[
     "httpx",
 ]
 prod=[
-    "birdxplorer_common @ git+https://github.com/codeforjapan/BirdXplorer.git@main#subdirectory=common",
+    "birdxplorer_common @ git+https://github.com/codeforjapan/BirdXplorer.git@feature/138#subdirectory=common",
     "psycopg2",
     "gunicorn",
 ]

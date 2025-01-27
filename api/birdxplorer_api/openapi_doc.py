@@ -527,7 +527,7 @@ v1_data_x_user_follow_count = FastAPIEndpointParamDocs(
     },
 )
 
-v1_data_post_favorite_count = FastAPIEndpointParamDocs(
+v1_data_post_like_count = FastAPIEndpointParamDocs(
     description="Postのお気に入り数。",
     openapi_examples={
         "single": {
@@ -583,7 +583,7 @@ V1DataSearchDocs = FastAPIEndpointDocs(
         "x_user_name": v1_data_x_user_name,
         "x_user_followers_count_from": v1_data_x_user_follower_count,
         "x_user_follow_count_from": v1_data_x_user_follow_count,
-        "post_favorite_count_from": v1_data_post_favorite_count,
+        "post_like_count_from": v1_data_post_like_count,
         "post_repost_count_from": v1_data_post_repost_count,
         "post_impression_count_from": v1_data_post_impression_count,
         "post_includes_media": v1_data_post_includes_media,
