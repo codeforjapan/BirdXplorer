@@ -1,5 +1,6 @@
 from datetime import timezone
 from typing import List, TypeAlias, Union
+from urllib.parse import urlencode
 
 from dateutil.parser import parse as dateutil_parse
 from fastapi import APIRouter, HTTPException, Path, Query, Request
@@ -31,7 +32,6 @@ from birdxplorer_common.models import (
     UserId,
 )
 from birdxplorer_common.storage import Storage
-from urllib.parse import urlencode
 
 PostsPaginationMetaWithExamples: TypeAlias = Annotated[
     PaginationMeta,
@@ -279,8 +279,8 @@ def ensure_twitter_timestamp(t: Union[str, TwitterTimestamp]) -> TwitterTimestam
     try:
         timestamp = str_to_twitter_timestamp(t) if isinstance(t, str) else t
         return timestamp
-    except:
-        raise ValueError(f"Timestamp out of range")
+    except OverflowError:
+        raise OverflowError("Timestamp out of range")
 
 
 def gen_router(storage: Storage) -> APIRouter:
@@ -324,7 +324,7 @@ def gen_router(storage: Storage) -> APIRouter:
                 created_at_from = ensure_twitter_timestamp(created_at_from)
             if created_at_to is not None and isinstance(created_at_to, str):
                 created_at_to = ensure_twitter_timestamp(created_at_to)
-        except ValueError as e:
+        except OverflowError as e:
             raise HTTPException(status_code=422, detail=str(e))
 
         notes = list(
@@ -387,7 +387,7 @@ def gen_router(storage: Storage) -> APIRouter:
                 created_at_from = ensure_twitter_timestamp(created_at_from)
             if created_at_to is not None and isinstance(created_at_to, str):
                 created_at_to = ensure_twitter_timestamp(created_at_to)
-        except ValueError as e:
+        except OverflowError as e:
             raise HTTPException(status_code=422, detail=str(e))
 
         posts = list(
@@ -467,7 +467,7 @@ def gen_router(storage: Storage) -> APIRouter:
                 note_created_at_from = ensure_twitter_timestamp(note_created_at_from)
             if note_created_at_to is not None and isinstance(note_created_at_to, str):
                 note_created_at_to = ensure_twitter_timestamp(note_created_at_to)
-        except ValueError as e:
+        except OverflowError as e:
             raise HTTPException(status_code=422, detail=str(e))
 
         # Get search results using the optimized storage method
@@ -533,14 +533,14 @@ def gen_router(storage: Storage) -> APIRouter:
 
         next_url = None
         if next_offset < total_count:
-            query_params["offset"] = next_offset
-            query_params["limit"] = limit
+            query_params["offset"] = str(next_offset)
+            query_params["limit"] = str(limit)
             next_url = f"{base_url}?{urlencode(query_params)}"
 
         prev_url = None
         if offset > 0:
-            query_params["offset"] = prev_offset
-            query_params["limit"] = limit
+            query_params["offset"] = str(prev_offset)
+            query_params["limit"] = str(limit)
             prev_url = f"{base_url}?{urlencode(query_params)}"
 
         return SearchResponse(data=results, meta=PaginationMeta(next=next_url, prev=prev_url))
