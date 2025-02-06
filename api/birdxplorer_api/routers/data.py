@@ -31,6 +31,7 @@ from birdxplorer_common.models import (
     UserId,
 )
 from birdxplorer_common.storage import Storage
+from urllib.parse import urlencode
 
 PostsPaginationMetaWithExamples: TypeAlias = Annotated[
     PaginationMeta,
@@ -275,7 +276,11 @@ def str_to_twitter_timestamp(s: str) -> TwitterTimestamp:
 
 
 def ensure_twitter_timestamp(t: Union[str, TwitterTimestamp]) -> TwitterTimestamp:
-    return str_to_twitter_timestamp(t) if isinstance(t, str) else t
+    try:
+        timestamp = str_to_twitter_timestamp(t) if isinstance(t, str) else t
+        return timestamp
+    except:
+        raise ValueError(f"Timestamp out of range")
 
 
 def gen_router(storage: Storage) -> APIRouter:
@@ -314,10 +319,13 @@ def gen_router(storage: Storage) -> APIRouter:
         language: Union[LanguageIdentifier, None] = Query(default=None, **V1DataNotesDocs.params["language"]),
         search_text: Union[None, str] = Query(default=None, **V1DataNotesDocs.params["search_text"]),
     ) -> NoteListResponse:
-        if created_at_from is not None and isinstance(created_at_from, str):
-            created_at_from = ensure_twitter_timestamp(created_at_from)
-        if created_at_to is not None and isinstance(created_at_to, str):
-            created_at_to = ensure_twitter_timestamp(created_at_to)
+        try:
+            if created_at_from is not None and isinstance(created_at_from, str):
+                created_at_from = ensure_twitter_timestamp(created_at_from)
+            if created_at_to is not None and isinstance(created_at_to, str):
+                created_at_to = ensure_twitter_timestamp(created_at_to)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
 
         notes = list(
             storage.get_notes(
@@ -374,10 +382,14 @@ def gen_router(storage: Storage) -> APIRouter:
         search_url: Union[None, HttpUrl] = Query(default=None, **V1DataPostsDocs.params["search_url"]),
         media: bool = Query(default=True, **V1DataPostsDocs.params["media"]),
     ) -> PostListResponse:
-        if created_at_from is not None and isinstance(created_at_from, str):
-            created_at_from = ensure_twitter_timestamp(created_at_from)
-        if created_at_to is not None and isinstance(created_at_to, str):
-            created_at_to = ensure_twitter_timestamp(created_at_to)
+        try:
+            if created_at_from is not None and isinstance(created_at_from, str):
+                created_at_from = ensure_twitter_timestamp(created_at_from)
+            if created_at_to is not None and isinstance(created_at_to, str):
+                created_at_to = ensure_twitter_timestamp(created_at_to)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
         posts = list(
             storage.get_posts(
                 post_ids=post_ids,
@@ -450,10 +462,13 @@ def gen_router(storage: Storage) -> APIRouter:
         limit: int = Query(default=100, gt=0, le=1000, **V1DataSearchDocs.params["limit"]),
     ) -> SearchResponse:
         # Convert timestamp strings to TwitterTimestamp objects
-        if note_created_at_from is not None and isinstance(note_created_at_from, str):
-            note_created_at_from = ensure_twitter_timestamp(note_created_at_from)
-        if note_created_at_to is not None and isinstance(note_created_at_to, str):
-            note_created_at_to = ensure_twitter_timestamp(note_created_at_to)
+        try:
+            if note_created_at_from is not None and isinstance(note_created_at_from, str):
+                note_created_at_from = ensure_twitter_timestamp(note_created_at_from)
+            if note_created_at_to is not None and isinstance(note_created_at_to, str):
+                note_created_at_to = ensure_twitter_timestamp(note_created_at_to)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
 
         # Get search results using the optimized storage method
         results = []
@@ -512,14 +527,21 @@ def gen_router(storage: Storage) -> APIRouter:
 
         # Generate pagination URLs
         base_url = str(request.url).split("?")[0]
+        query_params = dict(request.query_params)
         next_offset = offset + limit
         prev_offset = max(offset - limit, 0)
+
         next_url = None
         if next_offset < total_count:
-            next_url = f"{base_url}?offset={next_offset}&limit={limit}"
+            query_params["offset"] = next_offset
+            query_params["limit"] = limit
+            next_url = f"{base_url}?{urlencode(query_params)}"
+
         prev_url = None
         if offset > 0:
-            prev_url = f"{base_url}?offset={prev_offset}&limit={limit}"
+            query_params["offset"] = prev_offset
+            query_params["limit"] = limit
+            prev_url = f"{base_url}?{urlencode(query_params)}"
 
         return SearchResponse(data=results, meta=PaginationMeta(next=next_url, prev=prev_url))
 
