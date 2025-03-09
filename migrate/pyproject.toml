@@ -25,9 +25,9 @@ classifiers = [
 ]
 
 dependencies = [
-    "birdxplorer_common @ git+https://github.com/codeforjapan/BirdXplorer.git@feature/issue-53-divide-python-packages#subdirectory=common",
     "sqlalchemy",
     "python-dotenv",
+    "alembic",
 ]
 
 [project.urls]
@@ -59,7 +59,8 @@ dev=[
     "httpx",
 ]
 prod=[
-    "psycopg2"
+    "psycopg2",
+    "birdxplorer_common @ git+https://github.com/codeforjapan/BirdXplorer.git@main#subdirectory=common",
 ]
 
 [tool.black]
@@ -94,11 +95,10 @@ legacy_tox_ini = """
         VIRTUALENV_PIP = 24.0
     deps =
         -e .[dev]
+        -e ../common
     commands =
-        black birdxplorer_api tests
-        isort birdxplorer_api tests
-        pytest
-        pflake8 birdxplorer_api/ tests/
-        mypy birdxplorer_api --strict
-        mypy tests --strict
+        black migration
+        isort migration
+        pflake8 migration
+        mypy migration --strict
 """
