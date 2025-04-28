@@ -1,6 +1,6 @@
 from datetime import timezone
 from typing import List, TypeAlias, Union
-from urllib.parse import urlencode
+from urllib.parse import parse_qs as parse_query_string, urlencode
 
 from dateutil.parser import parse as dateutil_parse
 from fastapi import APIRouter, HTTPException, Path, Query, Request
@@ -527,21 +527,22 @@ def gen_router(storage: Storage) -> APIRouter:
 
         # Generate pagination URLs
         base_url = str(request.url).split("?")[0]
-        query_params = dict(request.query_params)
+        raw_query = request.url.query
+        query_params = parse_query_string(raw_query)
         next_offset = offset + limit
         prev_offset = max(offset - limit, 0)
 
         next_url = None
         if next_offset < total_count:
-            query_params["offset"] = str(next_offset)
-            query_params["limit"] = str(limit)
-            next_url = f"{base_url}?{urlencode(query_params)}"
+            query_params["offset"] = [str(next_offset)]
+            query_params["limit"] = [str(limit)]
+            next_url = f"{base_url}?{urlencode(query_params, doseq=True)}"
 
         prev_url = None
         if offset > 0:
-            query_params["offset"] = str(prev_offset)
-            query_params["limit"] = str(limit)
-            prev_url = f"{base_url}?{urlencode(query_params)}"
+            query_params["offset"] = [str(prev_offset)]
+            query_params["limit"] = [str(limit)]
+            prev_url = f"{base_url}?{urlencode(query_params, doseq=True)}"
 
         return SearchResponse(data=results, meta=PaginationMeta(next=next_url, prev=prev_url))
 
