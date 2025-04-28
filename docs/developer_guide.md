@@ -11,7 +11,7 @@
 
 ## 1. toxコマンドでテスト環境を構築する
 
-BirdXplorerは複数のPythonモジュール（api, common, etl, migrate）で構成されています。各モジュールは独自のpyproject.tomlファイルを持ち、toxを使用してテスト環境を構築できます。
+BirdXplorerは複数のPythonモジュール（api, common, migrate）で構成されています。各モジュールは独自のpyproject.tomlファイルを持ち、toxを使用してテスト環境を構築できます。
 
 ### 前提条件
 
@@ -45,7 +45,7 @@ pip install -e "./api[dev]"
 
 4. toxを使用してテストを実行する
 
-各モジュールディレクトリで以下のコマンドを実行します：
+各モジュールのテストは、プロジェクトのルートディレクトリから以下のように実行します：
 
 ```bash
 # commonモジュールのテスト
@@ -53,7 +53,7 @@ cd common
 tox
 
 # apiモジュールのテスト
-cd ../api
+cd api
 tox
 ```
 
