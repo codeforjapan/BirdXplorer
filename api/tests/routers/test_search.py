@@ -194,3 +194,22 @@ def test_search_timestamp_conversion(client: TestClient, mock_storage: MagicMock
     # Test invalid timestamp
     response = client.get("/api/v1/data/search?note_created_at_from=invalid")
     assert response.status_code == 422
+
+
+def test_search_duplicate_parameters(client: TestClient, mock_storage: MagicMock) -> None:
+    """Test that duplicate query parameters are preserved in pagination URLs."""
+    mock_storage.search_notes_with_posts.return_value = []
+    mock_storage.count_search_results.return_value = 150  # Enough to have pagination
+
+    # Test with duplicate note_status parameters
+    response = client.get(
+        "/api/v1/data/search?note_status=NEEDS_MORE_RATINGS&note_status=CURRENTLY_RATED_HELPFUL&limit=50&offset=0"
+    )
+    assert response.status_code == 200
+
+    data = response.json()
+    next_url = data["meta"]["next"]
+    assert next_url is not None
+
+    assert "note_status=NEEDS_MORE_RATINGS" in next_url
+    assert "note_status=CURRENTLY_RATED_HELPFUL" in next_url
