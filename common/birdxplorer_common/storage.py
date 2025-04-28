@@ -8,13 +8,30 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, rela
 from sqlalchemy.orm.query import RowReturningQuery
 from sqlalchemy.types import CHAR, DECIMAL, JSON, Integer, String, Uuid
 
-from .models import BinaryBool, LanguageIdentifier
+from .models import (
+    BinaryBool,
+    LanguageIdentifier,
+)
 from .models import Link as LinkModel
-from .models import LinkId, Media, MediaDetails, MediaType, NonNegativeInt
+from .models import (
+    LinkId,
+    Media,
+    MediaDetails,
+    MediaType,
+    NonNegativeInt,
+)
 from .models import Note as NoteModel
-from .models import NoteId, NotesClassification, NotesHarmful, ParticipantId
+from .models import (
+    NoteId,
+    NotesClassification,
+    NotesHarmful,
+    ParticipantId,
+)
 from .models import Post as PostModel
-from .models import PostId, SummaryString
+from .models import (
+    PostId,
+    SummaryString,
+)
 from .models import Topic as TopicModel
 from .models import (
     TopicId,

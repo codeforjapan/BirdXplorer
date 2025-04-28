@@ -3,7 +3,6 @@ version: "3.1"
 services:
   db:
     image: postgres:15.4
-    container_name: postgres_container
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${BX_STORAGE_SETTINGS__PASSWORD}
@@ -35,19 +34,6 @@ services:
         - action: rebuild
           path: ./
           target: /app
-  migrate:
-    depends_on:
-      db:
-        condition: service_healthy
-    build:
-      args:
-        - ENVIRONMENT=dev
-      context: ./
-      dockerfile: ./migrate/Dockerfile.dev
-    environment:
-      - WAIT_HOSTS=db:5432
-    env_file:
-      - .env
 
 volumes:
   postgres_data:
