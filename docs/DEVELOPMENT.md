@@ -61,8 +61,10 @@ cp .env.example .env
 Edit the `.env` file to set the required environment variables:
 
 ```
-BX_STORAGE_SETTINGS__PASSWORD=birdxplorer
+BX_STORAGE_SETTINGS__PASSWORD=your_secure_password
 ```
+
+Replace `your_secure_password` with a secure password of your choice.
 
 For ETL processes, you may need additional environment variables. Check the `.env.example` file in the ETL directory:
 
