@@ -5,6 +5,7 @@ from random import Random
 from typing import (
     Annotated,
     Any,
+    Callable,
     Dict,
     List,
     Literal,
@@ -17,7 +18,9 @@ from typing import (
 from uuid import UUID
 
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import ConfigDict
+from pydantic import (
+    ConfigDict,
+)
 from pydantic import Field as PydanticField
 from pydantic import (
     GetCoreSchemaHandler,
@@ -492,13 +495,14 @@ class BaseModel(PydanticBaseModel):
         indent: int | None = None,
         include: IncEx | None = None,
         exclude: IncEx | None = None,
-        context: Dict[str, Any] | None = None,
-        by_alias: bool = True,
+        context: Any | None = None,
+        by_alias: bool | None = True,
         exclude_unset: bool = False,
         exclude_defaults: bool = False,
         exclude_none: bool = False,
         round_trip: bool = False,
-        warnings: bool | Literal["none"] | Literal["warn"] | Literal["error"] = True,
+        warnings: bool | Literal["none", "warn", "error"] = True,
+        fallback: Callable[[Any], Any] | None = None,
         serialize_as_any: bool = False,
     ) -> str:
         return super(BaseModel, self).model_dump_json(
@@ -512,6 +516,7 @@ class BaseModel(PydanticBaseModel):
             exclude_none=exclude_none,
             round_trip=round_trip,
             warnings=warnings,
+            fallback=fallback,
             serialize_as_any=serialize_as_any,
         )
 
