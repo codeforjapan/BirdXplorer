@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 import requests
 import stringcase
 from sqlalchemy.orm import Session
+
+from birdxplorer_etl.lib.sqlite.init import close_sqlite
 from lib.x.postlookup import lookup
 from birdxplorer_common.storage import (
     RowNoteRecord,
@@ -103,6 +105,8 @@ def extract_data(sqlite: Session, postgresql: Session):
         .filter(RowNoteRecord.created_at_millis <= settings.TARGET_TWITTER_POST_END_UNIX_MILLISECOND)
         .all()
     )
+
+    close_sqlite(sqlite)
     logging.info(f"Target notes: {len(postExtract_targetNotes)}")
     for note in postExtract_targetNotes:
         tweet_id = note.tweet_id
