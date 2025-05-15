@@ -1,0 +1,25 @@
+# Dockerfile for running extract.py
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       gcc \
+       libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+      requests \
+      stringcase \
+      sqlalchemy \
+      psycopg2-binary
+
+COPY src/birdxplorer_etl /app/birdxplorer_etl
+COPY src/birdxplorer_common /app/birdxplorer_common
+COPY src/lib /app/lib
+COPY settings.py /app/settings.py
+
+# 6. Entrypoint to run extract.py
+ENTRYPOINT ["python", "-u", "birdxplorer_etl/run_extract.py"]
