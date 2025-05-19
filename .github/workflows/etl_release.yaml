@@ -4,8 +4,6 @@ permissions: write-all
 
 on:
   push:
-    branches:
-      - main
     paths:
       - 'etl/**'
 
