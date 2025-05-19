@@ -1,5 +1,5 @@
 name: Project test
-on: push
+on: workflow_call
 
 permissions:
   contents: read

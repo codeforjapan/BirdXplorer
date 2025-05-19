@@ -1,0 +1,69 @@
+name: Main
+
+permissions: write-all
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'etl/**'
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  release:
+    uses: ./.github/workflows/_release.yaml
+    needs:
+      - test
+
+  create-deploy-env:
+    runs-on: ubuntu-latest
+    needs:
+      - release
+    outputs:
+      deploy-env: ${{ steps.output-deploy-env.outputs.deploy-env }}
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set env to staging
+        id: set-env-staging
+        if: endsWith(github.ref, 'heads/main')
+        run: |
+          echo "DEPLOY_ENV=staging" >> $GITHUB_ENV
+
+      - name: Set env to production
+        id: set-env-production
+        if: ${{ needs.release.outputs.created }}
+        run: |
+          echo "DEPLOY_ENV=production" >> $GITHUB_ENV
+
+      - name: Output App Env
+        id: output-deploy-env
+        run: |
+          echo "deploy-env=${DEPLOY_ENV}" >> $GITHUB_OUTPUT
+
+  build:
+    needs:
+      - release
+      - create-deploy-env
+    uses: ./.github/workflows/_build.yaml
+    with:
+      image-tags: ${{ needs.release.outputs.tag_name }}
+      deploy-env: ${{ needs.create-deploy-env.outputs.deploy-env }}
+    secrets:
+      aws-ecr-repo-name: ${{ secrets.AWS_ECR_REPO_NAME }}
+
+#  prod:
+#    if: ${{ needs.release.outputs.created }}
+#    needs:
+#      - create-deploy-env
+#      - build
+#      - release
+#    uses: ./.github/workflows/_deploy.yaml
+#    with:
+#      image-tag: ${{ needs.release.outputs.tag_name }}
+#      deploy-env: ${{ needs.create-deploy-env.outputs.deploy-env }}
+#    secrets: inherit
