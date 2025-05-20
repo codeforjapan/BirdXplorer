@@ -50,8 +50,8 @@ jobs:
           push: true
           builder: ${{ steps.buildx.outputs.name }}
           tags: ${{ steps.login-ecr.outputs.registry }}/${{ secrets.aws-ecr-repo-name }}:${{ inputs.deploy-env }}-${{ inputs.image-tags }}
-          file: ./Dockerfile.extract
-          context: ./etl
+          file: ./etl/Dockerfile.extract
+          context: ./
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
