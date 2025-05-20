@@ -6,6 +6,7 @@ on:
   push:
     paths:
       - 'etl/**'
+  workflow_dispatch: {}
 
 jobs:
   test:
