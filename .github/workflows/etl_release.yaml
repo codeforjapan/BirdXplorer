@@ -2,11 +2,7 @@ name: ETL Release
 
 permissions: write-all
 
-on:
-  push:
-    paths:
-      - 'etl/**'
-  workflow_dispatch: {}
+on: push
 
 jobs:
   test:
