@@ -19,7 +19,7 @@ RUN pip install --no-cache-dir \
 COPY src/birdxplorer_etl /app/birdxplorer_etl
 COPY src/birdxplorer_common /app/birdxplorer_common
 COPY src/lib /app/lib
-COPY settings.py /app/settings.py
+COPY src/birdxplorer_etl/settings.py /app/settings.py
 
 # 6. Entrypoint to run extract.py
 ENTRYPOINT ["python", "-u", "birdxplorer_etl/run_extract.py"]
