@@ -7,7 +7,6 @@ FROM python:3.10
 WORKDIR /app
 COPY pyproject.toml ./
 COPY src/birdxplorer_etl/__init__.py ./src/birdxplorer_etl/
-COPY .env ./
 
 RUN python -m pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -e .[prod]
