@@ -45,7 +45,7 @@ jobs:
       - create-deploy-env
     uses: ./.github/workflows/_build.yaml
     with:
-      image-tags: ${{ needs.release.outputs.tag_name }}
+      image-tags: ${{ github.sha }}
       deploy-env: ${{ needs.create-deploy-env.outputs.deploy-env }}
     secrets:
       aws-ecr-repo-name: ${{ secrets.AWS_ECR_REPO_NAME }}
