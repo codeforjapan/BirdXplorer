@@ -17,10 +17,7 @@ RUN apt-get update \
 COPY etl/. .
 
 RUN python -m pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -e .[prod] && \
-    pip install --no-cache-dir boto3 && \
-    python -c "import boto3; print('boto3 successfully imported')" && \
-    pip list | grep boto3
+    pip install --no-cache-dir -e .[prod]
 
 # 6. Entrypoint to run extract.py
-ENTRYPOINT ["sh", "-c", "echo 'Python path:' && python -c 'import sys; print(sys.path)' && echo 'Working directory:' && pwd && echo 'Checking boto3:' && python -c 'import boto3; print(\"boto3 version:\", boto3.__version__)' && echo 'Starting application...' && python -u src/birdxplorer_etl/run_extract.py"]
+ENTRYPOINT ["python", "-u", "src/birdxplorer_etl/run_extract.py"]

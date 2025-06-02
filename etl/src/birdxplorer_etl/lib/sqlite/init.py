@@ -24,7 +24,7 @@ def _get_database_config():
     """データベース設定を環境変数から取得"""
     return {
         's3_bucket': settings.S3_BUCKET_NAME,
-        's3_key': os.getenv('SQLITE_S3_KEY', ''),
+        's3_key': os.getenv('SQLITE_S3_KEY', 'etl'),
         'tmp_path': '/tmp/notes.sqlite'
     }
 
