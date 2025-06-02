@@ -17,6 +17,7 @@ RUN apt-get update \
 COPY etl/. .
 
 RUN python -m pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -e . && \
     pip install --no-cache-dir -e .[prod]
 
 # 6. Entrypoint to run extract.py
