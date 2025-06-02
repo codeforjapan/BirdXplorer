@@ -7,8 +7,6 @@ on: push
 jobs:
 #  release:
 #    uses: ./.github/workflows/_release.yaml
-#    needs:
-#      - test
 
   create-deploy-env:
     runs-on: ubuntu-latest
