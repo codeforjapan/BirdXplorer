@@ -56,9 +56,25 @@ def init_sqlite():
     return Session()
 
 def download_sqlite(src_path: str, dest_path: str, bucket: str):
+    import botocore.exceptions
+    
     s3_client = boto3.client('s3')
     Path(dest_path).parent.mkdir(parents=True, exist_ok=True)
-    s3_client.download_file(bucket, src_path, dest_path)
+    
+    try:
+        s3_client.download_file(bucket, src_path, dest_path)
+        logging.info(f"Successfully downloaded {src_path} from S3 bucket {bucket}")
+    except botocore.exceptions.ClientError as e:
+        error_code = e.response['Error']['Code']
+        if error_code == '404':
+            logging.warning(f"S3 file not found: {src_path} in bucket {bucket}. Creating empty database.")
+            # 空のSQLiteファイルを作成
+            import sqlite3
+            conn = sqlite3.connect(dest_path)
+            conn.close()
+        else:
+            logging.error(f"S3 download failed: {e}")
+            raise
 
 def upload_sqlite(src_path: str, dest_path: str, bucket: str):
     s3_client = boto3.client('s3')
