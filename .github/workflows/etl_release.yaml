@@ -49,6 +49,7 @@ jobs:
       deploy-env: ${{ needs.create-deploy-env.outputs.deploy-env }}
     secrets:
       aws-ecr-repo-name: ${{ secrets.AWS_ECR_REPO_NAME }}
+      aws-ecr-tweet-repo-name: ${{ secrets.AWS_ECR_TWEET_REPO_NAME }}
 
 #  prod:
 #    if: ${{ needs.release.outputs.created }}
