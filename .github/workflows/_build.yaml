@@ -20,6 +20,8 @@ on:
     secrets:
       aws-ecr-repo-name:
         required: true
+      aws-ecr-tweet-repo-name:
+        required: true
 
 jobs:
   build:
@@ -51,6 +53,17 @@ jobs:
           builder: ${{ steps.buildx.outputs.name }}
           tags: ${{ steps.login-ecr.outputs.registry }}/${{ secrets.aws-ecr-repo-name }}:${{ inputs.deploy-env }}-${{ inputs.image-tags }}
           file: ./etl/Dockerfile.extract
+          context: ./
+#          cache-from: type=gha
+#          cache-to: type=gha,mode=max
+
+      - name: Docker Build tweet
+        uses: docker/build-push-action@v3
+        with:
+          push: true
+          builder: ${{ steps.buildx.outputs.name }}
+          tags: ${{ steps.login-ecr.outputs.registry }}/${{ secrets.aws-ecr-tweet-repo-name }}:${{ inputs.deploy-env }}-${{ inputs.image-tags }}
+          file: ./etl/Dockerfile.tweet
           context: ./
 #          cache-from: type=gha
 #          cache-to: type=gha,mode=max

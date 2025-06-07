@@ -101,6 +101,12 @@ def init_postgresql():
     logging.info(f"Initializing database at {db_host}:{db_port}/{db_name}")
     engine = create_engine(f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}")
 
+    if not inspect(engine).has_table("row_notes"):
+        logging.info("Creating table notes")
+        RowNoteRecord.metadata.create_all(engine)
+    if not inspect(engine).has_table("row_note_status"):
+        logging.info("Creating table note_status")
+        RowNoteStatusRecord.metadata.create_all(engine)
     if not inspect(engine).has_table("row_posts"):
         logging.info("Creating table post")
         RowPostRecord.metadata.create_all(engine)
