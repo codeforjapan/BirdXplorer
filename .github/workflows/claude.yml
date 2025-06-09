@@ -11,18 +11,70 @@ on:
     types: [submitted]
 
 jobs:
-  claude-code-action:
+  check-permissions:
     if: |
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
       (github.event_name == 'issues' && contains(github.event.issue.body, '@claude'))
     runs-on: ubuntu-latest
+    outputs:
+      has-permission: ${{ steps.check.outputs.has-permission }}
+    steps:
+      - name: Check user permissions
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              // Get the user who triggered the event
+              let user;
+              if (context.eventName === 'issue_comment') {
+                user = context.payload.comment.user.login;
+              } else if (context.eventName === 'pull_request_review_comment') {
+                user = context.payload.comment.user.login;
+              } else if (context.eventName === 'pull_request_review') {
+                user = context.payload.review.user.login;
+              } else if (context.eventName === 'issues') {
+                user = context.payload.issue.user.login;
+              }
+              
+              console.log(`Checking permissions for user: ${user}`);
+              
+              // Check if user has write access to the repository
+              const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: user
+              });
+              
+              const hasPermission = ['admin', 'write', 'maintain'].includes(permission.permission);
+              console.log(`User ${user} has permission level: ${permission.permission}`);
+              console.log(`Has required permission: ${hasPermission}`);
+              
+              core.setOutput('has-permission', hasPermission);
+              
+              if (!hasPermission) {
+                core.notice(`User ${user} does not have sufficient permissions to trigger Claude actions. Required: write, maintain, or admin access.`);
+              }
+              
+              return hasPermission;
+            } catch (error) {
+              console.log(`Error checking permissions: ${error.message}`);
+              core.setOutput('has-permission', false);
+              return false;
+            }
+
+  claude-code-action:
+    needs: check-permissions
+    if: needs.check-permissions.outputs.has-permission == 'true'
+    runs-on: ubuntu-latest
     permissions:
-      contents: read
-      pull-requests: read
-      issues: read
+      contents: write
+      pull-requests: write
+      issues: write
       id-token: write
+      actions: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
