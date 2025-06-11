@@ -2,7 +2,8 @@ import logging
 import time
 
 import requests
-import settings
+
+from birdxplorer_etl import settings
 
 
 def create_url(id):
