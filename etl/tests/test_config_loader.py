@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-import yaml
+import yaml  # noqa: F401
 
 from birdxplorer_etl.pipeline.config.config_loader import (
     ConfigLoader,
@@ -15,11 +15,11 @@ from birdxplorer_etl.pipeline.config.config_loader import (
     create_sample_config,
     load_config,
 )
+from birdxplorer_etl.pipeline.config.models import AIConfig  # noqa: F401
+from birdxplorer_etl.pipeline.config.models import ExtractionConfig  # noqa: F401
 from birdxplorer_etl.pipeline.config.models import (
-    AIConfig,
     ComponentConfig,
     ETLConfig,
-    ExtractionConfig,
     FilterConfig,
 )
 
