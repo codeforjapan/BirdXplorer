@@ -1,7 +1,8 @@
+import logging
+import time
+
 import requests
 import settings
-import time
-import logging
 
 
 def create_url(id):
