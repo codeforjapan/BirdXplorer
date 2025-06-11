@@ -1,11 +1,13 @@
-from birdxplorer_etl.settings import OPENAPI_TOKEN
-from birdxplorer_etl.lib.ai_model.ai_model_interface_base import AIModelInterface
-from birdxplorer_common.models import LanguageIdentifier
-from openai import OpenAI
-from typing import Dict, List
 import csv
 import json
 import os
+from typing import Dict, List
+
+from openai import OpenAI
+
+from birdxplorer_common.models import LanguageIdentifier
+from birdxplorer_etl.lib.ai_model.ai_model_interface_base import AIModelInterface
+from birdxplorer_etl.settings import OPENAPI_TOKEN
 
 
 class OpenAIService(AIModelInterface):

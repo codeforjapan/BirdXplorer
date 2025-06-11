@@ -74,4 +74,4 @@ jobs:
         run: cp .env.example etl/.env
       - name: test
         working-directory: etl
-        run: pytest
+        run: tox
