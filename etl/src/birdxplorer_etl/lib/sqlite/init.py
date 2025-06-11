@@ -1,17 +1,17 @@
 # Create Note table for sqlite with columns: id, title, content, created_at, updated_at by sqlalchemy
-import os
 import logging
+import os
 
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 
 from birdxplorer_common.storage import (
     RowNoteRecord,
+    RowNoteStatusRecord,
+    RowPostEmbedURLRecord,
+    RowPostMediaRecord,
     RowPostRecord,
     RowUserRecord,
-    RowPostEmbedURLRecord,
-    RowNoteStatusRecord,
-    RowPostMediaRecord,
 )
 
 

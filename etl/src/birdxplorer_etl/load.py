@@ -1,7 +1,8 @@
-import boto3
 import logging
-import settings
 from datetime import datetime
+
+import boto3
+import settings
 
 s3 = boto3.client("s3", region_name="ap-northeast-1")
 

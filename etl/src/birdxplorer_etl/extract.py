@@ -1,19 +1,21 @@
 import csv
 import logging
 from datetime import datetime, timedelta
+
 import requests
+import settings
 import stringcase
-from sqlalchemy.orm import Session
 from lib.x.postlookup import lookup
+from sqlalchemy.orm import Session
+
 from birdxplorer_common.storage import (
     RowNoteRecord,
+    RowNoteStatusRecord,
+    RowPostEmbedURLRecord,
     RowPostMediaRecord,
     RowPostRecord,
     RowUserRecord,
-    RowNoteStatusRecord,
-    RowPostEmbedURLRecord,
 )
-import settings
 
 
 def extract_data(sqlite: Session, postgresql: Session):
@@ -98,7 +100,7 @@ def extract_data(sqlite: Session, postgresql: Session):
     # Noteに紐づくtweetデータを取得
     postExtract_targetNotes = (
         sqlite.query(RowNoteRecord)
-        .filter(RowNoteRecord.tweet_id != None)
+        .filter(RowNoteRecord.tweet_id is not None)
         .filter(RowNoteRecord.created_at_millis >= settings.TARGET_TWITTER_POST_START_UNIX_MILLISECOND)
         .filter(RowNoteRecord.created_at_millis <= settings.TARGET_TWITTER_POST_END_UNIX_MILLISECOND)
         .all()
@@ -116,7 +118,7 @@ def extract_data(sqlite: Session, postgresql: Session):
         logging.info(tweet_id)
         post = lookup(tweet_id)
 
-        if post == None or "data" not in post:
+        if post is None or "data" not in post:
             continue
 
         created_at = datetime.strptime(post["data"]["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ")

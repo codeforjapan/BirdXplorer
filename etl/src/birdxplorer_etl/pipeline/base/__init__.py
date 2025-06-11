@@ -1,7 +1,7 @@
 """
 Pipeline Base Classes
 
-This module contains abstract base classes and core interfaces for 
+This module contains abstract base classes and core interfaces for
 the pipeline infrastructure.
 """
 
@@ -10,6 +10,6 @@ from .context import PipelineContext
 
 __all__ = [
     "PipelineComponent",
-    "PipelineComponentError", 
+    "PipelineComponentError",
     "PipelineContext",
 ]
