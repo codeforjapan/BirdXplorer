@@ -11,7 +11,7 @@ from .post_extractor import PostExtractorComponent
 
 __all__ = [
     "DataLoaderComponent",
-    "DataTransformerComponent", 
+    "DataTransformerComponent",
     "NoteExtractorComponent",
     "PostExtractorComponent",
 ]

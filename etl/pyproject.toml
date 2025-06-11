@@ -53,6 +53,7 @@ dev=[
     'prefect',
     "isort",
     "tox",
+    "psycopg2-binary",
 ]
 prod=[
     "psycopg2",
