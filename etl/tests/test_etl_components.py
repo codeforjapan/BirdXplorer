@@ -5,8 +5,9 @@ Tests for the new ETL components: NoteExtractorComponent, PostExtractorComponent
 DataTransformerComponent, and DataLoaderComponent.
 """
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
 
 from birdxplorer_etl.pipeline.base import PipelineContext
 from birdxplorer_etl.pipeline.components import (
@@ -139,11 +140,7 @@ class TestDataLoaderComponent:
 
     def test_validate_config_valid(self) -> None:
         """Test configuration validation with valid config."""
-        config = {
-            "s3_bucket_name": "test-bucket",
-            "aws_region": "us-east-1",
-            "input_directory": "./data"
-        }
+        config = {"s3_bucket_name": "test-bucket", "aws_region": "us-east-1", "input_directory": "./data"}
         component = DataLoaderComponent("data_loader", config)
 
         # Should not raise any exception
@@ -173,7 +170,7 @@ class TestDataLoaderComponent:
         with pytest.raises(ValueError):
             component.validate_config()
 
-    @patch('boto3.client')
+    @patch("boto3.client")
     def test_setup(self, mock_boto3_client) -> None:
         """Test component setup."""
         mock_s3_client = Mock()
@@ -229,16 +226,19 @@ class TestCompatibilityLayer:
     def test_extract_import(self) -> None:
         """Test that extract_data can be imported."""
         from birdxplorer_etl.extract import extract_data
+
         assert extract_data is not None
 
     def test_transform_import(self) -> None:
         """Test that transform_data can be imported."""
         from birdxplorer_etl.transform import transform_data
+
         assert transform_data is not None
 
     def test_load_import(self) -> None:
         """Test that load_data can be imported."""
         from birdxplorer_etl.load import load_data
+
         assert load_data is not None
 
     def test_legacy_functions_import(self) -> None:
@@ -248,7 +248,7 @@ class TestCompatibilityLayer:
             generate_post_link,
             write_media_csv,
         )
-        
+
         assert generate_note_topic is not None
         assert generate_post_link is not None
         assert write_media_csv is not None
