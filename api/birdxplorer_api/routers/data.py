@@ -1,6 +1,7 @@
 from datetime import timezone
 from typing import List, TypeAlias, Union
-from urllib.parse import parse_qs as parse_query_string, urlencode
+from urllib.parse import parse_qs as parse_query_string
+from urllib.parse import urlencode
 
 from dateutil.parser import parse as dateutil_parse
 from fastapi import APIRouter, HTTPException, Path, Query, Request
