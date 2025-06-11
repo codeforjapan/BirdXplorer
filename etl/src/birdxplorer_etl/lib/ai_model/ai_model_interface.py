@@ -1,7 +1,7 @@
-from birdxplorer_etl.settings import AI_MODEL
-from birdxplorer_etl.lib.openapi.open_ai_service import OpenAIService
-from birdxplorer_etl.lib.claude.claude_service import ClaudeService
 from birdxplorer_etl.lib.ai_model.ai_model_interface_base import AIModelInterface
+from birdxplorer_etl.lib.claude.claude_service import ClaudeService
+from birdxplorer_etl.lib.openapi.open_ai_service import OpenAIService
+from birdxplorer_etl.settings import AI_MODEL
 
 
 def get_ai_service() -> AIModelInterface:
