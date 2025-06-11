@@ -1,36 +1,53 @@
+"""
+ETL Load Module - Compatibility Layer
+
+This module provides backward compatibility for the load_data function
+while using the new pipeline component architecture under the hood.
+"""
+
 import logging
-from datetime import datetime
 
-import boto3
-import settings
-
-s3 = boto3.client("s3", region_name="ap-northeast-1")
+from birdxplorer_etl.pipeline.base.context import PipelineContext
+from birdxplorer_etl.pipeline.components import DataLoaderComponent
 
 
 def load_data():
-
-    if settings.S3_BUCKET_NAME:
-        bucket_name = settings.S3_BUCKET_NAME
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
-        objectPrefix = f"{current_time}/"
-
-        fileNames = [
-            "./data/transformed/media.csv",
-            "./data/transformed/note_topic_association.csv",
-            "./data/transformed/note.csv",
-            "./data/transformed/post_link_association.csv",
-            "./data/transformed/post_link.csv",
-            "./data/transformed/post_media_association.csv",
-            "./data/transformed/post.csv",
-            "./data/transformed/topic.csv",
-            "./data/transformed/user.csv",
-        ]
-
-        for fileName in fileNames:
-            try:
-                s3.upload_file(fileName, bucket_name, f"{objectPrefix}{fileName.split('/')[-1]}")
-                logging.info(f"Successfully uploaded {fileName} to S3")
-            except FileNotFoundError:
-                logging.error(f"{fileName} not found")
-            except Exception as e:
-                logging.error(f"Failed to upload {fileName} to S3: {e}")
+    """
+    Load transformed data to S3 using pipeline components.
+    
+    This function maintains compatibility with the original interface
+    while leveraging the new component-based architecture.
+    """
+    logger = logging.getLogger(__name__)
+    logger.info("Starting data loading using pipeline components")
+    
+    try:
+        # Create pipeline context
+        context = PipelineContext()
+        
+        # Initialize data loader component
+        loader = DataLoaderComponent(
+            name="data_loader",
+            config={
+                "input_directory": "./data/transformed",
+                "aws_region": "ap-northeast-1",
+                "timestamp_format": "%Y-%m-%d %H:%M"
+            }
+        )
+        
+        # Setup and execute loading
+        loader.setup(context)
+        context = loader.execute(context)
+        
+        # Get results from context
+        files_uploaded = context.get_metadata("data_loader_files_uploaded", 0)
+        bucket_name = context.get_metadata("data_loader_s3_bucket", "N/A")
+        
+        if context.get_metadata("data_loader_status") == "skipped":
+            logger.info("Data loading skipped - no S3 bucket configured")
+        else:
+            logger.info(f"Data loading completed successfully. Uploaded {files_uploaded} files to {bucket_name}")
+        
+    except Exception as e:
+        logger.error(f"Data loading failed: {e}")
+        raise
