@@ -15,7 +15,7 @@ RUN python -m pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -e .[prod]
 
 # Lambda関数のコードをコピー
-COPY etl/src/birdxplorer_etl/lib/x/postlookup_lambda.py ./
+COPY etl/src/birdxplorer_etl/lib/lambda/postlookup_lambda.py ./
 
 # Lambda関数のハンドラーを指定
 CMD ["postlookup_lambda.lambda_handler"]
