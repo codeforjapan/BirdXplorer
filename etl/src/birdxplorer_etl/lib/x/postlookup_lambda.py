@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime
 import json
 import os
 import requests
@@ -89,8 +89,6 @@ def lambda_handler(event, context):
             logger.info(f"Looking up tweet: {tweet_id}")
             
             post = lookup(tweet_id)
-            logger.debug('postpostpostpostpostpostpostpostpostpostpost')
-            logger.debug(post)
 
             if post is None or "data" not in post:
                 logger.error(f"Lambda execution error: failed get tweet: {tweet_id}")
