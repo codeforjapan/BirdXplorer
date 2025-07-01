@@ -35,3 +35,6 @@ USE_SQS = os.getenv("USE_SQS", "False") == "True"
 ESTIMATE_TOPIC_QUEUE_URL = os.environ.get('ESTIMATE_TOPIC_QUEUE_URL')
 ESTIMATE_LANG_QUEUE_URL = os.environ.get('ESTIMATE_LANG_QUEUE_URL')
 ESTIMATE_TWEET_QUEUE_URL = os.environ.get('ESTIMATE_TWEET_QUEUE_URL')
+
+# トピック取得方法の設定 ("csv" または "db")
+TOPIC_SOURCE = os.getenv("TOPIC_SOURCE", "csv")
