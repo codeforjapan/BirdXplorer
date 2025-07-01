@@ -2,8 +2,10 @@ import csv
 import json
 import logging
 import os
+import zipfile
 from datetime import datetime, timedelta
 from typing import Dict
+from io import BytesIO
 
 import boto3
 import requests
@@ -22,10 +24,6 @@ import settings
 def extract_data(postgresql: Session):
     logging.info("Downloading community notes data")
 
-    # get columns of post table
-    columns = postgresql.query(RowUserRecord).statement.columns.keys()
-    logging.info(columns)
-
     # Noteデータを取得してPostgreSQLに保存
     date = datetime.now()
     latest_note = postgresql.query(RowNoteRecord).order_by(RowNoteRecord.created_at_millis.desc()).first()
@@ -39,7 +37,7 @@ def extract_data(postgresql: Session):
             break
 
         dateString = date.strftime("%Y/%m/%d")
-        note_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/notes/notes-00000.tsv"
+        note_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/notes/notes-00000.zip"
         if settings.USE_DUMMY_DATA:
             note_url = (
                 "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/notes_sample.tsv"
@@ -49,22 +47,97 @@ def extract_data(postgresql: Session):
         res = requests.get(note_url)
 
         if res.status_code == 200:
-            # res.contentをsqliteのNoteテーブル
-            tsv_data = res.content.decode("utf-8").splitlines()
-            reader = csv.DictReader(tsv_data, delimiter="\t")
-            reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
+            if settings.USE_DUMMY_DATA:
+                # ダミーデータの場合はTSVファイルを直接処理
+                tsv_data = res.content.decode("utf-8").splitlines()
+                reader = csv.DictReader(tsv_data, delimiter="\t")
+                reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
+            else:
+                with zipfile.ZipFile(BytesIO(res.content)) as zip_file:
+                    tsv_filename = 'notes-00000.tsv'
+                    if tsv_filename not in zip_file.namelist():
+                        logging.error(f"TSV file {tsv_filename} not found in the zip file.")
+                        break
+                    
+                    with zip_file.open(tsv_filename) as tsv_file:
+                        tsv_data = tsv_file.read().decode("utf-8").splitlines()
+                        reader = csv.DictReader(tsv_data, delimiter="\t")
+                        reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
 
             rows_to_add = []
             for index, row in enumerate(reader):
                 if postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id == row["note_id"]).first():
                     continue
+                
+                # BinaryBoolフィールドの値を正規化
+                binary_bool_fields = [
+                    'believable', 'misleading_other', 'misleading_factual_error',
+                    'misleading_manipulated_media', 'misleading_outdated_information',
+                    'misleading_missing_important_context', 'misleading_unverified_claim_as_fact',
+                    'misleading_satire', 'not_misleading_other', 'not_misleading_factually_correct',
+                    'not_misleading_outdated_but_not_when_written', 'not_misleading_clearly_satire',
+                    'not_misleading_personal_opinion', 'trustworthy_sources', 'is_media_note'
+                ]
+                
+                for field in binary_bool_fields:
+                    if field in row:
+                        value = row[field]
+                        if field == 'believable':
+                            # believableフィールドの特別な処理
+                            if value == "BELIEVABLE_BY_MANY":
+                                row[field] = "1"
+                            elif value == "BELIEVABLE_BY_FEW":
+                                row[field] = "0"
+                            elif value == "" or value is None or value == "empty":
+                                row[field] = "0"
+                            elif value not in ["0", "1"]:
+                                logging.warning(f"Unexpected value '{value}' for believable field in note {row.get('note_id', 'unknown')}. Setting to '0'.")
+                                row[field] = "0"
+                        else:
+                            # 他のBinaryBoolフィールドの処理
+                            if value == "" or value is None or value == "empty":
+                                row[field] = "0"
+                            elif value not in ["0", "1"]:
+                                # 予期しない値の場合はログに記録して0に設定
+                                logging.warning(f"Unexpected value '{value}' for field '{field}' in note {row.get('note_id', 'unknown')}. Setting to '0'.")
+                                row[field] = "0"
+                
+                # harmfulフィールドの処理
+                if 'harmful' in row:
+                    value = row['harmful']
+                    if value == "" or value is None or value == "empty":
+                        row['harmful'] = "LITTLE_HARM"  # デフォルト値
+                    elif value not in ["LITTLE_HARM", "CONSIDERABLE_HARM"]:
+                        logging.warning(f"Unexpected value '{value}' for harmful field in note {row.get('note_id', 'unknown')}. Setting to 'LITTLE_HARM'.")
+                        row['harmful'] = "LITTLE_HARM"
+                
+                # classificationフィールドの処理
+                if 'classification' in row:
+                    value = row['classification']
+                    if value == "" or value is None or value == "empty":
+                        row['classification'] = "NOT_MISLEADING"  # デフォルト値
+                    elif value not in ["NOT_MISLEADING", "MISINFORMED_OR_POTENTIALLY_MISLEADING"]:
+                        logging.warning(f"Unexpected value '{value}' for classification field in note {row.get('note_id', 'unknown')}. Setting to 'NOT_MISLEADING'.")
+                        row['classification'] = "NOT_MISLEADING"
+                
+                # validation_difficultyフィールドの処理（データベースではSummaryString型）
+                if 'validation_difficulty' in row:
+                    value = row['validation_difficulty']
+                    if value == "" or value is None or value == "empty":
+                        row['validation_difficulty'] = ""  # 空文字列として保存
+                
+                # その他の空文字列フィールドの処理（harmful と validation_difficulty 以外）
+                for key, value in row.items():
+                    if value == "" and key not in ['harmful', 'validation_difficulty']:
+                        row[key] = None
+                
                 rows_to_add.append(RowNoteRecord(**row))
                 if index % 1000 == 0:
                     postgresql.bulk_save_objects(rows_to_add)
                     rows_to_add = []
             postgresql.bulk_save_objects(rows_to_add)
 
-            status_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/noteStatusHistory/noteStatusHistory-00000.tsv"
+            status_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/noteStatusHistory/noteStatusHistory-00000.zip"
             if settings.USE_DUMMY_DATA:
                 status_url = "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/noteStatus_sample.tsv"
 
@@ -72,15 +145,38 @@ def extract_data(postgresql: Session):
             res = requests.get(status_url)
 
             if res.status_code == 200:
-                tsv_data = res.content.decode("utf-8").splitlines()
-                reader = csv.DictReader(tsv_data, delimiter="\t")
-                reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
+                if settings.USE_DUMMY_DATA:
+                    # ダミーデータの場合はTSVファイルを直接処理
+                    tsv_data = res.content.decode("utf-8").splitlines()
+                    reader = csv.DictReader(tsv_data, delimiter="\t")
+                    reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
+                else:
+                    # zipファイルを解凍してTSVファイルを取得
+                    with zipfile.ZipFile(BytesIO(res.content)) as zip_file:
+                        tsv_filename = 'noteStatusHistory-00000.tsv'
+                        if tsv_filename not in zip_file.namelist():
+                            logging.error(f"TSV file {tsv_filename} not found in the zip file.")
+                            break
+                        
+                        # TSVファイルを読み込み
+                        with zip_file.open(tsv_filename) as tsv_file:
+                            tsv_data = tsv_file.read().decode("utf-8").splitlines()
+                            reader = csv.DictReader(tsv_data, delimiter="\t")
+                            reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
 
                 rows_to_add = []
                 for index, row in enumerate(reader):
                     for key, value in list(row.items()):
                         if value == "":
                             row[key] = None
+                    
+                    # 対応するnote_idがrow_notesテーブルに存在するかを確認
+                    note_exists = postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id == row["note_id"]).first()
+                    if note_exists is None:
+                        # 対応するnoteが存在しない場合はスキップ
+                        logging.warning(f"Note ID {row['note_id']} not found in row_notes table. Skipping note status record.")
+                        continue
+                    
                     status = (
                         postgresql.query(RowNoteStatusRecord).filter(RowNoteStatusRecord.note_id == row["note_id"]).first()
                     )
