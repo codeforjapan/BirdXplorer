@@ -106,7 +106,7 @@ def lambda_handler(event, context):
                 new_note = NoteRecord(
                     note_id=note_row.note_id,
                     post_id=note_row.tweet_id,
-                    language=str(detected_language),
+                    language=detected_language,
                     summary=note_row.summary,
                     current_status=note_row.current_status,
                     created_at=note_row.created_at_millis
