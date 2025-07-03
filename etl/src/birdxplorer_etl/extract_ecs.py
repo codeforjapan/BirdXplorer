@@ -135,7 +135,10 @@ def extract_data(postgresql: Session):
                 if index % 1000 == 0:
                     postgresql.bulk_save_objects(rows_to_add)
                     rows_to_add = []
+                    postgresql.commit()
+
             postgresql.bulk_save_objects(rows_to_add)
+            postgresql.commit()
 
             status_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/noteStatusHistory/noteStatusHistory-00000.zip"
             if settings.USE_DUMMY_DATA:
@@ -186,6 +189,8 @@ def extract_data(postgresql: Session):
                     if index % 1000 == 0:
                         postgresql.bulk_save_objects(rows_to_add)
                         rows_to_add = []
+                        postgresql.commit()
+
                 postgresql.bulk_save_objects(rows_to_add)
 
                 break
