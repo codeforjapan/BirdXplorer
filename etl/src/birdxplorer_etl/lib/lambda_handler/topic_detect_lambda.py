@@ -15,16 +15,31 @@ def lambda_handler(event, context):
     トピック推定Lambda関数
     
     期待されるeventの形式:
-    {
-        "note_id": "1234567890"
-    }
+    1. 直接呼び出し: {"note_id": "1234567890"}
+    2. SQS経由: {"Records": [{"body": "{\"note_id\": \"1234567890\", \"processing_type\": \"topic_detect\"}"}]}
     """
     postgresql = init_postgresql()
     
     try:
-        # note_idが指定された場合
-        if 'note_id' in event:
+        note_id = None
+        
+        # SQSイベントの場合
+        if 'Records' in event:
+            for record in event['Records']:
+                try:
+                    message_body = json.loads(record['body'])
+                    if message_body.get('processing_type') == 'topic_detect':
+                        note_id = message_body.get('note_id')
+                        break
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse SQS message body: {e}")
+                    continue
+        
+        # 直接呼び出しの場合
+        elif 'note_id' in event:
             note_id = event['note_id']
+        
+        if note_id:
             logger.info(f"Detecting topics for note: {note_id}")
             
             ai_service = get_ai_service()
@@ -103,7 +118,7 @@ def lambda_handler(event, context):
             return {
                 'statusCode': 400,
                 'body': json.dumps({
-                    'error': 'Missing note_id in event'
+                    'error': 'Missing note_id in event or no valid topic_detect message found'
                 })
             }
         

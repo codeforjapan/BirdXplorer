@@ -131,14 +131,30 @@ def extract_data(postgresql: Session):
                     if value == "" and key not in ['harmful', 'validation_difficulty']:
                         row[key] = None
                 
-                rows_to_add.append(RowNoteRecord(**row))
+                note_record = RowNoteRecord(**row)
+                rows_to_add.append(note_record)
+                
                 if index % 1000 == 0:
                     postgresql.bulk_save_objects(rows_to_add)
-                    rows_to_add = []
                     postgresql.commit()
+                    
+                    # バッチ処理後にSQSキューイング
+                    for note in rows_to_add:
+                        enqueue_notes(note.note_id)
+                        if note.tweet_id:
+                            enqueue_tweets(note.tweet_id)
+                    
+                    rows_to_add = []
 
+            # 最後のバッチを処理
             postgresql.bulk_save_objects(rows_to_add)
             postgresql.commit()
+            
+            # 最後のバッチのSQSキューイング
+            for note in rows_to_add:
+                enqueue_notes(note.note_id)
+                if note.tweet_id:
+                    enqueue_tweets(note.tweet_id)
 
             status_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/noteStatusHistory/noteStatusHistory-00000.zip"
             if settings.USE_DUMMY_DATA:
@@ -221,51 +237,45 @@ def extract_data(postgresql: Session):
 
     return
 
-def enqueue_notes(note: Dict):
-    message_body = json.dumps({
-        'note_id': note['note_id'],
-    })
+def enqueue_notes(note_id: str):
+    """
+    ノート処理用のSQSキューにメッセージを送信
+    lang-detect-queueに送信（topic-detectはnote-transform完了後に実行）
+    """
     sqs_client = boto3.client('sqs', region_name=os.environ.get('AWS_REGION', 'ap-northeast-1'))
 
-    try:
-        response = sqs_client.send_message(
-            QueueUrl=settings.ESTIMATE_TOPIC_QUEUE_URL,
-            MessageBody=message_body,
-        )
-        # ロギング（必要なら）
-        print(f"Enqueued note {note['note_id']} to SQS, messageId={response.get('MessageId')}")
-    except Exception as e:
-        print(f"Failed to enqueue note {note['note_id']}: {e}")
+    # note-transform-queue用のメッセージ
+    note_transform_message = json.dumps({
+        'note_id': note_id,
+        'processing_type': 'note_transform'
+    })
 
+    # lang-detect-queueに送信（高優先度）
     try:
         response = sqs_client.send_message(
-            QueueUrl=settings.ESTIMATE_LANG_QUEUE_URL,
-            MessageBody=message_body,
+            QueueUrl=settings.LANG_DETECT_QUEUE_URL,  # 既存の環境変数を使用
+            MessageBody=note_transform_message,
         )
-        # ロギング（必要なら）
-        print(f"Enqueued note {note['note_id']} to SQS, messageId={response.get('MessageId')}")
+        logging.info(f"Enqueued note {note_id} to lang-detect queue, messageId={response.get('MessageId')}")
     except Exception as e:
-        print(f"Failed to enqueue note {note['note_id']}: {e}")
+        logging.error(f"Failed to enqueue note {note_id} to lang-detect queue: {e}")
 
 def enqueue_tweets(tweet_id: str):
+    """
+    ツイート取得用のSQSキューにメッセージを送信
+    """
     message_body = json.dumps({
         'tweet_id': tweet_id,
+        'processing_type': 'tweet_lookup'
     })
     sqs_client = boto3.client('sqs', region_name=os.environ.get('AWS_REGION', 'ap-northeast-1'))
 
     try:
-        sqs_client.send_message(
-            QueueUrl=settings.ESTIMATE_TWEET_QUEUE_URL,
+        response = sqs_client.send_message(
+            QueueUrl=settings.TWEET_LOOKUP_QUEUE_URL,  # 新しい環境変数を使用
             MessageBody=message_body,
         )
+        logging.info(f"Enqueued tweet {tweet_id} to tweet-lookup queue, messageId={response.get('MessageId')}")
     except Exception as e:
-        print(f"Failed to enqueue tweet {tweet_id}: {e}")
-
-    try:
-        sqs_client.send_message(
-            QueueUrl=settings.ESTIMATE_LANG_QUEUE_URL,
-            MessageBody=message_body,
-        )
-    except Exception as e:
-        print(f"Failed to enqueue tweet {tweet_id}: {e}")
+        logging.error(f"Failed to enqueue tweet {tweet_id} to tweet-lookup queue: {e}")
 

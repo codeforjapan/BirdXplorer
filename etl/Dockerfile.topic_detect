@@ -15,7 +15,7 @@ RUN python -m pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -e .[prod]
 
 # Lambda関数のコードをコピー
-COPY etl/src/birdxplorer_etl/lib/lambda/topic_detect_lambda.py ./
+COPY etl/src/birdxplorer_etl/lib/lambda_handler/topic_detect_lambda.py ./
 
 # Lambda関数のハンドラーを指定
 CMD ["topic_detect_lambda.lambda_handler"]

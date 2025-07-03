@@ -77,15 +77,30 @@ def lambda_handler(event, context):
     AWS Lambda用のハンドラー関数
     
     期待されるeventの形式:
-    {
-        "tweet_id": "1234567890"
-    }
+    1. 直接呼び出し: {"tweet_id": "1234567890"}
+    2. SQS経由: {"Records": [{"body": "{\"tweet_id\": \"1234567890\", \"processing_type\": \"tweet_lookup\"}"}]}
     """
     postgresql = init_postgresql()
     try:
-        # 単一のツイートIDの場合
-        if 'tweet_id' in event:
+        tweet_id = None
+        
+        # SQSイベントの場合
+        if 'Records' in event:
+            for record in event['Records']:
+                try:
+                    message_body = json.loads(record['body'])
+                    if message_body.get('processing_type') == 'tweet_lookup':
+                        tweet_id = message_body.get('tweet_id')
+                        break
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse SQS message body: {e}")
+                    continue
+        
+        # 直接呼び出しの場合
+        elif 'tweet_id' in event:
             tweet_id = event['tweet_id']
+        
+        if tweet_id:
             logger.info(f"Looking up tweet: {tweet_id}")
             
             post = lookup(tweet_id)
@@ -191,7 +206,7 @@ def lambda_handler(event, context):
                 logging.error(f"Error: {e}")
                 postgresql.rollback()
 
-
+            postgresql.close()
             return {
                 'statusCode': 200,
                 'body': json.dumps({
@@ -200,10 +215,11 @@ def lambda_handler(event, context):
                 })
             }
         else:
+            postgresql.close()
             return {
                 'statusCode': 400,
                 'body': json.dumps({
-                    'error': 'Missing tweet_id in event'
+                    'error': 'Missing tweet_id in event or no valid tweet_lookup message found'
                 })
             }
     
