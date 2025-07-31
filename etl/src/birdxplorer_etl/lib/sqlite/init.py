@@ -19,6 +19,9 @@ from birdxplorer_common.storage import (
 
 from birdxplorer_etl import settings
 
+import csv
+import os
+from birdxplorer_common.storage import TopicRecord
 
 def _get_database_config():
     """データベース設定を環境変数から取得"""
@@ -123,3 +126,48 @@ def init_postgresql():
     Session = sessionmaker(bind=engine)
 
     return Session()
+
+# todo topicがない場合や、新しく更新された場合に最初にinsertする
+def insert_topic_seed_data(session):
+    csv_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "seed", "topic_seed.csv")
+
+    # 既存のトピックラベルを取得（重複チェック用）
+    existing_topics = {}
+    for topic in session.query(TopicRecord).all():
+        # 日本語ラベルと英語ラベルの両方をチェック
+        if isinstance(topic.label, dict):
+            if "ja" in topic.label:
+                existing_topics[topic.label["ja"]] = topic.topic_id
+            if "en" in topic.label:
+                existing_topics[topic.label["en"]] = topic.topic_id
+
+    inserted_count = 0
+    skipped_count = 0
+
+    with open(csv_path, newline="", encoding="utf-8") as csvfile:
+        reader = csv.DictReader(csvfile)
+        for index, row in enumerate(reader):
+            if "ja" in row and row["ja"] and "en" in row and row["en"]:
+                ja_label = row["ja"].strip()
+                en_label = row["en"].strip()
+
+                # 同名のトピックが存在するかチェック
+                if ja_label in existing_topics or en_label in existing_topics:
+                    logging.info(f"Skipping duplicate topic: {ja_label} / {en_label}")
+                    skipped_count += 1
+                    continue
+
+                # 新しいトピックを挿入
+                topic_record = TopicRecord(
+                    topic_id=index + 1,
+                    label={"ja": ja_label, "en": en_label}
+                )
+                session.add(topic_record)
+
+                # 重複チェック用辞書に追加
+                existing_topics[ja_label] = topic_record.topic_id
+                existing_topics[en_label] = topic_record.topic_id
+                inserted_count += 1
+
+    session.commit()
+    logging.info(f"Topic seed data processing completed: {inserted_count} inserted, {skipped_count} skipped")
