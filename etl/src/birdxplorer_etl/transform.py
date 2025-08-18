@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Generator
 
-from sqlalchemy import Integer, Numeric, and_, func, select
+from sqlalchemy import Integer, Numeric, and_, func, select, or_
 from sqlalchemy.orm import Session
 
 from birdxplorer_common.storage import (
@@ -22,6 +22,7 @@ from birdxplorer_etl.settings import (
     TARGET_NOTE_ESTIMATE_TOPIC_END_UNIX_MILLISECOND,
     TARGET_NOTE_ESTIMATE_TOPIC_START_UNIX_MILLISECOND,
 )
+from constants import TARGET_KEYWORDS
 
 
 def transform_data(sqlite: Session, postgresql: Session):
@@ -36,11 +37,18 @@ def transform_data(sqlite: Session, postgresql: Session):
         os.remove("./data/transformed/note.csv")
     with open("./data/transformed/note.csv", "a") as file:
         writer = csv.writer(file)
-        writer.writerow(["note_id", "post_id", "summary", "current_status", "created_at", "language"])
+        writer.writerow(
+            ["note_id", "post_id", "author_id", "summary", "current_status", "locked_status", "created_at", "language"]
+        )
 
     offset = 0
     limit = 1000
     ai_service = get_ai_service()
+
+    # Build keyword filter conditions using shared TARGET_KEYWORDS
+    keyword_conditions = []
+    for keyword in TARGET_KEYWORDS:
+        keyword_conditions.append(RowNoteRecord.summary.ilike(f"%{keyword}%"))
 
     num_of_notes = (
         sqlite.query(func.count(RowNoteRecord.note_id))
@@ -48,6 +56,8 @@ def transform_data(sqlite: Session, postgresql: Session):
             and_(
                 RowNoteRecord.created_at_millis <= TARGET_NOTE_ESTIMATE_TOPIC_END_UNIX_MILLISECOND,
                 RowNoteRecord.created_at_millis >= TARGET_NOTE_ESTIMATE_TOPIC_START_UNIX_MILLISECOND,
+                # Apply keyword filter
+                or_(*keyword_conditions),
             )
         )
         .scalar()
@@ -61,11 +71,21 @@ def transform_data(sqlite: Session, postgresql: Session):
                 select(
                     RowNoteRecord.note_id,
                     RowNoteRecord.row_post_id,
+                    RowNoteRecord.note_author_participant_id.label("author_id"),
                     RowNoteRecord.summary,
                     RowNoteStatusRecord.current_status,
+                    RowNoteStatusRecord.locked_status,
                     func.cast(RowNoteRecord.created_at_millis, Integer).label("created_at"),
                 )
                 .join(RowNoteStatusRecord, RowNoteRecord.note_id == RowNoteStatusRecord.note_id)
+                .filter(
+                    and_(
+                        RowNoteRecord.created_at_millis <= TARGET_NOTE_ESTIMATE_TOPIC_END_UNIX_MILLISECOND,
+                        RowNoteRecord.created_at_millis >= TARGET_NOTE_ESTIMATE_TOPIC_START_UNIX_MILLISECOND,
+                        # Apply keyword filter
+                        or_(*keyword_conditions),
+                    )
+                )
                 .limit(limit)
                 .offset(offset)
             )
@@ -84,7 +104,18 @@ def transform_data(sqlite: Session, postgresql: Session):
         os.remove("./data/transformed/post.csv")
     with open("./data/transformed/post.csv", "a") as file:
         writer = csv.writer(file)
-        writer.writerow(["post_id", "user_id", "text", "created_at", "like_count", "repost_count", "impression_count"])
+        writer.writerow(
+            [
+                "post_id",
+                "user_id",
+                "text",
+                "created_at",
+                "like_count",
+                "repost_count",
+                "impression_count",
+                "extracted_at",
+            ]
+        )
 
     offset = 0
     limit = 1000
@@ -101,6 +132,7 @@ def transform_data(sqlite: Session, postgresql: Session):
                 func.cast(RowPostRecord.like_count, Integer).label("like_count"),
                 func.cast(RowPostRecord.repost_count, Integer).label("repost_count"),
                 func.cast(RowPostRecord.impression_count, Integer).label("impression_count"),
+                func.cast(RowPostRecord.extracted_at, Numeric).label("extracted_at"),
             )
             .limit(limit)
             .offset(offset)
@@ -288,7 +320,23 @@ def generate_note_topic(sqlite: Session):
         offset = 0
         limit = 1000
 
-        num_of_notes = sqlite.query(func.count(RowNoteRecord.row_post_id)).scalar()
+        # Build keyword filter conditions for topic estimation
+        keyword_conditions = []
+        for keyword in TARGET_KEYWORDS:
+            keyword_conditions.append(RowNoteRecord.summary.ilike(f"%{keyword}%"))
+
+        num_of_notes = (
+            sqlite.query(func.count(RowNoteRecord.row_post_id))
+            .filter(
+                and_(
+                    RowNoteRecord.created_at_millis <= TARGET_NOTE_ESTIMATE_TOPIC_END_UNIX_MILLISECOND,
+                    RowNoteRecord.created_at_millis >= TARGET_NOTE_ESTIMATE_TOPIC_START_UNIX_MILLISECOND,
+                    # Apply keyword filter
+                    or_(*keyword_conditions),
+                )
+            )
+            .scalar()
+        )
 
         while offset < num_of_notes:
             topicEstimationTargetNotes = sqlite.execute(
@@ -297,6 +345,8 @@ def generate_note_topic(sqlite: Session):
                     and_(
                         RowNoteRecord.created_at_millis <= TARGET_NOTE_ESTIMATE_TOPIC_END_UNIX_MILLISECOND,
                         RowNoteRecord.created_at_millis >= TARGET_NOTE_ESTIMATE_TOPIC_START_UNIX_MILLISECOND,
+                        # Apply keyword filter
+                        or_(*keyword_conditions),
                     )
                 )
                 .join(RowNoteStatusRecord, RowNoteRecord.note_id == RowNoteStatusRecord.note_id)

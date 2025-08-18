@@ -15,6 +15,7 @@ from birdxplorer_common.storage import (
     RowPostEmbedURLRecord,
     RowNoteStatusRecord,
     RowPostMediaRecord,
+    RowNoteRatingRecord,
 )
 
 from birdxplorer_etl import settings
@@ -43,7 +44,14 @@ def init_sqlite():
         db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "data", "note.db"))
 
     logging.info(f"Initializing database at {db_path}")
-    engine = create_engine("sqlite:///" + db_path)
+    engine = create_engine(
+        "sqlite:///" + db_path,
+        pool_size=20,
+        max_overflow=30,
+        pool_timeout=60,
+        pool_recycle=3600,
+        connect_args={"check_same_thread": False, "timeout": 60},
+    )
 
     # 一時データベースのテーブル作成する
     # ToDo: noteテーブル以外に必要なものを追加
@@ -53,6 +61,9 @@ def init_sqlite():
     if not inspect(engine).has_table("row_note_status"):
         logging.info("Creating table note_status")
         RowNoteStatusRecord.metadata.create_all(engine)
+    if not inspect(engine).has_table("row_note_ratings"):
+        logging.info("Creating table note_ratings")
+        RowNoteRatingRecord.metadata.create_all(engine)
 
     Session = sessionmaker(bind=engine)
 
@@ -122,6 +133,9 @@ def init_postgresql():
     if not inspect(engine).has_table("row_post_media"):
         logging.info("Creating table post_media")
         RowPostMediaRecord.metadata.create_all(engine)
+    if not inspect(engine).has_table("row_note_ratings"):
+        logging.info("Creating table note_ratings")
+        RowNoteRatingRecord.metadata.create_all(engine)
 
     Session = sessionmaker(bind=engine)
 
