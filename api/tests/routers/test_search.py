@@ -19,6 +19,11 @@ def test_search_basic(client: TestClient, mock_storage: MagicMock) -> None:
         summary="Test summary",
         current_status="NEEDS_MORE_RATINGS",
         created_at=timestamp,
+        has_been_helpfuled=False,
+        helpful_count=0,
+        not_helpful_count=0,
+        somewhat_helpful_count=0,
+        current_status_history=[],
     )
 
     post = Post(
@@ -61,6 +66,11 @@ def test_search_basic(client: TestClient, mock_storage: MagicMock) -> None:
     assert result["language"] == "ja"
     assert result["summary"] == "Test summary"
     assert result["currentStatus"] == "NEEDS_MORE_RATINGS"
+    assert result["hasBeenHelpfuled"] == False
+    assert result["helpfulCount"] == 0
+    assert result["notHelpfulCount"] == 0
+    assert result["somewhatHelpfulCount"] == 0
+    assert result["currentStatusHistory"] == []
     assert result["post"]["postId"] == "2234567890123456789"
 
 
@@ -103,6 +113,11 @@ def test_search_empty_parameters(client: TestClient, mock_storage: MagicMock) ->
         summary="Test summary",
         current_status="NEEDS_MORE_RATINGS",
         created_at=timestamp,
+        has_been_helpfuled=False,
+        helpful_count=0,
+        not_helpful_count=0,
+        somewhat_helpful_count=0,
+        current_status_history=[],
     )
 
     post = Post(
@@ -145,6 +160,11 @@ def test_search_empty_parameters(client: TestClient, mock_storage: MagicMock) ->
     assert result["language"] == "ja"
     assert result["summary"] == "Test summary"
     assert result["currentStatus"] == "NEEDS_MORE_RATINGS"
+    assert result["hasBeenHelpfuled"] == False
+    assert result["helpfulCount"] == 0
+    assert result["notHelpfulCount"] == 0
+    assert result["somewhatHelpfulCount"] == 0
+    assert result["currentStatusHistory"] == []
     assert result["post"]["postId"] == "2234567890123456789"
 
 
