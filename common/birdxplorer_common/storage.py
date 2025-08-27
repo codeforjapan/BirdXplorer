@@ -740,5 +740,5 @@ class Storage:
 
 
 def gen_storage(settings: GlobalSettings) -> Storage:
-    engine = create_engine(settings.storage_settings.sqlalchemy_database_url())
+    engine = create_engine(settings.storage_settings.sqlalchemy_database_url)
     return Storage(engine=engine)

@@ -163,11 +163,11 @@ PostListWithExamples: TypeAlias = Annotated[
 
 
 class SearchedNote(BaseModel):
-    note_id: Annotated[NoteId, PydanticField(description="コミュニティノートのID")]
+    noteId: Annotated[NoteId, PydanticField(description="コミュニティノートのID")]
     summary: Annotated[SummaryString, PydanticField(description="コミュニティノートの本文")]
     language: Annotated[LanguageIdentifier, PydanticField(description="コミュニティノートの言語")]
     topics: Annotated[List[Topic], PydanticField(description="コミュニティノートに関連付けられたトピックのリスト")]
-    post_id: Annotated[PostId, PydanticField(description="関連するPostのID")]
+    postId: Annotated[PostId, PydanticField(description="関連するPostのID")]
     current_status: Annotated[
         Annotated[
             str,
@@ -511,10 +511,10 @@ def gen_router(storage: Storage) -> APIRouter:
         ):
             results.append(
                 SearchedNote(
-                    note_id=note.note_id,
+                    noteId=note.note_id,
                     language=note.language,
                     topics=note.topics,
-                    post_id=note.post_id,
+                    postId=note.post_id,
                     summary=note.summary,
                     current_status=note.current_status,
                     created_at=note.created_at,
