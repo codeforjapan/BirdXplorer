@@ -5,6 +5,7 @@ from random import Random
 from typing import (
     Annotated,
     Any,
+    Callable,
     Dict,
     List,
     Literal,
@@ -477,8 +478,8 @@ class BaseModel(PydanticBaseModel):
     >>> x.model_dump()
     {'object_name': 'test'}
     >>> x.model_dump_json()
-    '{"object_name":"test"}'
-    >>> DerivedModel.model_validate_json('{"object_name":"test2"}')
+    '{"objectName":"test"}'
+    >>> DerivedModel.model_validate_json('{"objectName":"test2"}')
     DerivedModel(object_name='test2')
     >>> DerivedModel.model_validate_json('{"object_name":"test3"}')
     DerivedModel(object_name='test3')
@@ -495,12 +496,13 @@ class BaseModel(PydanticBaseModel):
         include: IncEx | None = None,
         exclude: IncEx | None = None,
         context: Any | None = None,
-        by_alias: bool | None = False,
+        by_alias: bool | None = True,
         exclude_unset: bool = False,
         exclude_defaults: bool = False,
         exclude_none: bool = False,
         round_trip: bool = False,
         warnings: bool | Literal["none", "warn", "error"] = True,
+        fallback: Callable[[Any], Any] | None = None,
         serialize_as_any: bool = False,
     ) -> str:
         return super(BaseModel, self).model_dump_json(
@@ -514,6 +516,7 @@ class BaseModel(PydanticBaseModel):
             exclude_none=exclude_none,
             round_trip=round_trip,
             warnings=warnings,
+            fallback=fallback,
             serialize_as_any=serialize_as_any,
         )
 
