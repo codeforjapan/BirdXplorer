@@ -857,7 +857,8 @@ class Post(BaseModel):
         List[Link], PydanticField(default_factory=lambda: [], description="Post に含まれるリンク情報のリスト")
     ]
 
-    @computed_field(description="Post を X 上で表示する URL")
+    @computed_field(description="Post を X 上で表示する URL")  # type: ignore[prop-decorator]
+    @property
     def link(self) -> HttpUrl:
         """
         PostのX上でのURLを返す。
