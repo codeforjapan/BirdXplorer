@@ -1,6 +1,7 @@
 from datetime import timezone
-from typing import List, TypeAlias, Union
-from urllib.parse import parse_qs as parse_query_string, urlencode
+from typing import Any, Dict, List, TypeAlias, Union
+from urllib.parse import parse_qs as parse_query_string
+from urllib.parse import urlencode
 
 from dateutil.parser import parse as dateutil_parse
 from fastapi import APIRouter, HTTPException, Path, Query, Request
@@ -189,7 +190,7 @@ class SearchedNote(BaseModel):
     helpful_count: Annotated[int, PydanticField(description="役立つ評価の数")]
     not_helpful_count: Annotated[int, PydanticField(description="役立たない評価の数")]
     somewhat_helpful_count: Annotated[int, PydanticField(description="やや役立つ評価の数")]
-    current_status_history: Annotated[List[dict], PydanticField(description="ステータス変更履歴")]
+    current_status_history: Annotated[List[Dict[str, Any]], PydanticField(description="ステータス変更履歴")]
     post: Annotated[Post, PydanticField(description="コミュニティノートに関連付けられた Post の情報")]
 
 
