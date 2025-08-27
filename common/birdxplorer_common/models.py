@@ -5,7 +5,6 @@ from random import Random
 from typing import (
     Annotated,
     Any,
-    Callable,
     Dict,
     List,
     Literal,
@@ -478,8 +477,8 @@ class BaseModel(PydanticBaseModel):
     >>> x.model_dump()
     {'object_name': 'test'}
     >>> x.model_dump_json()
-    '{"objectName":"test"}'
-    >>> DerivedModel.model_validate_json('{"objectName":"test2"}')
+    '{"object_name":"test"}'
+    >>> DerivedModel.model_validate_json('{"object_name":"test2"}')
     DerivedModel(object_name='test2')
     >>> DerivedModel.model_validate_json('{"object_name":"test3"}')
     DerivedModel(object_name='test3')
@@ -496,7 +495,7 @@ class BaseModel(PydanticBaseModel):
         include: IncEx | None = None,
         exclude: IncEx | None = None,
         context: Any | None = None,
-        by_alias: bool | None = True,
+        by_alias: bool | None = False,
         exclude_unset: bool = False,
         exclude_defaults: bool = False,
         exclude_none: bool = False,
@@ -855,8 +854,7 @@ class Post(BaseModel):
         List[Link], PydanticField(default_factory=lambda: [], description="Post に含まれるリンク情報のリスト")
     ]
 
-    @computed_field(description="Post を X 上で表示する URL")  # type: ignore[prop-decorator]
-    @property
+    @computed_field(description="Post を X 上で表示する URL")
     def link(self) -> HttpUrl:
         """
         PostのX上でのURLを返す。

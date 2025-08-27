@@ -66,7 +66,7 @@ def test_search_basic(client: TestClient, mock_storage: MagicMock) -> None:
     assert result["language"] == "ja"
     assert result["summary"] == "Test summary"
     assert result["currentStatus"] == "NEEDS_MORE_RATINGS"
-    assert result["hasBeenHelpfuled"] == False
+    assert result["hasBeenHelpfuled"] is False
     assert result["helpfulCount"] == 0
     assert result["notHelpfulCount"] == 0
     assert result["somewhatHelpfulCount"] == 0
@@ -160,7 +160,7 @@ def test_search_empty_parameters(client: TestClient, mock_storage: MagicMock) ->
     assert result["language"] == "ja"
     assert result["summary"] == "Test summary"
     assert result["currentStatus"] == "NEEDS_MORE_RATINGS"
-    assert result["hasBeenHelpfuled"] == False
+    assert result["hasBeenHelpfuled"] is False
     assert result["helpfulCount"] == 0
     assert result["notHelpfulCount"] == 0
     assert result["somewhatHelpfulCount"] == 0
