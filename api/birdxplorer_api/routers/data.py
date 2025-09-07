@@ -1,6 +1,7 @@
 from datetime import timezone
-from typing import List, TypeAlias, Union
-from urllib.parse import parse_qs as parse_query_string, urlencode
+from typing import Any, Dict, List, TypeAlias, Union
+from urllib.parse import parse_qs as parse_query_string
+from urllib.parse import urlencode
 
 from dateutil.parser import parse as dateutil_parse
 from fastapi import APIRouter, HTTPException, Path, Query, Request
@@ -106,6 +107,11 @@ NoteListWithExamples: TypeAlias = Annotated[
                     "summary": "Content Security Policyは情報の持ち出しを防止する仕組みではありません。コンテンツインジェクションの脆弱性のリスクを軽減する仕組みです。適切なContent Security Policyがレスポンスヘッダーに設定されている場合でも、外部への通信をブロックできない点に注意が必要です。    Content Security Policy Level 3  https://w3c.github.io/webappsec-csp/",  # noqa: E501
                     "currentStatus": "NEEDS_MORE_RATINGS",
                     "createdAt": 1728877704750,
+                    "hasBeenHelpfuled": False,
+                    "helpfulCount": 0,
+                    "notHelpfulCount": 2,
+                    "somewhatHelpfulCount": 1,
+                    "currentStatusHistory": [{"status": "NEEDS_MORE_RATINGS", "date": 1728877704750}],
                 },
             ]
         },
@@ -157,11 +163,11 @@ PostListWithExamples: TypeAlias = Annotated[
 
 
 class SearchedNote(BaseModel):
-    noteId: NoteId
+    noteId: Annotated[NoteId, PydanticField(description="コミュニティノートのID")]
     summary: Annotated[SummaryString, PydanticField(description="コミュニティノートの本文")]
     language: Annotated[LanguageIdentifier, PydanticField(description="コミュニティノートの言語")]
     topics: Annotated[List[Topic], PydanticField(description="コミュニティノートに関連付けられたトピックのリスト")]
-    postId: PostId
+    postId: Annotated[PostId, PydanticField(description="関連するPostのID")]
     current_status: Annotated[
         Annotated[
             str,
@@ -179,6 +185,12 @@ class SearchedNote(BaseModel):
     created_at: Annotated[
         TwitterTimestamp, PydanticField(description="コミュニティノートの作成日時 (ミリ秒単位の UNIX EPOCH TIMESTAMP)")
     ]
+    # New helpful rating fields
+    has_been_helpfuled: Annotated[bool, PydanticField(description="ノートが役立つと評価されたことがあるかどうか")]
+    helpful_count: Annotated[int, PydanticField(description="役立つ評価の数")]
+    not_helpful_count: Annotated[int, PydanticField(description="役立たない評価の数")]
+    somewhat_helpful_count: Annotated[int, PydanticField(description="やや役立つ評価の数")]
+    current_status_history: Annotated[List[Dict[str, Any]], PydanticField(description="ステータス変更履歴")]
     post: Annotated[Post, PydanticField(description="コミュニティノートに関連付けられた Post の情報")]
 
 
@@ -203,6 +215,11 @@ SearchWithExamples: TypeAlias = Annotated[
                     "summary": "Content Security Policyは情報の持ち出しを防止する仕組みではありません。コンテンツインジェクションの脆弱性のリスクを軽減する仕組みです。適切なContent Security Policyがレスポンスヘッダーに設定されている場合でも、外部への通信をブロックできない点に注意が必要です。    Content Security Policy Level 3  https://w3c.github.io/webappsec-csp/",  # noqa: E501
                     "currentStatus": "NEEDS_MORE_RATINGS",
                     "createdAt": 1728877704750,
+                    "hasBeenHelpfuled": False,
+                    "helpfulCount": 0,
+                    "notHelpfulCount": 2,
+                    "somewhatHelpfulCount": 1,
+                    "currentStatusHistory": [{"status": "NEEDS_MORE_RATINGS", "date": 1728877704750}],
                     "post": {
                         "postId": "1846718284369912064",
                         "xUserId": "90954365",
@@ -501,10 +518,16 @@ def gen_router(storage: Storage) -> APIRouter:
                     summary=note.summary,
                     current_status=note.current_status,
                     created_at=note.created_at,
+                    has_been_helpfuled=note.has_been_helpfuled,
+                    helpful_count=note.helpful_count,
+                    not_helpful_count=note.not_helpful_count,
+                    somewhat_helpful_count=note.somewhat_helpful_count,
+                    current_status_history=[
+                        {"status": history.status, "date": history.date} for history in note.current_status_history
+                    ],
                     post=post,
                 )
             )
-
         # Get total count for pagination
         total_count = storage.count_search_results(
             note_includes_text=note_includes_text,
