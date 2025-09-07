@@ -1,8 +1,10 @@
+import random
 from datetime import datetime, timezone
 from typing import Dict, List, Union
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
+from polyfactory import Use
 
 from birdxplorer_common.models import Note, Post, Topic, TwitterTimestamp, XUser
 
@@ -10,9 +12,11 @@ from birdxplorer_common.models import Note, Post, Topic, TwitterTimestamp, XUser
 def test_search_basic(client: TestClient, mock_storage: MagicMock) -> None:
     # Mock data
     timestamp = TwitterTimestamp.from_int(int(datetime(2023, 1, 1, tzinfo=timezone.utc).timestamp() * 1000))
+    note_author_participant_id = Use(lambda: "".join(random.choices("0123456789ABCDEF", k=64))).to_value()
 
     note = Note(
         note_id="1234567890123456789",  # 19-digit string
+        note_author_participant_id=note_author_participant_id,
         post_id="2234567890123456789",  # 19-digit string
         language="ja",
         topics=[Topic(topic_id=1, label={"ja": "テスト", "en": "test"}, reference_count=1)],
@@ -39,6 +43,7 @@ def test_search_basic(client: TestClient, mock_storage: MagicMock) -> None:
         text="Test post",
         media_details=[],
         created_at=timestamp,
+        aggregated_at=timestamp,
         like_count=10,
         repost_count=5,
         impression_count=100,
@@ -62,6 +67,7 @@ def test_search_basic(client: TestClient, mock_storage: MagicMock) -> None:
     # Verify response structure
     result = data["data"][0]
     assert result["noteId"] == "1234567890123456789"
+    assert result["noteAuthorParticipantId"] == note_author_participant_id
     assert result["postId"] == "2234567890123456789"
     assert result["language"] == "ja"
     assert result["summary"] == "Test summary"
@@ -104,9 +110,11 @@ def test_search_pagination(client: TestClient, mock_storage: MagicMock) -> None:
 def test_search_empty_parameters(client: TestClient, mock_storage: MagicMock) -> None:
     # Mock data
     timestamp = TwitterTimestamp.from_int(int(datetime(2023, 1, 1, tzinfo=timezone.utc).timestamp() * 1000))
+    note_author_participant_id = Use(lambda: "".join(random.choices("0123456789ABCDEF", k=64))).to_value()
 
     note = Note(
         note_id="1234567890123456789",
+        note_author_participant_id=note_author_participant_id,
         post_id="2234567890123456789",
         language="ja",
         topics=[Topic(topic_id=1, label={"ja": "テスト", "en": "test"}, reference_count=1)],
@@ -133,6 +141,7 @@ def test_search_empty_parameters(client: TestClient, mock_storage: MagicMock) ->
         text="Test post",
         media_details=[],
         created_at=timestamp,
+        aggregated_at=timestamp,
         like_count=10,
         repost_count=5,
         impression_count=100,
@@ -156,6 +165,7 @@ def test_search_empty_parameters(client: TestClient, mock_storage: MagicMock) ->
     # Verify response structure
     result = data["data"][0]
     assert result["noteId"] == "1234567890123456789"
+    assert result["noteAuthorParticipantId"] == note_author_participant_id
     assert result["postId"] == "2234567890123456789"
     assert result["language"] == "ja"
     assert result["summary"] == "Test summary"
