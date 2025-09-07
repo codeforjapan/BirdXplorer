@@ -681,6 +681,23 @@ class Topic(BaseModel):
 class SummaryString(NonEmptyTrimmedString): ...
 
 
+class NoteStatus(str, Enum):
+    """Enum for note status values"""
+
+    NEEDS_MORE_RATINGS = "NEEDS_MORE_RATINGS"
+    CURRENTLY_RATED_HELPFUL = "CURRENTLY_RATED_HELPFUL"
+    CURRENTLY_RATED_NOT_HELPFUL = "CURRENTLY_RATED_NOT_HELPFUL"
+
+
+class NoteStatusHistory(BaseModel):
+    """Model for note status history entry"""
+
+    status: Annotated[NoteStatus, PydanticField(description="ノートのステータス")]
+    date: Annotated[
+        TwitterTimestamp, PydanticField(description="ステータス変更日時 (ミリ秒単位の UNIX EPOCH TIMESTAMP)")
+    ]
+
+
 class Note(BaseModel):
     note_id: Annotated[NoteId, PydanticField(description="コミュニティノートの ID")]
     post_id: Annotated[PostId, PydanticField(description="コミュニティノートに対応する X の Post の ID")]
@@ -688,21 +705,22 @@ class Note(BaseModel):
     topics: Annotated[List[Topic], PydanticField(description="推定されたコミュニティノートのトピック")]
     summary: Annotated[SummaryString, PydanticField(description="コミュニティノートの本文")]
     current_status: Annotated[
-        Annotated[
-            str,
-            PydanticField(
-                json_schema_extra={
-                    "enum": ["NEEDS_MORE_RATINGS", "CURRENTLY_RATED_HELPFUL", "CURRENTLY_RATED_NOT_HELPFUL"]
-                },
-            ),
-        ]
-        | None,
+        NoteStatus | None,
         PydanticField(
             description="コミュニティノートの現在の評価状態",
         ),
     ]
     created_at: Annotated[
         TwitterTimestamp, PydanticField(description="コミュニティノートの作成日時 (ミリ秒単位の UNIX EPOCH TIMESTAMP)")
+    ]
+    has_been_helpfuled: Annotated[
+        bool, PydanticField(description="ノートが役立つと評価されたことがあるかどうか", default=False)
+    ]
+    helpful_count: Annotated[NonNegativeInt, PydanticField(description="役立つ評価の数", default=0)]
+    not_helpful_count: Annotated[NonNegativeInt, PydanticField(description="役立たない評価の数", default=0)]
+    somewhat_helpful_count: Annotated[NonNegativeInt, PydanticField(description="やや役立つ評価の数", default=0)]
+    current_status_history: Annotated[
+        List[NoteStatusHistory], PydanticField(description="ステータス変更履歴", default_factory=list)
     ]
 
 

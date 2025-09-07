@@ -54,6 +54,7 @@ def postgres_storage_settings_factory(
 ) -> Type[ModelFactory[PostgresStorageSettings]]:
     class PostgresStorageSettingsFactory(ModelFactory[PostgresStorageSettings]):
         __model__ = PostgresStorageSettings
+        __check_model__ = False
 
         host = "localhost"
         username = "postgres"
@@ -70,6 +71,7 @@ def global_settings_factory(
 ) -> Type[ModelFactory[GlobalSettings]]:
     class GlobalSettingsFactory(ModelFactory[GlobalSettings]):
         __model__ = GlobalSettings
+        __check_model__ = False
 
         storage_settings = postgres_storage_settings_factory.build()
 
@@ -79,6 +81,7 @@ def global_settings_factory(
 @register_fixture(name="user_enrollment_factory")
 class UserEnrollmentFactory(ModelFactory[UserEnrollment]):
     __model__ = UserEnrollment
+    __check_model__ = False
 
     participant_id = Use(lambda: "".join(random.choices("0123456789ABCDEF", k=64)))
     timestamp_of_last_state_change = Use(gen_random_twitter_timestamp)
@@ -88,31 +91,37 @@ class UserEnrollmentFactory(ModelFactory[UserEnrollment]):
 @register_fixture(name="note_factory")
 class NoteFactory(ModelFactory[Note]):
     __model__ = Note
+    __check_model__ = False
 
 
 @register_fixture(name="topic_factory")
 class TopicFactory(ModelFactory[Topic]):
     __model__ = Topic
+    __check_model__ = False
 
 
 @register_fixture(name="x_user_factory")
 class XUserFactory(ModelFactory[XUser]):
     __model__ = XUser
+    __check_model__ = False
 
 
 @register_fixture(name="media_factory")
 class MediaFactory(ModelFactory[Media]):
     __model__ = Media
+    __check_model__ = False
 
 
 @register_fixture(name="post_factory")
 class PostFactory(ModelFactory[Post]):
     __model__ = Post
+    __check_model__ = False
 
 
 @register_fixture(name="link_factory")
 class LinkFactory(ModelFactory[Link]):
     __model__ = Link
+    __check_model__ = False
 
 
 @fixture
@@ -156,6 +165,11 @@ def note_samples(note_factory: NoteFactory, topic_samples: List[Topic]) -> Gener
             summary="要約文1",
             current_status=None,
             created_at=1152921600000,
+            has_been_helpfuled=False,
+            helpful_count=0,
+            not_helpful_count=0,
+            somewhat_helpful_count=0,
+            current_status_history=[],
         ),
         note_factory.build(
             note_id="1234567890123456782",
@@ -165,6 +179,11 @@ def note_samples(note_factory: NoteFactory, topic_samples: List[Topic]) -> Gener
             summary="summary2",
             current_status=None,
             created_at=1152921601000,
+            has_been_helpfuled=False,
+            helpful_count=0,
+            not_helpful_count=0,
+            somewhat_helpful_count=0,
+            current_status_history=[],
         ),
         note_factory.build(
             note_id="1234567890123456783",
@@ -174,6 +193,11 @@ def note_samples(note_factory: NoteFactory, topic_samples: List[Topic]) -> Gener
             summary="summary3",
             current_status=None,
             created_at=1152921602000,
+            has_been_helpfuled=False,
+            helpful_count=0,
+            not_helpful_count=0,
+            somewhat_helpful_count=0,
+            current_status_history=[],
         ),
         note_factory.build(
             note_id="1234567890123456784",
@@ -183,6 +207,11 @@ def note_samples(note_factory: NoteFactory, topic_samples: List[Topic]) -> Gener
             summary="summary4",
             current_status=None,
             created_at=1152921603000,
+            has_been_helpfuled=False,
+            helpful_count=0,
+            not_helpful_count=0,
+            somewhat_helpful_count=0,
+            current_status_history=[],
         ),
         note_factory.build(
             note_id="1234567890123456785",
@@ -192,6 +221,11 @@ def note_samples(note_factory: NoteFactory, topic_samples: List[Topic]) -> Gener
             summary="summary5",
             current_status=None,
             created_at=1152921604000,
+            has_been_helpfuled=False,
+            helpful_count=0,
+            not_helpful_count=0,
+            somewhat_helpful_count=0,
+            current_status_history=[],
         ),
         note_factory.build(
             note_id="1234567890123456786",
@@ -201,6 +235,11 @@ def note_samples(note_factory: NoteFactory, topic_samples: List[Topic]) -> Gener
             summary="summary6_empty_post_id",
             current_status=None,
             created_at=1152921604000,
+            has_been_helpfuled=False,
+            helpful_count=0,
+            not_helpful_count=0,
+            somewhat_helpful_count=0,
+            current_status_history=[],
         ),
     ]
     yield notes
