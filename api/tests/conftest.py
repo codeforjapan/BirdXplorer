@@ -54,31 +54,37 @@ class UserEnrollmentFactory(ModelFactory[UserEnrollment]):
 @register_fixture(name="note_factory")
 class NoteFactory(ModelFactory[Note]):
     __model__ = Note
+    __check_model__ = False
 
 
 @register_fixture(name="topic_factory")
 class TopicFactory(ModelFactory[Topic]):
     __model__ = Topic
+    __check_model__ = False
 
 
 @register_fixture(name="x_user_factory")
 class XUserFactory(ModelFactory[XUser]):
     __model__ = XUser
+    __check_model__ = False
 
 
 @register_fixture(name="media_factory")
 class MediaFactory(ModelFactory[Media]):
     __model__ = Media
+    __check_model__ = False
 
 
 @register_fixture(name="post_factory")
 class PostFactory(ModelFactory[Post]):
     __model__ = Post
+    __check_model__ = False
 
 
 @register_fixture(name="link_factory")
 class LinkFactory(ModelFactory[Link]):
     __model__ = Link
+    __check_model__ = False
 
 
 @fixture
@@ -480,6 +486,7 @@ def load_dotenv_fixture() -> None:
 def cors_settings_factory(load_dotenv_fixture: None) -> Type[ModelFactory[CORSSettings]]:
     class CORSSettingsFactory(ModelFactory[CORSSettings]):
         __model__ = CORSSettings
+        __check_model__ = False
 
         allow_credentials = True
         allow_methods = ["*"]
@@ -495,6 +502,7 @@ def postgres_storage_settings_factory(
 ) -> Type[ModelFactory[PostgresStorageSettings]]:
     class PostgresStorageSettingsFactory(ModelFactory[PostgresStorageSettings]):
         __model__ = PostgresStorageSettings
+        __check_model__ = False
 
         host = "localhost"
         username = "postgres"
@@ -512,6 +520,7 @@ def global_settings_factory(
 ) -> Type[ModelFactory[GlobalSettings]]:
     class GlobalSettingsFactory(ModelFactory[GlobalSettings]):
         __model__ = GlobalSettings
+        __check_model__ = False
 
         cors_settings = cors_settings_factory.build()
         storage_settings = postgres_storage_settings_factory.build()
