@@ -44,6 +44,7 @@ def gen_random_twitter_timestamp() -> int:
 @register_fixture(name="user_enrollment_factory")
 class UserEnrollmentFactory(ModelFactory[UserEnrollment]):
     __model__ = UserEnrollment
+    __check_model__ = False
 
     participant_id = Use(lambda: "".join(random.choices("0123456789ABCDEF", k=64)))
     timestamp_of_last_state_change = Use(gen_random_twitter_timestamp)
