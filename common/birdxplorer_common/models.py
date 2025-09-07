@@ -700,6 +700,9 @@ class NoteStatusHistory(BaseModel):
 
 class Note(BaseModel):
     note_id: Annotated[NoteId, PydanticField(description="コミュニティノートの ID")]
+    note_author_participant_id: Annotated[
+        ParticipantId, PydanticField(description="コミュニティノートの作成者の Participant ID")
+    ]
     post_id: Annotated[PostId, PydanticField(description="コミュニティノートに対応する X の Post の ID")]
     language: Annotated[LanguageIdentifier, PydanticField(description="コミュニティノートの言語")]
     topics: Annotated[List[Topic], PydanticField(description="推定されたコミュニティノートのトピック")]
@@ -716,6 +719,7 @@ class Note(BaseModel):
     has_been_helpfuled: Annotated[
         bool, PydanticField(description="ノートが役立つと評価されたことがあるかどうか", default=False)
     ]
+    rate_count: Annotated[NonNegativeInt, PydanticField(description="ノートの総評価数", default=0)]
     helpful_count: Annotated[NonNegativeInt, PydanticField(description="役立つ評価の数", default=0)]
     not_helpful_count: Annotated[NonNegativeInt, PydanticField(description="役立たない評価の数", default=0)]
     somewhat_helpful_count: Annotated[NonNegativeInt, PydanticField(description="やや役立つ評価の数", default=0)]
@@ -849,6 +853,10 @@ class Post(BaseModel):
     ]
     created_at: Annotated[
         TwitterTimestamp, PydanticField(description="Post の作成日時 (ミリ秒単位の UNIX EPOCH TIMESTAMP)")
+    ]
+    aggregated_at: Annotated[
+        TwitterTimestamp,
+        PydanticField(description="Post の情報がETLで取得された日時 (ミリ秒単位の UNIX EPOCH TIMESTAMP)"),
     ]
     like_count: Annotated[NonNegativeInt, PydanticField(description="Post のいいね数")]
     repost_count: Annotated[NonNegativeInt, PydanticField(description="Post のリポスト数")]
