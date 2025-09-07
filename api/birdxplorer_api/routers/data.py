@@ -145,6 +145,7 @@ PostListWithExamples: TypeAlias = Annotated[
                         }
                     ],
                     "createdAt": 1729094524000,
+                    "aggregatedAt": 1729094524000,
                     "likeCount": 451,
                     "repostCount": 104,
                     "impressionCount": 82378,
@@ -164,6 +165,9 @@ PostListWithExamples: TypeAlias = Annotated[
 
 class SearchedNote(BaseModel):
     noteId: Annotated[NoteId, PydanticField(description="コミュニティノートのID")]
+    noteAuthorParticipantId: Annotated[
+        ParticipantId, PydanticField(description="コミュニティノートの作成者のユーザーID")
+    ]
     summary: Annotated[SummaryString, PydanticField(description="コミュニティノートの本文")]
     language: Annotated[LanguageIdentifier, PydanticField(description="コミュニティノートの言語")]
     topics: Annotated[List[Topic], PydanticField(description="コミュニティノートに関連付けられたトピックのリスト")]
@@ -187,6 +191,7 @@ class SearchedNote(BaseModel):
     ]
     # New helpful rating fields
     has_been_helpfuled: Annotated[bool, PydanticField(description="ノートが役立つと評価されたことがあるかどうか")]
+    rate_count: Annotated[int, PydanticField(description="ノートの総評価数")]
     helpful_count: Annotated[int, PydanticField(description="役立つ評価の数")]
     not_helpful_count: Annotated[int, PydanticField(description="役立たない評価の数")]
     somewhat_helpful_count: Annotated[int, PydanticField(description="やや役立つ評価の数")]
@@ -241,6 +246,7 @@ SearchWithExamples: TypeAlias = Annotated[
                             }
                         ],
                         "createdAt": 1729094524000,
+                        "aggregatedAt": 1729094524000,
                         "likeCount": 451,
                         "repostCount": 104,
                         "impressionCount": 82378,
@@ -512,6 +518,7 @@ def gen_router(storage: Storage) -> APIRouter:
             results.append(
                 SearchedNote(
                     noteId=note.note_id,
+                    noteAuthorParticipantId=note.note_author_participant_id,
                     language=note.language,
                     topics=note.topics,
                     postId=note.post_id,
@@ -519,6 +526,7 @@ def gen_router(storage: Storage) -> APIRouter:
                     current_status=note.current_status,
                     created_at=note.created_at,
                     has_been_helpfuled=note.has_been_helpfuled,
+                    rate_count=note.rate_count,
                     helpful_count=note.helpful_count,
                     not_helpful_count=note.not_helpful_count,
                     somewhat_helpful_count=note.somewhat_helpful_count,
