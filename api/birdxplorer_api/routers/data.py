@@ -93,6 +93,7 @@ NoteListWithExamples: TypeAlias = Annotated[
             "examples": [
                 {
                     "noteId": "1845672983001710655",
+                    "noteAuthorParticipantId": "A1B2C3D4E5F60718293A4B5C6D7E8F901234567890ABCDEF1234567890ABCDEF",
                     "postId": "1842116937066955027",
                     "language": "ja",
                     "topics": [
@@ -108,6 +109,7 @@ NoteListWithExamples: TypeAlias = Annotated[
                     "currentStatus": "NEEDS_MORE_RATINGS",
                     "createdAt": 1728877704750,
                     "hasBeenHelpfuled": False,
+                    "rateCount": 3,
                     "helpfulCount": 0,
                     "notHelpfulCount": 2,
                     "somewhatHelpfulCount": 1,
@@ -207,6 +209,7 @@ SearchWithExamples: TypeAlias = Annotated[
             "examples": [
                 {
                     "noteId": "1845672983001710655",
+                    "noteAuthorParticipantId": "A1B2C3D4E5F60718293A4B5C6D7E8F901234567890ABCDEF1234567890ABCDEF",
                     "language": "ja",
                     "topics": [
                         {
@@ -221,6 +224,7 @@ SearchWithExamples: TypeAlias = Annotated[
                     "currentStatus": "NEEDS_MORE_RATINGS",
                     "createdAt": 1728877704750,
                     "hasBeenHelpfuled": False,
+                    "rateCount": 3,
                     "helpfulCount": 0,
                     "notHelpfulCount": 2,
                     "somewhatHelpfulCount": 1,
