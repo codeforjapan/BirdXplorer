@@ -1,9 +1,13 @@
 import csv
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import requests
 import stringcase
+import zipfile
+import io
 from sqlalchemy.orm import Session
+import sqlalchemy
+from birdxplorer_etl.lib.sqlite.init import close_sqlite
 from lib.x.postlookup import lookup
 from birdxplorer_common.storage import (
     RowNoteRecord,
@@ -12,8 +16,10 @@ from birdxplorer_common.storage import (
     RowUserRecord,
     RowNoteStatusRecord,
     RowPostEmbedURLRecord,
+    RowNoteRatingRecord,
 )
 import settings
+from constants import TARGET_KEYWORDS
 
 
 def extract_data(sqlite: Session, postgresql: Session):
@@ -36,7 +42,7 @@ def extract_data(sqlite: Session, postgresql: Session):
             break
 
         dateString = date.strftime("%Y/%m/%d")
-        note_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/notes/notes-00000.tsv"
+        note_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/notes/notes-00000.zip"
         if settings.USE_DUMMY_DATA:
             note_url = (
                 "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/notes_sample.tsv"
@@ -46,22 +52,54 @@ def extract_data(sqlite: Session, postgresql: Session):
         res = requests.get(note_url)
 
         if res.status_code == 200:
-            # res.contentをsqliteのNoteテーブル
-            tsv_data = res.content.decode("utf-8").splitlines()
-            reader = csv.DictReader(tsv_data, delimiter="\t")
-            reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
+            if settings.USE_DUMMY_DATA:
+                # Handle dummy data as TSV
+                tsv_data = res.content.decode("utf-8").splitlines()
+                reader = csv.DictReader(tsv_data, delimiter="\t")
+                reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
 
-            rows_to_add = []
-            for index, row in enumerate(reader):
-                if sqlite.query(RowNoteRecord).filter(RowNoteRecord.note_id == row["note_id"]).first():
+                rows_to_add = []
+                for index, row in enumerate(reader):
+                    if sqlite.query(RowNoteRecord).filter(RowNoteRecord.note_id == row["note_id"]).first():
+                        continue
+                    rows_to_add.append(RowNoteRecord(**row))
+                    if index % 1000 == 0:
+                        sqlite.bulk_save_objects(rows_to_add)
+                        rows_to_add = []
+                sqlite.bulk_save_objects(rows_to_add)
+            else:
+                # Handle real data as zip file
+                try:
+                    with zipfile.ZipFile(io.BytesIO(res.content)) as zip_file:
+                        file_names = zip_file.namelist()
+                        if file_names:
+                            tsv_file_name = file_names[0]
+                            with zip_file.open(tsv_file_name) as tsv_file:
+                                tsv_data = tsv_file.read().decode("utf-8").splitlines()
+                                reader = csv.DictReader(tsv_data, delimiter="\t")
+                                reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
+
+                                rows_to_add = []
+                                for index, row in enumerate(reader):
+                                    if (
+                                        sqlite.query(RowNoteRecord)
+                                        .filter(RowNoteRecord.note_id == row["note_id"])
+                                        .first()
+                                    ):
+                                        continue
+                                    rows_to_add.append(RowNoteRecord(**row))
+                                    if index % 1000 == 0:
+                                        sqlite.bulk_save_objects(rows_to_add)
+                                        rows_to_add = []
+                                sqlite.bulk_save_objects(rows_to_add)
+                except zipfile.BadZipFile:
+                    logging.error(f"Invalid zip file from {note_url}")
                     continue
-                rows_to_add.append(RowNoteRecord(**row))
-                if index % 1000 == 0:
-                    sqlite.bulk_save_objects(rows_to_add)
-                    rows_to_add = []
-            sqlite.bulk_save_objects(rows_to_add)
+                except Exception as e:
+                    logging.error(f"Error processing note data from {note_url}: {e}")
+                    continue
 
-            status_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/noteStatusHistory/noteStatusHistory-00000.tsv"
+            status_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/noteStatusHistory/noteStatusHistory-00000.zip"
             if settings.USE_DUMMY_DATA:
                 status_url = "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/noteStatus_sample.tsv"
 
@@ -69,25 +107,70 @@ def extract_data(sqlite: Session, postgresql: Session):
             res = requests.get(status_url)
 
             if res.status_code == 200:
-                tsv_data = res.content.decode("utf-8").splitlines()
-                reader = csv.DictReader(tsv_data, delimiter="\t")
-                reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
+                if settings.USE_DUMMY_DATA:
+                    # Handle dummy data as TSV
+                    tsv_data = res.content.decode("utf-8").splitlines()
+                    reader = csv.DictReader(tsv_data, delimiter="\t")
+                    reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
 
-                rows_to_add = []
-                for index, row in enumerate(reader):
-                    for key, value in list(row.items()):
-                        if value == "":
-                            row[key] = None
-                    status = (
-                        sqlite.query(RowNoteStatusRecord).filter(RowNoteStatusRecord.note_id == row["note_id"]).first()
-                    )
-                    if status is None or status.created_at_millis > int(datetime.now().timestamp() * 1000):
-                        sqlite.query(RowNoteStatusRecord).filter(RowNoteStatusRecord.note_id == row["note_id"]).delete()
-                        rows_to_add.append(RowNoteStatusRecord(**row))
-                    if index % 1000 == 0:
-                        sqlite.bulk_save_objects(rows_to_add)
-                        rows_to_add = []
-                sqlite.bulk_save_objects(rows_to_add)
+                    rows_to_add = []
+                    for index, row in enumerate(reader):
+                        for key, value in list(row.items()):
+                            if value == "":
+                                row[key] = None
+                        status = (
+                            sqlite.query(RowNoteStatusRecord)
+                            .filter(RowNoteStatusRecord.note_id == row["note_id"])
+                            .first()
+                        )
+                        if status is None or status.created_at_millis > int(datetime.now().timestamp() * 1000):
+                            sqlite.query(RowNoteStatusRecord).filter(
+                                RowNoteStatusRecord.note_id == row["note_id"]
+                            ).delete()
+                            rows_to_add.append(RowNoteStatusRecord(**row))
+                        if index % 1000 == 0:
+                            sqlite.bulk_save_objects(rows_to_add)
+                            rows_to_add = []
+                    sqlite.bulk_save_objects(rows_to_add)
+                else:
+                    # Handle real data as zip file
+                    try:
+                        with zipfile.ZipFile(io.BytesIO(res.content)) as zip_file:
+                            file_names = zip_file.namelist()
+                            if file_names:
+                                tsv_file_name = file_names[0]
+                                with zip_file.open(tsv_file_name) as tsv_file:
+                                    tsv_data = tsv_file.read().decode("utf-8").splitlines()
+                                    reader = csv.DictReader(tsv_data, delimiter="\t")
+                                    reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
+
+                                    rows_to_add = []
+                                    for index, row in enumerate(reader):
+                                        for key, value in list(row.items()):
+                                            if value == "":
+                                                row[key] = None
+                                        status = (
+                                            sqlite.query(RowNoteStatusRecord)
+                                            .filter(RowNoteStatusRecord.note_id == row["note_id"])
+                                            .first()
+                                        )
+                                        if status is None or status.created_at_millis > int(
+                                            datetime.now().timestamp() * 1000
+                                        ):
+                                            sqlite.query(RowNoteStatusRecord).filter(
+                                                RowNoteStatusRecord.note_id == row["note_id"]
+                                            ).delete()
+                                            rows_to_add.append(RowNoteStatusRecord(**row))
+                                        if index % 1000 == 0:
+                                            sqlite.bulk_save_objects(rows_to_add)
+                                            rows_to_add = []
+                                    sqlite.bulk_save_objects(rows_to_add)
+                    except zipfile.BadZipFile:
+                        logging.error(f"Invalid zip file from {status_url}")
+                        continue
+                    except Exception as e:
+                        logging.error(f"Error processing note status data from {status_url}: {e}")
+                        continue
 
                 break
 
@@ -96,13 +179,24 @@ def extract_data(sqlite: Session, postgresql: Session):
     sqlite.commit()
 
     # Noteに紐づくtweetデータを取得
+    # Build keyword filter conditions using shared TARGET_KEYWORDS
+    keyword_conditions = []
+    for keyword in TARGET_KEYWORDS:
+        keyword_conditions.append(RowNoteRecord.summary.ilike(f"%{keyword}%"))
+
     postExtract_targetNotes = (
         sqlite.query(RowNoteRecord)
         .filter(RowNoteRecord.tweet_id != None)
         .filter(RowNoteRecord.created_at_millis >= settings.TARGET_TWITTER_POST_START_UNIX_MILLISECOND)
         .filter(RowNoteRecord.created_at_millis <= settings.TARGET_TWITTER_POST_END_UNIX_MILLISECOND)
+        .filter(
+            # Use OR condition to match any of the keywords
+            sqlalchemy.or_(*keyword_conditions)
+        )
         .all()
     )
+
+    close_sqlite(sqlite)
     logging.info(f"Target notes: {len(postExtract_targetNotes)}")
     for note in postExtract_targetNotes:
         tweet_id = note.tweet_id
@@ -119,8 +213,9 @@ def extract_data(sqlite: Session, postgresql: Session):
         if post == None or "data" not in post:
             continue
 
-        created_at = datetime.strptime(post["data"]["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ")
+        created_at = datetime.strptime(post["data"]["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
         created_at_millis = int(created_at.timestamp() * 1000)
+        now_millis = int(datetime.now(timezone.utc).timestamp() * 1000)
 
         is_userExist = (
             postgresql.query(RowUserRecord).filter(RowUserRecord.user_id == post["data"]["author_id"]).first()
@@ -166,6 +261,7 @@ def extract_data(sqlite: Session, postgresql: Session):
             quote_count=post["data"]["public_metrics"]["quote_count"],
             reply_count=post["data"]["public_metrics"]["reply_count"],
             lang=post["data"]["lang"],
+            extracted_at=now_millis,
         )
         postgresql.add(row_post)
 

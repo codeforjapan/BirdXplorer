@@ -230,6 +230,43 @@ class RowNoteStatusRecord(Base):
     timestamp_millis_of_first_nmr_due_to_min_stable_crh_time: Mapped[TwitterTimestamp] = mapped_column(nullable=True)
 
 
+class RowNoteRatingRecord(Base):
+    __tablename__ = "row_note_ratings"
+
+    note_id: Mapped[NoteId] = mapped_column(primary_key=True)
+    rater_participant_id: Mapped[ParticipantId] = mapped_column(primary_key=True)
+    created_at_millis: Mapped[TwitterTimestamp] = mapped_column(nullable=False)
+    version: Mapped[int] = mapped_column(nullable=False)
+    agree: Mapped[BinaryBool] = mapped_column(nullable=False)
+    disagree: Mapped[BinaryBool] = mapped_column(nullable=False)
+    helpful: Mapped[BinaryBool] = mapped_column(nullable=False)
+    not_helpful: Mapped[BinaryBool] = mapped_column(nullable=False)
+    helpfulness_level: Mapped[String] = mapped_column(nullable=False)
+    helpful_other: Mapped[BinaryBool] = mapped_column(nullable=False)
+    helpful_informative: Mapped[BinaryBool] = mapped_column(nullable=False)
+    helpful_clear: Mapped[BinaryBool] = mapped_column(nullable=False)
+    helpful_empathetic: Mapped[BinaryBool] = mapped_column(nullable=False)
+    helpful_good_sources: Mapped[BinaryBool] = mapped_column(nullable=False)
+    helpful_unique_context: Mapped[BinaryBool] = mapped_column(nullable=False)
+    helpful_addresses_claim: Mapped[BinaryBool] = mapped_column(nullable=False)
+    helpful_important_context: Mapped[BinaryBool] = mapped_column(nullable=False)
+    helpful_unbiased_language: Mapped[BinaryBool] = mapped_column(nullable=False)
+    not_helpful_other: Mapped[BinaryBool] = mapped_column(nullable=False)
+    not_helpful_incorrect: Mapped[BinaryBool] = mapped_column(nullable=False)
+    not_helpful_sources_missing_or_unreliable: Mapped[BinaryBool] = mapped_column(nullable=False)
+    not_helpful_opinion_speculation_or_bias: Mapped[BinaryBool] = mapped_column(nullable=False)
+    not_helpful_missing_key_points: Mapped[BinaryBool] = mapped_column(nullable=False)
+    not_helpful_outdated: Mapped[BinaryBool] = mapped_column(nullable=False)
+    not_helpful_hard_to_understand: Mapped[BinaryBool] = mapped_column(nullable=False)
+    not_helpful_argumentative_or_biased: Mapped[BinaryBool] = mapped_column(nullable=False)
+    not_helpful_off_topic: Mapped[BinaryBool] = mapped_column(nullable=False)
+    not_helpful_spam_harassment_or_abuse: Mapped[BinaryBool] = mapped_column(nullable=False)
+    not_helpful_irrelevant_sources: Mapped[BinaryBool] = mapped_column(nullable=False)
+    not_helpful_opinion_speculation: Mapped[BinaryBool] = mapped_column(nullable=False)
+    not_helpful_note_not_needed: Mapped[BinaryBool] = mapped_column(nullable=False)
+    rated_on_tweet_id: Mapped[PostId] = mapped_column(nullable=False)
+
+
 class RowPostRecord(Base):
     __tablename__ = "row_posts"
 
@@ -247,6 +284,7 @@ class RowPostRecord(Base):
     lang: Mapped[String] = mapped_column()
     row_notes: Mapped["RowNoteRecord"] = relationship("RowNoteRecord", back_populates="row_post")
     user: Mapped["RowUserRecord"] = relationship("RowUserRecord", back_populates="row_post")
+    extracted_at: Mapped[TwitterTimestamp] = mapped_column(nullable=False)
 
 
 class RowPostMediaRecord(Base):
