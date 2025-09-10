@@ -1,0 +1,9 @@
+name: Main
+
+permissions: write-all
+
+on: push
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
