@@ -6,7 +6,7 @@ from sqlalchemy import ForeignKey, create_engine, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 from sqlalchemy.orm.query import RowReturningQuery
-from sqlalchemy.types import CHAR, DECIMAL, JSON, Integer, String, Uuid
+from sqlalchemy.types import CHAR, DECIMAL, JSON, Integer, String, Text, Uuid
 
 from .models import (
     BinaryBool,
@@ -25,6 +25,7 @@ from .models import (
     NoteId,
     NotesClassification,
     NotesHarmful,
+    NoteStatusHistory,
     ParticipantId,
 )
 from .models import Post as PostModel
@@ -85,12 +86,19 @@ class NoteRecord(Base):
     __tablename__ = "notes"
 
     note_id: Mapped[NoteId] = mapped_column(primary_key=True)
+    note_author_participant_id: Mapped[ParticipantId] = mapped_column(nullable=False)
     post_id: Mapped[PostId] = mapped_column(nullable=False)
     topics: Mapped[List[NoteTopicAssociation]] = relationship()
     language: Mapped[LanguageIdentifier] = mapped_column(nullable=False)
     summary: Mapped[SummaryString] = mapped_column(nullable=False)
     current_status: Mapped[String] = mapped_column(nullable=True)
     created_at: Mapped[TwitterTimestamp] = mapped_column(nullable=False)
+    has_been_helpfuled: Mapped[bool] = mapped_column(nullable=True, default=False)
+    rate_count: Mapped[NonNegativeInt] = mapped_column(nullable=True, default=0)
+    helpful_count: Mapped[int] = mapped_column(nullable=True, default=0)
+    not_helpful_count: Mapped[int] = mapped_column(nullable=True, default=0)
+    somewhat_helpful_count: Mapped[int] = mapped_column(nullable=True, default=0)
+    current_status_history: Mapped[str] = mapped_column(Text, nullable=True, default="[]")
 
 
 class TopicRecord(Base):
@@ -157,6 +165,7 @@ class PostRecord(Base):
     text: Mapped[SummaryString] = mapped_column(nullable=False)
     media_details: Mapped[List[PostMediaAssociation]] = relationship()
     created_at: Mapped[TwitterTimestamp] = mapped_column(nullable=False)
+    aggregated_at: Mapped[TwitterTimestamp] = mapped_column(nullable=True)
     like_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
     repost_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
     impression_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
@@ -265,6 +274,7 @@ class RowPostRecord(Base):
     author_id: Mapped[UserId] = mapped_column(ForeignKey("row_users.user_id"), nullable=False)
     text: Mapped[SummaryString] = mapped_column(nullable=False)
     created_at: Mapped[TwitterTimestamp] = mapped_column(nullable=False)
+    aggregated_at: Mapped[TwitterTimestamp] = mapped_column(nullable=True)
     like_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
     repost_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
     bookmark_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
@@ -326,6 +336,21 @@ class Storage:
         return self._engine
 
     @classmethod
+    def _parse_status_history(cls, status_history_json: str) -> List[NoteStatusHistory]:
+        """Parse JSON string to list of NoteStatusHistory objects."""
+        import json
+
+        from .models import NoteStatus, NoteStatusHistory
+
+        try:
+            status_history_data = json.loads(status_history_json)
+            return [
+                NoteStatusHistory(status=NoteStatus(item["status"]), date=item["date"]) for item in status_history_data
+            ]
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError):
+            return []
+
+    @classmethod
     def _media_record_to_model(cls, media_record: MediaRecord) -> Media:
         return Media(
             media_key=media_record.media_key,
@@ -360,6 +385,7 @@ class Storage:
             text=post_record.text,
             media_details=media_details,
             created_at=post_record.created_at,
+            aggregated_at=post_record.aggregated_at,
             like_count=post_record.like_count,
             repost_count=post_record.repost_count,
             impression_count=post_record.impression_count,
@@ -430,6 +456,7 @@ class Storage:
             for note_record in query.all():
                 yield NoteModel(
                     note_id=note_record.note_id,
+                    note_author_participant_id=note_record.note_author_participant_id,
                     post_id=note_record.post_id,
                     topics=[
                         TopicModel(
@@ -447,6 +474,12 @@ class Storage:
                     summary=note_record.summary,
                     current_status=note_record.current_status,
                     created_at=note_record.created_at,
+                    has_been_helpfuled=note_record.has_been_helpfuled,
+                    rate_count=note_record.rate_count,
+                    helpful_count=note_record.helpful_count,
+                    not_helpful_count=note_record.not_helpful_count,
+                    somewhat_helpful_count=note_record.somewhat_helpful_count,
+                    current_status_history=self._parse_status_history(note_record.current_status_history),
                 )
 
     def get_number_of_notes(
@@ -682,6 +715,7 @@ class Storage:
             for note_record, post_record in query.all():
                 note = NoteModel(
                     note_id=note_record.note_id,
+                    note_author_participant_id=note_record.note_author_participant_id,
                     post_id=note_record.post_id,
                     topics=[
                         TopicModel(topic_id=topic.topic_id, label=topic.topic.label, reference_count=0)
@@ -691,6 +725,12 @@ class Storage:
                     summary=note_record.summary,
                     current_status=note_record.current_status,
                     created_at=note_record.created_at,
+                    has_been_helpfuled=note_record.has_been_helpfuled,
+                    rate_count=note_record.rate_count,
+                    helpful_count=note_record.helpful_count,
+                    not_helpful_count=note_record.not_helpful_count,
+                    somewhat_helpful_count=note_record.somewhat_helpful_count,
+                    current_status_history=self._parse_status_history(note_record.current_status_history),
                 )
 
                 post = self._post_record_to_model(post_record, with_media=post_includes_media) if post_record else None
