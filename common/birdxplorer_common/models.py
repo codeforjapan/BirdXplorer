@@ -681,28 +681,50 @@ class Topic(BaseModel):
 class SummaryString(NonEmptyTrimmedString): ...
 
 
+class NoteStatus(str, Enum):
+    """Enum for note status values"""
+
+    NEEDS_MORE_RATINGS = "NEEDS_MORE_RATINGS"
+    CURRENTLY_RATED_HELPFUL = "CURRENTLY_RATED_HELPFUL"
+    CURRENTLY_RATED_NOT_HELPFUL = "CURRENTLY_RATED_NOT_HELPFUL"
+
+
+class NoteStatusHistory(BaseModel):
+    """Model for note status history entry"""
+
+    status: Annotated[NoteStatus, PydanticField(description="ノートのステータス")]
+    date: Annotated[
+        TwitterTimestamp, PydanticField(description="ステータス変更日時 (ミリ秒単位の UNIX EPOCH TIMESTAMP)")
+    ]
+
+
 class Note(BaseModel):
     note_id: Annotated[NoteId, PydanticField(description="コミュニティノートの ID")]
+    note_author_participant_id: Annotated[
+        ParticipantId, PydanticField(description="コミュニティノートの作成者の Participant ID")
+    ]
     post_id: Annotated[PostId, PydanticField(description="コミュニティノートに対応する X の Post の ID")]
     language: Annotated[LanguageIdentifier, PydanticField(description="コミュニティノートの言語")]
     topics: Annotated[List[Topic], PydanticField(description="推定されたコミュニティノートのトピック")]
     summary: Annotated[SummaryString, PydanticField(description="コミュニティノートの本文")]
     current_status: Annotated[
-        Annotated[
-            str,
-            PydanticField(
-                json_schema_extra={
-                    "enum": ["NEEDS_MORE_RATINGS", "CURRENTLY_RATED_HELPFUL", "CURRENTLY_RATED_NOT_HELPFUL"]
-                },
-            ),
-        ]
-        | None,
+        NoteStatus | None,
         PydanticField(
             description="コミュニティノートの現在の評価状態",
         ),
     ]
     created_at: Annotated[
         TwitterTimestamp, PydanticField(description="コミュニティノートの作成日時 (ミリ秒単位の UNIX EPOCH TIMESTAMP)")
+    ]
+    has_been_helpfuled: Annotated[
+        bool, PydanticField(description="ノートが役立つと評価されたことがあるかどうか", default=False)
+    ]
+    rate_count: Annotated[NonNegativeInt, PydanticField(description="ノートの総評価数", default=0)]
+    helpful_count: Annotated[NonNegativeInt, PydanticField(description="役立つ評価の数", default=0)]
+    not_helpful_count: Annotated[NonNegativeInt, PydanticField(description="役立たない評価の数", default=0)]
+    somewhat_helpful_count: Annotated[NonNegativeInt, PydanticField(description="やや役立つ評価の数", default=0)]
+    current_status_history: Annotated[
+        List[NoteStatusHistory], PydanticField(description="ステータス変更履歴", default_factory=list)
     ]
 
 
@@ -831,6 +853,10 @@ class Post(BaseModel):
     ]
     created_at: Annotated[
         TwitterTimestamp, PydanticField(description="Post の作成日時 (ミリ秒単位の UNIX EPOCH TIMESTAMP)")
+    ]
+    aggregated_at: Annotated[
+        TwitterTimestamp,
+        PydanticField(description="Post の情報がETLで取得された日時 (ミリ秒単位の UNIX EPOCH TIMESTAMP)"),
     ]
     like_count: Annotated[NonNegativeInt, PydanticField(description="Post のいいね数")]
     repost_count: Annotated[NonNegativeInt, PydanticField(description="Post のリポスト数")]

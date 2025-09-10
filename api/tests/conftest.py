@@ -44,6 +44,7 @@ def gen_random_twitter_timestamp() -> int:
 @register_fixture(name="user_enrollment_factory")
 class UserEnrollmentFactory(ModelFactory[UserEnrollment]):
     __model__ = UserEnrollment
+    __check_model__ = False
 
     participant_id = Use(lambda: "".join(random.choices("0123456789ABCDEF", k=64)))
     timestamp_of_last_state_change = Use(gen_random_twitter_timestamp)
@@ -53,31 +54,37 @@ class UserEnrollmentFactory(ModelFactory[UserEnrollment]):
 @register_fixture(name="note_factory")
 class NoteFactory(ModelFactory[Note]):
     __model__ = Note
+    __check_model__ = False
 
 
 @register_fixture(name="topic_factory")
 class TopicFactory(ModelFactory[Topic]):
     __model__ = Topic
+    __check_model__ = False
 
 
 @register_fixture(name="x_user_factory")
 class XUserFactory(ModelFactory[XUser]):
     __model__ = XUser
+    __check_model__ = False
 
 
 @register_fixture(name="media_factory")
 class MediaFactory(ModelFactory[Media]):
     __model__ = Media
+    __check_model__ = False
 
 
 @register_fixture(name="post_factory")
 class PostFactory(ModelFactory[Post]):
     __model__ = Post
+    __check_model__ = False
 
 
 @register_fixture(name="link_factory")
 class LinkFactory(ModelFactory[Link]):
     __model__ = Link
+    __check_model__ = False
 
 
 @fixture
@@ -114,48 +121,83 @@ def note_samples(note_factory: NoteFactory, topic_samples: List[Topic]) -> Gener
     notes = [
         note_factory.build(
             note_id="1234567890123456781",
+            note_author_participant_id=Use(lambda: "".join(random.choices("0123456789ABCDEF", k=64))).to_value(),
             post_id="2234567890123456781",
             topics=[topic_samples[0]],
             language="ja",
             summary="要約文1",
             current_status="NEEDS_MORE_RATINGS",
             created_at=1152921600000,
+            has_been_helpfuled=False,
+            rate_count=0,
+            helpful_count=0,
+            not_helpful_count=0,
+            somewhat_helpful_count=0,
+            current_status_history=[],
         ),
         note_factory.build(
             note_id="1234567890123456782",
+            note_author_participant_id=Use(lambda: "".join(random.choices("0123456789ABCDEF", k=64))).to_value(),
             post_id="2234567890123456782",
             topics=[],
             language="en",
             summary="summary2",
             current_status="NEEDS_MORE_RATINGS",
             created_at=1152921601000,
+            has_been_helpfuled=False,
+            rate_count=3,
+            helpful_count=0,
+            not_helpful_count=2,
+            somewhat_helpful_count=1,
+            current_status_history=[],
         ),
         note_factory.build(
             note_id="1234567890123456783",
+            note_author_participant_id=Use(lambda: "".join(random.choices("0123456789ABCDEF", k=64))).to_value(),
             post_id="2234567890123456783",
             topics=[topic_samples[1]],
             language="en",
             summary="summary3",
-            current_status="",
+            current_status=None,
             created_at=1152921602000,
+            has_been_helpfuled=False,
+            rate_count=0,
+            helpful_count=0,
+            not_helpful_count=0,
+            somewhat_helpful_count=0,
+            current_status_history=[],
         ),
         note_factory.build(
             note_id="1234567890123456784",
+            note_author_participant_id=Use(lambda: "".join(random.choices("0123456789ABCDEF", k=64))).to_value(),
             post_id="2234567890123456784",
             topics=[topic_samples[0], topic_samples[1], topic_samples[2]],
             language="en",
             summary="summary4",
             current_status="CURRENTLY_RATED_HELPFUL",
             created_at=1152921603000,
+            has_been_helpfuled=True,
+            rate_count=8,
+            helpful_count=5,
+            not_helpful_count=1,
+            somewhat_helpful_count=2,
+            current_status_history=[],
         ),
         note_factory.build(
             note_id="1234567890123456785",
+            note_author_participant_id=Use(lambda: "".join(random.choices("0123456789ABCDEF", k=64))).to_value(),
             post_id="2234567890123456785",
             topics=[topic_samples[0]],
             language="en",
             summary="summary5",
             current_status="CURRENTLY_RATED_HELPFUL",
             created_at=1152921604000,
+            has_been_helpfuled=True,
+            rate_count=13,
+            helpful_count=10,
+            not_helpful_count=0,
+            somewhat_helpful_count=3,
+            current_status_history=[],
         ),
     ]
     yield notes
@@ -232,6 +274,7 @@ def post_samples(
 https://t.co/xxxxxxxxxxx/ #プロジェクト #新発売 #Tech""",
             media_details=[],
             created_at=1152921600000,
+            aggregated_at=1152921600000,
             like_count=10,
             repost_count=20,
             impression_count=30,
@@ -248,6 +291,7 @@ https://t.co/xxxxxxxxxxx/ #プロジェクト #新発売 #Tech""",
 https://t.co/yyyyyyyyyyy/ #学び #自己啓発""",
             media_details=[media_samples[0]],
             created_at=1153921700000,
+            aggregated_at=1153921700000,
             like_count=10,
             repost_count=20,
             impression_count=30,
@@ -262,6 +306,7 @@ https://t.co/yyyyyyyyyyy/ #学び #自己啓発""",
 次の休暇はここに決めた！🌴🏖️ 見てみて～ https://t.co/xxxxxxxxxxx/ https://t.co/wwwwwwwwwww/ #旅行 #バケーション""",
             media_details=[],
             created_at=1154921800000,
+            aggregated_at=1154921800000,
             like_count=10,
             repost_count=20,
             impression_count=30,
@@ -275,6 +320,7 @@ https://t.co/yyyyyyyyyyy/ #学び #自己啓発""",
             text="https://t.co/zzzzzzzzzzz/ https://t.co/wwwwwwwwwww/",
             media_details=[],
             created_at=1154922900000,
+            aggregated_at=1154922900000,
             like_count=10,
             repost_count=20,
             impression_count=30,
@@ -288,6 +334,7 @@ https://t.co/yyyyyyyyyyy/ #学び #自己啓発""",
             text="empty",
             media_details=[],
             created_at=1154923900000,
+            aggregated_at=1154923900000,
             like_count=10,
             repost_count=20,
             impression_count=30,
@@ -454,6 +501,7 @@ def load_dotenv_fixture() -> None:
 def cors_settings_factory(load_dotenv_fixture: None) -> Type[ModelFactory[CORSSettings]]:
     class CORSSettingsFactory(ModelFactory[CORSSettings]):
         __model__ = CORSSettings
+        __check_model__ = False
 
         allow_credentials = True
         allow_methods = ["*"]
@@ -469,6 +517,7 @@ def postgres_storage_settings_factory(
 ) -> Type[ModelFactory[PostgresStorageSettings]]:
     class PostgresStorageSettingsFactory(ModelFactory[PostgresStorageSettings]):
         __model__ = PostgresStorageSettings
+        __check_model__ = False
 
         host = "localhost"
         username = "postgres"
@@ -486,6 +535,7 @@ def global_settings_factory(
 ) -> Type[ModelFactory[GlobalSettings]]:
     class GlobalSettingsFactory(ModelFactory[GlobalSettings]):
         __model__ = GlobalSettings
+        __check_model__ = False
 
         cors_settings = cors_settings_factory.build()
         storage_settings = postgres_storage_settings_factory.build()
