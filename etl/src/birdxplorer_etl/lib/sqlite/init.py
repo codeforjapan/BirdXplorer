@@ -1,45 +1,42 @@
 # Create Note table for sqlite with columns: id, title, content, created_at, updated_at by sqlalchemy
-import os
+import csv
 import logging
+import os
 from pathlib import Path
 
 import boto3
-
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 
 from birdxplorer_common.storage import (
+    RowNoteRatingRecord,
     RowNoteRecord,
+    RowNoteStatusRecord,
+    RowPostEmbedURLRecord,
+    RowPostMediaRecord,
     RowPostRecord,
     RowUserRecord,
-    RowPostEmbedURLRecord,
-    RowNoteStatusRecord,
-    RowPostMediaRecord,
-    RowNoteRatingRecord,
+    TopicRecord,
 )
-
 from birdxplorer_etl import settings
 
-import csv
-import os
-from birdxplorer_common.storage import TopicRecord
 
 def _get_database_config():
     """データベース設定を環境変数から取得"""
     return {
-        's3_bucket': settings.S3_BUCKET_NAME,
-        's3_key': os.getenv('SQLITE_S3_KEY', 'etl'),
-        'tmp_path': '/tmp/notes.sqlite'
+        "s3_bucket": settings.S3_BUCKET_NAME,
+        "s3_key": os.getenv("SQLITE_S3_KEY", "etl"),
+        "tmp_path": "/tmp/notes.sqlite",
     }
 
 
 def init_sqlite():
-    USE_S3 = os.getenv('USE_S3', 'false').lower() == 'true'
+    USE_S3 = os.getenv("USE_S3", "false").lower() == "true"
 
     if USE_S3:
         db_config = _get_database_config()
-        download_sqlite(db_config['s3_key'], db_config['tmp_path'], db_config['s3_bucket'])
-        db_path = db_config['tmp_path']
+        download_sqlite(db_config["s3_key"], db_config["tmp_path"], db_config["s3_bucket"])
+        db_path = db_config["tmp_path"]
     else:
         db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "data", "note.db"))
 
@@ -69,30 +66,34 @@ def init_sqlite():
 
     return Session()
 
+
 def download_sqlite(src_path: str, dest_path: str, bucket: str):
     import botocore.exceptions
-    
-    s3_client = boto3.client('s3')
+
+    s3_client = boto3.client("s3")
     Path(dest_path).parent.mkdir(parents=True, exist_ok=True)
-    
+
     try:
         s3_client.download_file(bucket, src_path, dest_path)
         logging.info(f"Successfully downloaded {src_path} from S3 bucket {bucket}")
     except botocore.exceptions.ClientError as e:
-        error_code = e.response['Error']['Code']
-        if error_code == '404':
+        error_code = e.response["Error"]["Code"]
+        if error_code == "404":
             logging.warning(f"S3 file not found: {src_path} in bucket {bucket}. Creating empty database.")
             # 空のSQLiteファイルを作成
             import sqlite3
+
             conn = sqlite3.connect(dest_path)
             conn.close()
         else:
             logging.error(f"S3 download failed: {e}")
             raise
 
+
 def upload_sqlite(src_path: str, dest_path: str, bucket: str):
-    s3_client = boto3.client('s3')
+    s3_client = boto3.client("s3")
     s3_client.upload_file(src_path, bucket, dest_path)
+
 
 def close_sqlite(session):
     try:
@@ -100,10 +101,11 @@ def close_sqlite(session):
     finally:
         session.close()
 
-    use_s3 = os.getenv('USE_S3', 'false').lower() == 'true'
+    use_s3 = os.getenv("USE_S3", "false").lower() == "true"
     if use_s3:
         db_cfg = _get_database_config()
-        upload_sqlite(db_cfg['tmp_path'], db_cfg['s3_key'], db_cfg['s3_bucket'])
+        upload_sqlite(db_cfg["tmp_path"], db_cfg["s3_key"], db_cfg["s3_bucket"])
+
 
 def init_postgresql():
     db_host = os.getenv("DB_HOST", "localhost")
@@ -141,6 +143,7 @@ def init_postgresql():
 
     return Session()
 
+
 # todo topicがない場合や、新しく更新された場合に最初にinsertする
 def insert_topic_seed_data(session):
     csv_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "seed", "topic_seed.csv")
@@ -172,10 +175,7 @@ def insert_topic_seed_data(session):
                     continue
 
                 # 新しいトピックを挿入
-                topic_record = TopicRecord(
-                    topic_id=index + 1,
-                    label={"ja": ja_label, "en": en_label}
-                )
+                topic_record = TopicRecord(topic_id=index + 1, label={"ja": ja_label, "en": en_label})
                 session.add(topic_record)
 
                 # 重複チェック用辞書に追加

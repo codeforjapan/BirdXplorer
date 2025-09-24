@@ -1,25 +1,27 @@
 import csv
-import logging
-from datetime import datetime, timedelta, timezone
-import requests
-import stringcase
-import zipfile
 import io
-from sqlalchemy.orm import Session
+import logging
+import zipfile
+from datetime import datetime, timedelta, timezone
+
+import requests
+import settings
 import sqlalchemy
-from birdxplorer_etl.lib.sqlite.init import close_sqlite
+import stringcase
+from constants import TARGET_KEYWORDS
 from lib.x.postlookup import lookup
+from sqlalchemy.orm import Session
+
 from birdxplorer_common.storage import (
+    RowNoteRatingRecord,
     RowNoteRecord,
+    RowNoteStatusRecord,
+    RowPostEmbedURLRecord,
     RowPostMediaRecord,
     RowPostRecord,
     RowUserRecord,
-    RowNoteStatusRecord,
-    RowPostEmbedURLRecord,
-    RowNoteRatingRecord,
 )
-import settings
-from constants import TARGET_KEYWORDS
+from birdxplorer_etl.lib.sqlite.init import close_sqlite
 
 
 def extract_data(sqlite: Session, postgresql: Session):

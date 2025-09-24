@@ -1,8 +1,9 @@
-from lib.sqlite.init import init_sqlite, init_postgresql
+import logging
+
 from extract import extract_data
+from lib.sqlite.init import init_postgresql, init_sqlite
 from load import load_data
 from transform import transform_data
-import logging
 
 logging.basicConfig(level=logging.INFO)
 
