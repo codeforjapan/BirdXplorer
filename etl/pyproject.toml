@@ -32,6 +32,7 @@ dependencies = [
     "stringcase",
     "openai",
     "boto3",
+    "twscrape",
 ]
 
 [project.urls]
