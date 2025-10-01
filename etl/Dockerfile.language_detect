@@ -1,5 +1,4 @@
-# AWS Lambda Container Image用のDockerfile (Language Detection Lambda)
-FROM public.ecr.aws/lambda/python:3.10
+FROM public.ecr.aws/lambda/python:3.12
 
 # 作業ディレクトリを設定
 WORKDIR ${LAMBDA_TASK_ROOT}
