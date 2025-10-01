@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import boto3
 from botocore.exceptions import ClientError
 
@@ -146,3 +146,66 @@ def send_tweet_lookup_message(tweet_id: str, queue_url: str) -> bool:
     
     message_id = handler.send_message(queue_url, message_body)
     return message_id is not None
+
+
+def send_unified_transform_message(processing_type: str, data_id: str, queue_url: str) -> bool:
+    """
+    unified-transform-queueにメッセージを送信
+    
+    Args:
+        processing_type: 処理タイプ ('user_transform', 'post_transform', 'media_transform', 'link_transform')
+        data_id: データID (user_id, post_id など)
+        queue_url: SQSキューURL
+        
+    Returns:
+        送信成功の可否
+    """
+    handler = SQSHandler()
+    
+    # 処理タイプに応じてメッセージボディを構築
+    if processing_type == 'user_transform':
+        message_body = {
+            'processing_type': processing_type,
+            'user_id': data_id
+        }
+    elif processing_type in ['post_transform', 'media_transform', 'link_transform']:
+        message_body = {
+            'processing_type': processing_type,
+            'post_id': data_id
+        }
+    else:
+        raise ValueError(f"Unsupported processing_type: {processing_type}")
+    
+    message_id = handler.send_message(queue_url, message_body)
+    return message_id is not None
+
+
+def send_batch_unified_transform_messages(messages: List[Dict[str, str]], queue_url: str) -> int:
+    """
+    unified-transform-queueに複数のメッセージを一括送信
+    
+    Args:
+        messages: メッセージのリスト [{'processing_type': 'user_transform', 'data_id': '123'}, ...]
+        queue_url: SQSキューURL
+        
+    Returns:
+        送信成功したメッセージ数
+    """
+    handler = SQSHandler()
+    success_count = 0
+    
+    for message in messages:
+        processing_type = message.get('processing_type')
+        data_id = message.get('data_id')
+        
+        if not processing_type or not data_id:
+            continue
+            
+        try:
+            if send_unified_transform_message(processing_type, data_id, queue_url):
+                success_count += 1
+        except Exception as e:
+            logger.error(f"Failed to send message {message}: {e}")
+            continue
+    
+    return success_count

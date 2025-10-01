@@ -15,7 +15,8 @@ logger.setLevel(logging.INFO)
 def lambda_handler(event, context):
     """
     ノート変換Lambda関数
-    row_notesテーブルからnotesテーブルへの変換と言語推定を実行
+    row_notesテーブルからnotesテーブルへの変換を実行
+    言語情報はrow_notesから取得（language_detect_lambdaで事前に判定済み）
     
     期待されるeventの形式:
     {
@@ -58,12 +59,13 @@ def lambda_handler(event, context):
                 
                 logger.info(f"Processing note transformation for note: {note_id}")
                 
-                # PostgreSQLからrow_notesデータを取得
+                # PostgreSQLからrow_notesデータを取得（言語情報を含む）
                 note_query = postgresql.execute(
                     select(
                         RowNoteRecord.note_id,
                         RowNoteRecord.tweet_id,
                         RowNoteRecord.summary,
+                        RowNoteRecord.language,
                         RowNoteRecord.created_at_millis,
                         RowNoteStatusRecord.current_status
                     )
@@ -96,11 +98,17 @@ def lambda_handler(event, context):
                     })
                     continue
                 
-                # AI サービスで言語検出
-                ai_service = get_ai_service()
-                detected_language = ai_service.detect_language(note_row.summary)
+                # row_notesから言語を取得（language_detect_lambdaで事前に判定済み）
+                detected_language = note_row.language
                 
-                logger.info(f"Language detected for note {note_id}: {detected_language}")
+                # 言語が未判定の場合のフォールバック処理
+                if not detected_language:
+                    logger.warning(f"Language not detected for note {note_id}, using fallback")
+                    ai_service = get_ai_service()
+                    detected_language = ai_service.detect_language(note_row.summary)
+                    logger.info(f"Fallback language detection for note {note_id}: {detected_language}")
+                else:
+                    logger.info(f"Using pre-detected language for note {note_id}: {detected_language}")
                 
                 # notesテーブルに新しいレコードを作成
                 new_note = NoteRecord(

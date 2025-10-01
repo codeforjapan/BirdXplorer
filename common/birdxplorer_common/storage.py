@@ -198,6 +198,7 @@ class RowNoteRecord(Base):
     harmful: Mapped[NotesHarmful] = mapped_column(nullable=False)
     validation_difficulty: Mapped[SummaryString] = mapped_column(nullable=False)
     summary: Mapped[SummaryString] = mapped_column(nullable=False)
+    language: Mapped[LanguageIdentifier] = mapped_column(nullable=True)
     row_post_id: Mapped[PostId] = mapped_column(ForeignKey("row_posts.post_id"), nullable=True)
     row_post: Mapped["RowPostRecord"] = relationship("RowPostRecord", back_populates="row_notes")
 
