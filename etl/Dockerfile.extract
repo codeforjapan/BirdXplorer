@@ -1,6 +1,6 @@
 ARG ENVIRONMENT="prod"
 
-FROM python:3.11
+FROM python:3.12
 
 WORKDIR /app
 
@@ -9,7 +9,7 @@ RUN apt-get update \
        gcc \
        libpq-dev \
        libpq5  \
-       postgresql-client-15 \
+       postgresql-client \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
