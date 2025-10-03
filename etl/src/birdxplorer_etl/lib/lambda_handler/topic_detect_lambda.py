@@ -106,35 +106,22 @@ def lambda_handler(event, context):
                 postgresql.rollback()
                 raise
             
-            # トピック推定完了後、条件に該当する場合はtweet-lookup-queueにメッセージを送信
-            should_lookup_tweet = False
-            language = note_row.language if hasattr(note_row, 'language') else None
-            
-            # 条件1: 日本語のノート
-            if language == 'ja':
-                should_lookup_tweet = True
-                logger.info(f"Note {note_id} is in Japanese, will trigger tweet lookup")
-            
-            # 条件2: トピックが検出されたノート（将来的な拡張用）
-            # 特定のトピックIDに該当する場合など、追加の条件をここに記述可能
-            
             # notesテーブルからtweet_idを取得
+            notes_query = postgresql.execute(
+                select(NoteRecord.post_id)
+                .filter(NoteRecord.note_id == note_id)
+            )
+            notes_row = notes_query.first()
+            
             tweet_id = None
-            if should_lookup_tweet:
-                notes_query = postgresql.execute(
-                    select(NoteRecord.post_id)
-                    .filter(NoteRecord.note_id == note_id)
-                )
-                notes_row = notes_query.first()
-                
-                if notes_row and notes_row.post_id:
-                    tweet_id = notes_row.post_id
-                    logger.info(f"Found tweet_id {tweet_id} for note {note_id}")
-                else:
-                    logger.warning(f"No tweet_id found for note {note_id}")
+            if notes_row and notes_row.post_id:
+                tweet_id = notes_row.post_id
+                logger.info(f"Found tweet_id {tweet_id} for note {note_id}")
+            else:
+                logger.warning(f"No tweet_id found for note {note_id}")
             
             # SQSメッセージ送信
-            if should_lookup_tweet and tweet_id and TWEET_LOOKUP_QUEUE_URL:
+            if tweet_id and TWEET_LOOKUP_QUEUE_URL:
                 try:
                     sqs_handler = SQSHandler()
                     tweet_lookup_message = {
@@ -154,9 +141,9 @@ def lambda_handler(event, context):
                         
                 except Exception as e:
                     logger.error(f"Error sending SQS message for tweet lookup: {e}")
-            elif should_lookup_tweet and not tweet_id:
-                logger.warning(f"Note {note_id} meets criteria but has no tweet_id")
-            elif should_lookup_tweet and not TWEET_LOOKUP_QUEUE_URL:
+            elif not tweet_id:
+                logger.warning(f"Note {note_id} has no tweet_id, skipping tweet lookup")
+            elif not TWEET_LOOKUP_QUEUE_URL:
                 logger.warning(f"TWEET_LOOKUP_QUEUE_URL is not configured, skipping SQS message")
             
             return {
@@ -167,8 +154,7 @@ def lambda_handler(event, context):
                     'summary': note_row.summary[:100] + '...' if len(note_row.summary) > 100 else note_row.summary,
                     'detected_topics': topic_ids,
                     'topics_count': len(topic_ids),
-                    'language': language,
-                    'tweet_lookup_triggered': should_lookup_tweet and tweet_id is not None,
+                    'tweet_lookup_triggered': tweet_id is not None,
                     'tweet_id': tweet_id
                 })
             }
