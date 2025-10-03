@@ -1,5 +1,7 @@
 import json
 import logging
+import os
+from pathlib import Path
 from sqlalchemy import select
 from birdxplorer_etl.lib.sqlite.init import init_postgresql
 from birdxplorer_etl.lib.ai_model.ai_model_interface import get_ai_service
@@ -10,6 +12,63 @@ from birdxplorer_etl import settings
 # Lambda用のロガー設定
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+def load_keywords():
+    """
+    キーワードJSONファイルを読み込む
+    
+    Lambda環境では LAMBDA_TASK_ROOT (/var/task) からの相対パスを使用
+    開発環境では __file__ からの相対パスを使用
+    
+    Returns:
+        list: キーワードのリスト（空配列の場合もある）
+    """
+    try:
+        # Lambda環境の場合
+        lambda_task_root = os.environ.get('LAMBDA_TASK_ROOT')
+        if lambda_task_root:
+            keywords_file_path = Path(lambda_task_root) / "seed" / "keywords.json"
+        else:
+            # 開発環境の場合
+            keywords_file_path = Path(__file__).parent.parent.parent.parent.parent / "seed" / "keywords.json"
+        
+        logger.info(f"Looking for keywords file at: {keywords_file_path}")
+        
+        if keywords_file_path.exists():
+            with open(keywords_file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                keywords = data.get('keywords', [])
+                logger.info(f"Loaded {len(keywords)} keywords from {keywords_file_path}")
+                return keywords
+        else:
+            logger.warning(f"Keywords file not found: {keywords_file_path}")
+            return []
+    except Exception as e:
+        logger.error(f"Error loading keywords file: {e}")
+        return []
+
+def check_keyword_match(text, keywords):
+    """
+    テキストにキーワードが含まれているかチェック
+    
+    Args:
+        text: チェック対象のテキスト
+        keywords: キーワードのリスト
+    
+    Returns:
+        bool: キーワードが1つでも含まれていればTrue
+    """
+    if not keywords:
+        # キーワードが空の場合は常にTrue（言語判定のみで通過）
+        return True
+    
+    text_lower = text.lower()
+    for keyword in keywords:
+        if keyword.lower() in text_lower:
+            logger.info(f"Keyword matched: {keyword}")
+            return True
+    
+    return False
 
 
 def lambda_handler(event, context):
@@ -145,10 +204,39 @@ def lambda_handler(event, context):
             postgresql.commit()
             logger.info(f"Successfully committed note transformations")
             
-            # 成功したnote_idをtopic-detect-queueに送信
-            successful_note_ids = [result['note_id'] for result in results if result['status'] == 'success']
+            # キーワードを読み込む
+            keywords = load_keywords()
             
-            for note_id in successful_note_ids:
+            # 成功したノートに対して条件判定を行い、topic-detect-queueに送信
+            successful_results = [result for result in results if result['status'] == 'success']
+            topic_detect_queued = 0
+            
+            for result in successful_results:
+                note_id = result['note_id']
+                detected_language = result.get('detected_language', '')
+                
+                # 条件1: 言語がjaまたはen
+                if detected_language not in ['ja', 'en']:
+                    logger.info(f"Note {note_id} language '{detected_language}' is not ja or en, skipping topic detection")
+                    continue
+                
+                # 条件2: キーワードマッチ（キーワードが空の場合は常にTrue）
+                # ノートのsummaryを取得
+                note_query = postgresql.execute(
+                    select(RowNoteRecord.summary)
+                    .filter(RowNoteRecord.note_id == note_id)
+                )
+                note_row = note_query.first()
+                
+                if not note_row:
+                    logger.warning(f"Could not retrieve summary for note {note_id}")
+                    continue
+                
+                if not check_keyword_match(note_row.summary, keywords):
+                    logger.info(f"Note {note_id} does not match any keywords, skipping topic detection")
+                    continue
+                
+                # 条件を満たす場合、topic-detect-queueに送信
                 topic_detect_message = {
                     'note_id': note_id,
                     'processing_type': 'topic_detect'
@@ -160,7 +248,8 @@ def lambda_handler(event, context):
                 )
                 
                 if message_id:
-                    logger.info(f"Enqueued note {note_id} to topic-detect queue, messageId={message_id}")
+                    logger.info(f"Enqueued note {note_id} to topic-detect queue (language={detected_language}), messageId={message_id}")
+                    topic_detect_queued += 1
                 else:
                     logger.error(f"Failed to enqueue note {note_id} to topic-detect queue")
             
@@ -174,7 +263,7 @@ def lambda_handler(event, context):
             'body': json.dumps({
                 'message': 'Note transformation completed',
                 'results': results,
-                'topic_detect_queued': len([r for r in results if r['status'] == 'success'])
+                'topic_detect_queued': topic_detect_queued
             })
         }
         
