@@ -8,6 +8,7 @@ Updated to use the latest X GraphQL API with two-step process:
 import asyncio
 import json
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -217,6 +218,7 @@ class XCommunityNotesClient:
         headers = self.default_headers.copy()
         headers["x-csrf-token"] = self.csrf_token
         headers["Cookie"] = f"auth_token={self.auth_token}; ct0={self.csrf_token}"
+        headers["Content-Type"] = "application/json"
         return headers
 
     def fetch_timeline_post_ids(self, count: int = 20) -> Optional[List[str]]:
@@ -347,51 +349,278 @@ class XCommunityNotesClient:
 
         return None
 
-    def fetch_community_notes(self, limit: int = 100) -> Optional[List[Dict[str, Any]]]:
+    def fetch_birdwatch_global_timeline(self) -> Optional[Dict[str, Any]]:
         """
-        Fetch community notes using the two-step process:
-        1. Get timeline to get post IDs
-        2. Get notes for each post (placeholder for now)
-
-        Args:
-            limit: Maximum number of notes to fetch
+        Fetch community notes using the BirdwatchFetchGlobalTimeline GraphQL endpoint
+        Includes retry logic for non-200 status codes.
 
         Returns:
-            Optional[List[Dict[str, Any]]]: List of community notes or None if failed
+            Optional[Dict[str, Any]]: Community notes timeline data or None if failed
         """
-        try:
-            logger.info(f"Fetching community notes (limit: {limit})")
+        max_retries = 10
+        retry_delay = 1  # 1 second delay between retries
 
-            # Step 1: Get post IDs from timeline
-            post_ids = self.fetch_timeline_post_ids(count=min(limit, 20))
-            if not post_ids:
-                logger.error("Failed to fetch post IDs from timeline")
+        try:
+            logger.info("Fetching community notes from BirdwatchFetchGlobalTimeline endpoint")
+
+            if not self.auth_token or not self.csrf_token:
+                logger.error("Not authenticated. Call authenticate() first.")
                 return None
 
-            logger.info(f"Got {len(post_ids)} post IDs from timeline")
+            # BirdwatchFetchGlobalTimeline endpoint
+            birdwatch_url = "https://x.com/i/api/graphql/J5pGd3g_8gGG28OGzHci8g/GenericTimelineById"
 
-            # Step 2: Get notes for each post (placeholder implementation)
-            # TODO: Implement the actual notes fetching for each post ID
-            notes = []
-            for i, post_id in enumerate(post_ids[:limit]):
-                # For now, create placeholder notes
-                note = {
-                    "note_id": f"note_{i+1}",
-                    "post_id": post_id,
-                    "content": f"Sample community note for post {post_id}",
-                    "created_at": "2025-01-01T00:00:00.000Z",
-                    "author_id": "sample_author",
-                    "classification": "HELPFUL",
-                    "raw_data": {"post_id": post_id, "step": "timeline_extraction"},
-                }
-                notes.append(note)
+            # Variables and features for the BirdwatchFetchGlobalTimeline endpoint
+            variables = {
+                "timelineId": "VGltZWxpbmU6CwA6AAAAEjkyMTMwNjQ4ODQyNTEwNzQ1NgA=",
+                "count": 20,
+                "withQuickPromoteEligibilityTweetFields": True,
+            }
+            features = {
+                "rweb_video_screen_enabled": False,
+                "payments_enabled": False,
+                "rweb_xchat_enabled": False,
+                "profile_label_improvements_pcf_label_in_post_enabled": True,
+                "rweb_tipjar_consumption_enabled": True,
+                "verified_phone_label_enabled": False,
+                "responsive_web_graphql_timeline_navigation_enabled": True,
+                "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
+                "creator_subscriptions_tweet_preview_api_enabled": True,
+                "premium_content_api_read_enabled": False,
+                "communities_web_enable_tweet_community_results_fetch": True,
+                "c9s_tweet_anatomy_moderator_badge_enabled": True,
+                "responsive_web_grok_analyze_button_fetch_trends_enabled": False,
+                "responsive_web_grok_analyze_post_followups_enabled": True,
+                "responsive_web_jetfuel_frame": True,
+                "responsive_web_grok_share_attachment_enabled": True,
+                "articles_preview_enabled": True,
+                "responsive_web_edit_tweet_api_enabled": True,
+                "graphql_is_translatable_rweb_tweet_is_translatable_enabled": True,
+                "view_counts_everywhere_api_enabled": True,
+                "longform_notetweets_consumption_enabled": True,
+                "responsive_web_twitter_article_tweet_consumption_enabled": True,
+                "tweet_awards_web_tipping_enabled": False,
+                "responsive_web_grok_show_grok_translated_post": False,
+                "responsive_web_grok_analysis_button_from_backend": True,
+                "creator_subscriptions_quote_tweet_preview_enabled": False,
+                "freedom_of_speech_not_reach_fetch_enabled": True,
+                "standardized_nudges_misinfo": True,
+                "tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled": True,
+                "longform_notetweets_rich_text_read_enabled": True,
+                "longform_notetweets_inline_media_enabled": True,
+                "responsive_web_grok_image_annotation_enabled": True,
+                "responsive_web_grok_imagine_annotation_enabled": True,
+                "responsive_web_grok_community_note_auto_translation_is_enabled": False,
+                "responsive_web_enhance_cards_enabled": False,
+            }
 
-            logger.info(f"Generated {len(notes)} placeholder notes")
-            return notes
+            # Build request parameters
+            params = {
+                "variables": json.dumps(variables),
+                "features": json.dumps(features),
+            }
+
+            # Build headers with authentication
+            headers = self._build_request_headers()
+
+            # Retry logic for making GraphQL request
+            for attempt in range(max_retries + 1):
+                try:
+                    logger.info(f"Making request attempt {attempt + 1}/{max_retries + 1}")
+
+                    # Make GraphQL request
+                    response = self.session.get(birdwatch_url, params=params, headers=headers, timeout=30)
+
+                    if response.status_code == 200:
+                        # Success - parse and return data
+                        data = json.loads(response.content)
+                        logger.info("Successfully fetched BirdwatchFetchGlobalTimeline response")
+                        return data
+                    else:
+                        # Non-200 status code
+                        logger.warning(
+                            f"BirdwatchFetchGlobalTimeline request failed with status {response.status_code}: {response.text}"
+                        )
+
+                        # If this is not the last attempt, wait and retry
+                        if attempt < max_retries:
+                            logger.info(
+                                f"Retrying in {retry_delay} second(s)... (attempt {attempt + 1}/{max_retries + 1})"
+                            )
+                            time.sleep(retry_delay)
+                        else:
+                            logger.error(f"All {max_retries + 1} attempts failed. Giving up.")
+                            return None
+
+                except requests.exceptions.RequestException as req_e:
+                    logger.warning(f"Request exception on attempt {attempt + 1}: {str(req_e)}")
+
+                    # If this is not the last attempt, wait and retry
+                    if attempt < max_retries:
+                        logger.info(f"Retrying in {retry_delay} second(s)... (attempt {attempt + 1}/{max_retries + 1})")
+                        time.sleep(retry_delay)
+                    else:
+                        logger.error(f"All {max_retries + 1} attempts failed due to request exceptions. Giving up.")
+                        return None
+
+            return None
 
         except Exception as e:
-            logger.error(f"Failed to fetch community notes: {str(e)}")
+            logger.error(f"Failed to fetch BirdwatchFetchGlobalTimeline: {str(e)}")
             return None
+
+    def extract_post_ids_from_birdwatch_response(self, data: Dict[str, Any]) -> List[str]:
+        """
+        Extract post IDs from BirdwatchFetchGlobalTimeline response
+
+        Args:
+            data: BirdwatchFetchGlobalTimeline GraphQL response data
+
+        Returns:
+            List[Dict[str, Any]]: List of extracted post IDs
+        """
+        post_ids = []
+
+        try:
+            # Navigate through the response structure to find community notes
+            # The exact structure may vary, so we'll handle multiple possible paths
+
+            if "data" in data:
+                data_section = data["data"]
+                entries = data_section["timeline"]["timeline"]["instructions"][0]["entries"]
+                entries = entries[1:]
+
+                for entry in entries:
+                    # get entryId from entry and remove tweet- prefix and push to post_ids
+                    if "entryId" in entry:
+                        entry_id = entry["entryId"]
+                        post_id = self._extract_post_id_from_entry_id(entry_id)
+                        if post_id:
+                            post_ids.append(post_id)
+
+        except Exception as e:
+            logger.error(f"Error extracting community notes from birdwatch response: {str(e)}")
+
+        logger.info(f"Extracted {len(post_ids)} community notes from birdwatch response")
+        return post_ids
+
+    def fetch_community_notes_by_tweet_id(self, tweet_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch community notes for a specific tweet ID
+        Includes retry logic for non-200 status codes.
+
+        Args:
+            tweet_id: Tweet ID to fetch community notes for
+        Returns:
+            Optional[Dict[str, Any]]: Fetched community notes or None if not found
+        """
+        max_retries = 10
+        retry_delay = 1  # 1 second delay between retries
+
+        try:
+            if not self.auth_token or not self.csrf_token:
+                logger.error("Not authenticated. Call authenticate() first.")
+                return None
+
+            birdwatch_url = "https://x.com/i/api/graphql/305KT9GmMLc2mVsLRL8EXg/BirdwatchFetchNotes"
+
+            variables = {
+                "tweet_id": tweet_id,
+            }
+            features = {
+                "responsive_web_birdwatch_enforce_author_user_quotas": True,
+                "responsive_web_birdwatch_media_notes_enabled": True,
+                "responsive_web_birdwatch_url_notes_enabled": False,
+                "responsive_web_grok_community_note_translation_is_enabled": False,
+                "responsive_web_birdwatch_fast_notes_badge_enabled": False,
+                "responsive_web_grok_community_note_auto_translation_is_enabled": False,
+                "responsive_web_graphql_timeline_navigation_enabled": True,
+                "payments_enabled": False,
+                "profile_label_improvements_pcf_label_in_post_enabled": True,
+                "rweb_tipjar_consumption_enabled": True,
+                "verified_phone_label_enabled": False,
+                "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
+            }
+
+            params = {
+                "variables": json.dumps(variables),
+                "features": json.dumps(features),
+            }
+
+            headers = self._build_request_headers()
+
+            # Retry logic for making GraphQL request
+            for attempt in range(max_retries + 1):
+                try:
+                    logger.info(f"Making request attempt {attempt + 1}/{max_retries + 1} for tweet {tweet_id}")
+
+                    # Make GraphQL request
+                    response = self.session.get(birdwatch_url, params=params, headers=headers, timeout=30)
+
+                    if response.status_code == 200:
+                        # Success - parse and return data
+                        data = json.loads(response.content)
+                        logger.info(f"Successfully fetched community notes for tweet {tweet_id}")
+                        return data
+                    else:
+                        # Non-200 status code
+                        logger.warning(
+                            f"Request for tweet {tweet_id} failed with status {response.status_code}: {response.text}"
+                        )
+
+                        # If this is not the last attempt, wait and retry
+                        if attempt < max_retries:
+                            logger.info(
+                                f"Retrying in {retry_delay} second(s)... (attempt {attempt + 1}/{max_retries + 1})"
+                            )
+                            time.sleep(retry_delay)
+                        else:
+                            logger.error(f"All {max_retries + 1} attempts failed for tweet {tweet_id}. Giving up.")
+                            return None
+
+                except requests.exceptions.RequestException as req_e:
+                    logger.warning(f"Request exception on attempt {attempt + 1} for tweet {tweet_id}: {str(req_e)}")
+
+                    # If this is not the last attempt, wait and retry
+                    if attempt < max_retries:
+                        logger.info(f"Retrying in {retry_delay} second(s)... (attempt {attempt + 1}/{max_retries + 1})")
+                        time.sleep(retry_delay)
+                    else:
+                        logger.error(
+                            f"All {max_retries + 1} attempts failed for tweet {tweet_id} due to request exceptions. Giving up."
+                        )
+                        return None
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error fetching community notes for tweet {tweet_id}: {str(e)}")
+            return None
+
+    def extract_required_data_from_notes_response(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Extract required fields from community notes response
+
+        Args:
+            data: Community notes GraphQL response data
+
+        Returns:
+            List of extracted community notes
+        """
+        notes = []
+
+        if "data" in data:
+            data_section = data["data"]
+            notes = data_section["tweet_result_by_rest_id"]["result"]["misleading_birdwatch_notes"]["notes"]
+            for note in notes:
+                if ("data_v1" in note) and ("rest_id" in note):
+                    extracted_data = {
+                        "summary": note["data_v1"]["summary"]["text"],
+                        "note_id": note["rest_id"],
+                    }
+                    notes.append(extracted_data)
+
+        return notes
 
 
 async def get_community_notes_client(

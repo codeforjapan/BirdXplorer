@@ -153,9 +153,9 @@ class TestXAuthenticationIntegration:
             pytest.fail(f"Factory function failed: {str(e)}")
 
     @pytest.mark.asyncio
-    async def test_timeline_fetch_with_real_credentials(self):
-        """Test fetching timeline with real credentials or cookies (basic connectivity test)"""
-        print("Testing timeline fetch with real credentials...")
+    async def test_fetch_community_notes_with_real_credentials(self):
+        """Test fetching community notes using the XCommunityNotesClient.fetch_birdwatch_global_timeline method"""
+        print("Testing community notes fetch with real credentials...")
 
         # Check if we have either full credentials or cookies
         has_full_creds = all([self.username, self.password, self.email, self.email_password])
@@ -173,55 +173,53 @@ class TestXAuthenticationIntegration:
                     username=self.username, password=self.password, email=self.email, email_password=self.email_password
                 )
 
-            print("✓ Client authenticated, attempting timeline fetch...")
+            print("✓ Client authenticated, attempting to fetch community notes...")
 
-            # Try to fetch timeline (this tests actual API connectivity)
-            post_ids = client.fetch_timeline_post_ids(count=5)
+            # Use the new fetch_birdwatch_global_timeline method
+            print("✓ Calling fetch_birdwatch_global_timeline method...")
+            birdwatch_data = client.fetch_birdwatch_global_timeline()
 
-            if post_ids is not None:
-                print(f"✓ Timeline fetch successful, got {len(post_ids)} post IDs")
-                print(f"✓ Sample post IDs: {post_ids[:3] if post_ids else 'None'}")
+            if birdwatch_data is not None:
+                print("✓ Successfully fetched birdwatch global timeline data!")
+
+                # Analyze the response structure
+                if "data" in birdwatch_data:
+                    # Try to extract community notes using the client's method
+                    print("✓ Attempting to extract postIds from response...")
+                    post_ids = client.extract_post_ids_from_birdwatch_response(birdwatch_data)
+
+                    if post_ids:
+                        print(f"✓ Extracted {len(post_ids)} postIds from birdwatch response")
+                        # get community notes for these post IDs
+                        # for post_id in post_ids:
+                        #     notes = client.fetch_community_notes_by_tweet_id(post_id)
+                        notes = client.fetch_community_notes_by_tweet_id(post_ids[0])
+                        extracted_data = client.extract_required_data_from_notes_response(notes)
+                        assert len(extracted_data) > 0
+                    else:
+                        print("⚠️ No community notes extracted (may be expected if no notes available)")
+
+                    # Verify we got a valid response structure
+                    assert birdwatch_data is not None
+                    assert isinstance(birdwatch_data, dict)
+                    assert "data" in birdwatch_data
+
+                    print("✓ Community notes fetch test completed successfully!")
+
+                else:
+                    print("⚠️ No 'data' field in birdwatch response")
+                    print(f"✓ Response keys: {list(birdwatch_data.keys())}")
+
             else:
-                print("⚠️ Timeline fetch returned None (may be expected due to API limitations)")
+                print("❌ fetch_birdwatch_global_timeline returned None")
+                print("⚠️ This might be expected if there are API limitations or access restrictions")
 
-            # The test passes as long as we don't get an authentication error
-            print("✓ Timeline fetch test completed (no auth errors)")
+            print("✓ Community notes fetch test completed (no auth errors)")
 
         except Exception as e:
-            print(f"❌ Timeline fetch failed: {str(e)}")
+            print(f"❌ Community notes fetch test failed: {str(e)}")
             # Don't fail the test for API errors, only for auth errors
             if "auth" in str(e).lower() or "unauthorized" in str(e).lower():
                 pytest.fail(f"Authentication-related error: {str(e)}")
             else:
                 print(f"⚠️ Non-auth error (may be expected): {str(e)}")
-
-
-def test_print_integration_test():
-    """Simple test that prints 'test' for integration module"""
-    print("test - X authentication integration module")
-    assert True
-
-
-def test_environment_setup_instructions():
-    """Test that provides instructions for setting up environment variables"""
-    print("\n" + "=" * 60)
-    print("X AUTHENTICATION INTEGRATION TEST SETUP")
-    print("=" * 60)
-    print("To run integration tests with real X credentials, you have two options:")
-    print("")
-    print("OPTION 1: Use cookies (recommended to avoid IP bans)")
-    print("export X_TEST_USERNAME='your_x_username'")
-    print("export X_TEST_COOKIES='auth_token=your_auth_token; ct0=your_csrf_token'")
-    print("")
-    print("OPTION 2: Use full credentials")
-    print("export X_TEST_USERNAME='your_x_username'")
-    print("export X_TEST_PASSWORD='your_x_password'")
-    print("export X_TEST_EMAIL='your_x_email'")
-    print("export X_TEST_EMAIL_PASSWORD='your_email_password'")
-    print("")
-    print("Then run: pytest tests/test_x_authentication_integration.py -v")
-    print("")
-    print("Note: Using cookies is preferred as it avoids potential IP bans")
-    print("from repeated login attempts.")
-    print("=" * 60)
-    assert True
