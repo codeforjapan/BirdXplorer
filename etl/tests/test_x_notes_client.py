@@ -187,15 +187,18 @@ class TestXAuthenticationIntegration:
                     # Try to extract community notes using the client's method
                     print("✓ Attempting to extract postIds from response...")
                     post_ids = client.extract_post_ids_from_birdwatch_response(birdwatch_data)
+                    extracted_data = []
 
                     if post_ids:
                         print(f"✓ Extracted {len(post_ids)} postIds from birdwatch response")
                         # get community notes for these post IDs
-                        # for post_id in post_ids:
-                        #     notes = client.fetch_community_notes_by_tweet_id(post_id)
-                        notes = client.fetch_community_notes_by_tweet_id(post_ids[0])
-                        extracted_data = client.extract_required_data_from_notes_response(notes)
-                        assert len(extracted_data) > 0
+                        for post_id in post_ids:
+                            notes = client.fetch_community_notes_by_tweet_id(post_id)
+                            required_data = client.extract_required_data_from_notes_response(notes)
+                            if required_data is None:
+                                continue
+                            extracted_data.extend(required_data)
+                        assert len(extracted_data) > len(post_ids)  # Should have at least one note per post ID
                     else:
                         print("⚠️ No community notes extracted (may be expected if no notes available)")
 
@@ -213,6 +216,7 @@ class TestXAuthenticationIntegration:
             else:
                 print("❌ fetch_birdwatch_global_timeline returned None")
                 print("⚠️ This might be expected if there are API limitations or access restrictions")
+                pytest.fail("Failed to fetch birdwatch global timeline data")
 
             print("✓ Community notes fetch test completed (no auth errors)")
 
