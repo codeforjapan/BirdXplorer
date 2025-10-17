@@ -122,6 +122,7 @@ def lambda_handler(event, context):
                 note_query = postgresql.execute(
                     select(
                         RowNoteRecord.note_id,
+                        RowNoteRecord.note_author_participant_id,
                         RowNoteRecord.tweet_id,
                         RowNoteRecord.summary,
                         RowNoteRecord.language,
@@ -172,6 +173,7 @@ def lambda_handler(event, context):
                 # notesテーブルに新しいレコードを作成
                 new_note = NoteRecord(
                     note_id=note_row.note_id,
+                    note_author_participant_id=note_row.note_author_participant_id,
                     post_id=note_row.tweet_id,
                     language=detected_language,
                     summary=note_row.summary,
