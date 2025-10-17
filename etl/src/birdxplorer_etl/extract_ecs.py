@@ -140,8 +140,6 @@ def extract_data(postgresql: Session):
                     # バッチ処理後にSQSキューイング
                     for note in rows_to_add:
                         enqueue_notes(note.note_id)
-                        if note.tweet_id:
-                            enqueue_tweets(note.tweet_id)
                     
                     rows_to_add = []
 
@@ -152,8 +150,6 @@ def extract_data(postgresql: Session):
             # 最後のバッチのSQSキューイング
             for note in rows_to_add:
                 enqueue_notes(note.note_id)
-                if note.tweet_id:
-                    enqueue_tweets(note.tweet_id)
 
             status_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/noteStatusHistory/noteStatusHistory-00000.zip"
             if settings.USE_DUMMY_DATA:
