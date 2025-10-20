@@ -50,9 +50,11 @@ class CommunityNote:
 
     note_id: str
     summary: str
+    post_id: Optional[str] = None
+    created_at: Optional[int] = None
 
     @classmethod
-    def from_response_data(cls, note_data: Dict[str, Any]) -> Optional["CommunityNote"]:
+    def from_response_data(cls, note_data: Dict[str, Any], tweet_id: Optional[str] = None) -> Optional["CommunityNote"]:
         """Create CommunityNote from API response data"""
         if not all(key in note_data for key in ["rest_id", "data_v1"]):
             return None
@@ -63,7 +65,15 @@ class CommunityNote:
         if "text" not in summary_data:
             return None
 
-        return cls(note_id=note_data["rest_id"], summary=summary_data["text"])
+        # Extract created_at from note data
+        created_at = note_data.get("created_at_millis")
+
+        return cls(
+            note_id=note_data["rest_id"],
+            summary=summary_data["text"],
+            post_id=tweet_id,
+            created_at=created_at,
+        )
 
 
 @dataclass
@@ -178,12 +188,13 @@ class NotesResponseParser:
     """Parser for community notes responses"""
 
     @staticmethod
-    def extract_community_notes(data: Dict[str, Any]) -> List[CommunityNote]:
+    def extract_community_notes(data: Dict[str, Any], tweet_id: Optional[str] = None) -> List[CommunityNote]:
         """
         Extract community notes from API response
 
         Args:
             data: Community notes GraphQL response data
+            tweet_id: Optional tweet ID to associate with the notes
 
         Returns:
             List[CommunityNote]: List of extracted community notes
@@ -197,17 +208,21 @@ class NotesResponseParser:
             data_section = data["data"]
             tweet_result = data_section.get("tweet_result_by_rest_id", {}).get("result", {})
 
+            # Extract tweet_id from the response if not provided
+            if not tweet_id:
+                tweet_id = tweet_result.get("rest_id")
+
             # Extract misleading notes
             misleading_notes = tweet_result.get("misleading_birdwatch_notes", {}).get("notes", [])
             for note_data in misleading_notes:
-                note = CommunityNote.from_response_data(note_data)
+                note = CommunityNote.from_response_data(note_data, tweet_id)
                 if note:
                     notes.append(note)
 
             # Extract not misleading notes
             not_misleading_notes = tweet_result.get("not_misleading_birdwatch_notes", {}).get("notes", [])
             for note_data in not_misleading_notes:
-                note = CommunityNote.from_response_data(note_data)
+                note = CommunityNote.from_response_data(note_data, tweet_id)
                 if note:
                     notes.append(note)
 
@@ -346,7 +361,12 @@ class XCommunityNotesClient:
     """
 
     def __init__(
-        self, username: str, password: str = None, email: str = None, email_password: str = None, cookies: str = None
+        self,
+        username: str,
+        password: Optional[str] = None,
+        email: Optional[str] = None,
+        email_password: Optional[str] = None,
+        cookies: Optional[str] = None,
     ):
         """
         Initialize the client with X account credentials or cookies
@@ -359,7 +379,11 @@ class XCommunityNotesClient:
             cookies: Cookie string in format "name1=value1; name2=value2" (alternative to credentials)
         """
         self.credentials = AuthCredentials(
-            username=username, password=password, email=email, email_password=email_password, cookies=cookies
+            username=username,
+            password=password,
+            email=email,
+            email_password=email_password,
+            cookies=cookies,
         )
         self.api = API()
         self.auth_token = None
@@ -551,7 +575,12 @@ class XCommunityNotesClient:
                 logger.info(f"Making request attempt {attempt + 1}/{XAPIConfig.MAX_RETRIES + 1}{context_str}")
 
                 # Make GraphQL request
-                response = self.session.get(url, params=params, headers=headers, timeout=XAPIConfig.REQUEST_TIMEOUT)
+                response = self.session.get(
+                    url,
+                    params=params,
+                    headers=headers,
+                    timeout=XAPIConfig.REQUEST_TIMEOUT,
+                )
 
                 if response.status_code == 200:
                     # Success - parse and return data
@@ -622,7 +651,10 @@ class XCommunityNotesClient:
 
             # Make GraphQL request to get timeline
             response = self.session.get(
-                XAPIConfig.TIMELINE_URL, params=params, headers=headers, timeout=XAPIConfig.REQUEST_TIMEOUT
+                XAPIConfig.TIMELINE_URL,
+                params=params,
+                headers=headers,
+                timeout=XAPIConfig.REQUEST_TIMEOUT,
             )
 
             if response.status_code != 200:
@@ -724,21 +756,28 @@ class XCommunityNotesClient:
             logger.error(f"Error fetching community notes for tweet {tweet_id}: {str(e)}")
             return None
 
-    def extract_required_data_from_notes_response(self, data: Dict[str, Any]) -> List[CommunityNote]:
+    def extract_required_data_from_notes_response(
+        self, data: Dict[str, Any], tweet_id: Optional[str] = None
+    ) -> List[CommunityNote]:
         """
         Extract required fields from community notes response
 
         Args:
             data: Community notes GraphQL response data
+            tweet_id: Optional tweet ID to associate with the notes
 
         Returns:
             List[CommunityNote]: List of extracted community notes
         """
-        return NotesResponseParser.extract_community_notes(data)
+        return NotesResponseParser.extract_community_notes(data, tweet_id)
 
 
 async def get_community_notes_client(
-    username: str, password: str = None, email: str = None, email_password: str = None, cookies: str = None
+    username: str,
+    password: Optional[str] = None,
+    email: Optional[str] = None,
+    email_password: Optional[str] = None,
+    cookies: Optional[str] = None,
 ) -> XCommunityNotesClient:
     """
     Factory function to create and authenticate a community notes client
