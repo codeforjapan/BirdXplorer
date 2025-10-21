@@ -32,6 +32,9 @@ jobs:
     strategy:
       matrix:
         lambda:
+          - name: etl_extract
+            dockerfile: Dockerfile.extract
+            repository: birdxplorer-etl
           - name: language_detect
             dockerfile: Dockerfile.language_detect
             repository: birdxplorer-etl-lang
