@@ -123,18 +123,27 @@ class TestGetLatest100NotesLambda:
     @pytest.mark.asyncio
     async def test_fetch_community_notes_async_success(self, mock_client: MagicMock):
         """Test successful fetching of community notes"""
-        with patch(
-            "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.get_community_notes_client",
-            new_callable=AsyncMock,
-        ) as mock_get_client:
-            mock_get_client.return_value = mock_client
+        with patch.dict(
+            "os.environ",
+            {
+                "X_TEST_USERNAME": "test_user",
+                "X_TEST_PASSWORD": "test_pass",
+                "X_TEST_EMAIL": "test@example.com",
+                "X_TEST_EMAIL_PASSWORD": "test_email_pass",
+            },
+        ):
+            with patch(
+                "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.get_community_notes_client",
+                new_callable=AsyncMock,
+            ) as mock_get_client:
+                mock_get_client.return_value = mock_client
 
-            result = await fetch_community_notes_async(limit=10)
+                result = await fetch_community_notes_async(limit=10)
 
-            assert result["success"] is True
-            assert "count" in result
-            assert "notes" in result
-            assert isinstance(result["notes"], list)
+                assert result["success"] is True
+                assert "count" in result
+                assert "notes" in result
+                assert isinstance(result["notes"], list)
 
     @pytest.mark.asyncio
     async def test_fetch_community_notes_async_missing_credentials(self):
@@ -152,85 +161,130 @@ class TestGetLatest100NotesLambda:
     @pytest.mark.asyncio
     async def test_fetch_community_notes_async_authentication_failure(self):
         """Test fetching with authentication failure"""
-        with patch(
-            "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.get_community_notes_client",
-            new_callable=AsyncMock,
-        ) as mock_get_client:
-            mock_get_client.side_effect = Exception("Authentication failed")
+        with patch.dict(
+            "os.environ",
+            {
+                "X_TEST_USERNAME": "test_user",
+                "X_TEST_PASSWORD": "test_pass",
+                "X_TEST_EMAIL": "test@example.com",
+                "X_TEST_EMAIL_PASSWORD": "test_email_pass",
+            },
+        ):
+            with patch(
+                "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.get_community_notes_client",
+                new_callable=AsyncMock,
+            ) as mock_get_client:
+                mock_get_client.side_effect = Exception("Authentication failed")
 
-            result = await fetch_community_notes_async(limit=10)
+                result = await fetch_community_notes_async(limit=10)
 
-            assert result["success"] is False
-            assert "error" in result
-            assert "Authentication failed" in result["error"]
+                assert result["success"] is False
+                assert "error" in result
+                assert "Authentication failed" in result["error"]
 
     @pytest.mark.asyncio
     async def test_fetch_community_notes_async_returns_none(self, mock_client: MagicMock):
         """Test when fetch_community_notes returns None"""
         mock_client.fetch_community_notes = MagicMock(return_value=None)
 
-        with patch(
-            "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.get_community_notes_client",
-            new_callable=AsyncMock,
-        ) as mock_get_client:
-            mock_get_client.return_value = mock_client
+        with patch.dict(
+            "os.environ",
+            {
+                "X_TEST_USERNAME": "test_user",
+                "X_TEST_PASSWORD": "test_pass",
+                "X_TEST_EMAIL": "test@example.com",
+                "X_TEST_EMAIL_PASSWORD": "test_email_pass",
+            },
+        ):
+            with patch(
+                "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.get_community_notes_client",
+                new_callable=AsyncMock,
+            ) as mock_get_client:
+                mock_get_client.return_value = mock_client
 
-            result = await fetch_community_notes_async(limit=10)
+                result = await fetch_community_notes_async(limit=10)
 
-            assert result["success"] is False
-            assert "Failed to fetch community notes" in result["error"]
+                assert result["success"] is False
+                assert "Failed to fetch community notes" in result["error"]
 
     def test_lambda_handler_success(self, mock_client: MagicMock):
         """Test lambda handler with successful execution"""
-        with patch(
-            "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.get_community_notes_client",
-            new_callable=AsyncMock,
-        ) as mock_get_client:
-            mock_get_client.return_value = mock_client
+        with patch.dict(
+            "os.environ",
+            {
+                "X_TEST_USERNAME": "test_user",
+                "X_TEST_PASSWORD": "test_pass",
+                "X_TEST_EMAIL": "test@example.com",
+                "X_TEST_EMAIL_PASSWORD": "test_email_pass",
+            },
+        ):
+            with patch(
+                "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.get_community_notes_client",
+                new_callable=AsyncMock,
+            ) as mock_get_client:
+                mock_get_client.return_value = mock_client
 
-            event = {"limit": 10}
-            context = {}
+                event = {"limit": 10}
+                context = {}
 
-            result = lambda_handler(event, context)
+                result = lambda_handler(event, context)
 
-            assert result["statusCode"] == 200
-            body = json.loads(result["body"])
-            assert body["status"] == "success"
-            assert body["function"] == "get_latest_100_notes"
-            assert "count" in body
-            assert "notes" in body
+                assert result["statusCode"] == 200
+                body = json.loads(result["body"])
+                assert body["status"] == "success"
+                assert body["function"] == "get_latest_100_notes"
+                assert "count" in body
+                assert "notes" in body
 
     def test_lambda_handler_default_limit(self, mock_client: MagicMock):
         """Test lambda handler with default limit"""
-        with patch(
-            "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.get_community_notes_client",
-            new_callable=AsyncMock,
-        ) as mock_get_client:
-            mock_get_client.return_value = mock_client
+        with patch.dict(
+            "os.environ",
+            {
+                "X_TEST_USERNAME": "test_user",
+                "X_TEST_PASSWORD": "test_pass",
+                "X_TEST_EMAIL": "test@example.com",
+                "X_TEST_EMAIL_PASSWORD": "test_email_pass",
+            },
+        ):
+            with patch(
+                "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.get_community_notes_client",
+                new_callable=AsyncMock,
+            ) as mock_get_client:
+                mock_get_client.return_value = mock_client
 
-            event = {}
-            context = {}
+                event = {}
+                context = {}
 
-            result = lambda_handler(event, context)
+                result = lambda_handler(event, context)
 
-            assert result["statusCode"] == 200
-            body = json.loads(result["body"])
-            assert body["status"] == "success"
+                assert result["statusCode"] == 200
+                body = json.loads(result["body"])
+                assert body["status"] == "success"
 
     def test_lambda_handler_invalid_limit(self, mock_client: MagicMock):
         """Test lambda handler with invalid limit (should use default)"""
-        with patch(
-            "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.get_community_notes_client",
-            new_callable=AsyncMock,
-        ) as mock_get_client:
-            mock_get_client.return_value = mock_client
+        with patch.dict(
+            "os.environ",
+            {
+                "X_TEST_USERNAME": "test_user",
+                "X_TEST_PASSWORD": "test_pass",
+                "X_TEST_EMAIL": "test@example.com",
+                "X_TEST_EMAIL_PASSWORD": "test_email_pass",
+            },
+        ):
+            with patch(
+                "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.get_community_notes_client",
+                new_callable=AsyncMock,
+            ) as mock_get_client:
+                mock_get_client.return_value = mock_client
 
-            event = {"limit": -1}
-            context = {}
+                event = {"limit": -1}
+                context = {}
 
-            result = lambda_handler(event, context)
+                result = lambda_handler(event, context)
 
-            assert result["statusCode"] == 200
+                assert result["statusCode"] == 200
 
     def test_lambda_handler_error(self):
         """Test lambda handler with error"""
