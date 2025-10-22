@@ -1,6 +1,7 @@
 import os
-from dotenv import load_dotenv
 from datetime import datetime, timedelta
+
+from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -32,14 +33,14 @@ USE_DUMMY_DATA = os.getenv("USE_DUMMY_DATA", "False") == "True"
 
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 USE_SQS = os.getenv("USE_SQS", "False") == "True"
-ESTIMATE_TOPIC_QUEUE_URL = os.environ.get('ESTIMATE_TOPIC_QUEUE_URL')
-ESTIMATE_LANG_QUEUE_URL = os.environ.get('ESTIMATE_LANG_QUEUE_URL')
-ESTIMATE_TWEET_QUEUE_URL = os.environ.get('ESTIMATE_TWEET_QUEUE_URL')
+ESTIMATE_TOPIC_QUEUE_URL = os.environ.get("ESTIMATE_TOPIC_QUEUE_URL")
+ESTIMATE_LANG_QUEUE_URL = os.environ.get("ESTIMATE_LANG_QUEUE_URL")
+ESTIMATE_TWEET_QUEUE_URL = os.environ.get("ESTIMATE_TWEET_QUEUE_URL")
 
 # 新しいETL処理用のSQSキューURL
-LANG_DETECT_QUEUE_URL = os.environ.get('LANG_DETECT_QUEUE_URL')
-TOPIC_DETECT_QUEUE_URL = os.environ.get('TOPIC_DETECT_QUEUE_URL')
-TWEET_LOOKUP_QUEUE_URL = os.environ.get('TWEET_LOOKUP_QUEUE_URL')
+LANG_DETECT_QUEUE_URL = os.environ.get("LANG_DETECT_QUEUE_URL")
+TOPIC_DETECT_QUEUE_URL = os.environ.get("TOPIC_DETECT_QUEUE_URL")
+TWEET_LOOKUP_QUEUE_URL = os.environ.get("TWEET_LOOKUP_QUEUE_URL")
 
 # トピック取得方法の設定 ("csv" または "db")
 TOPIC_SOURCE = os.getenv("TOPIC_SOURCE", "csv")

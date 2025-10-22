@@ -16,6 +16,11 @@
 - **機能**: ノートのトピック推定を行うLambda関数
 - **ハンドラー**: `topic_detect_lambda.lambda_handler`
 
+### 3. Dockerfile.get_latest_100_notes
+- **対象**: `get_latest_100_notes_lambda.py`
+- **機能**: 最新100件のノートを取得するLambda関数（現在はテスト実装）
+- **ハンドラー**: `get_latest_100_notes_lambda.lambda_handler`
+
 ## ビルド方法
 
 ### Language Detection Lambda
@@ -30,6 +35,13 @@ docker build -f Dockerfile.language_detect -t language-detect-lambda .
 ```bash
 # etlディレクトリで実行
 docker build -f Dockerfile.topic_detect -t topic-detect-lambda .
+```
+
+### Get Latest 100 Notes Lambda
+
+```bash
+# etlディレクトリで実行
+docker build -f Dockerfile.get_latest_100_notes -t get-latest-100-notes-lambda .
 ```
 
 ## ローカルテスト
@@ -85,6 +97,18 @@ curl -XPOST "http://localhost:9001/2015-03-31/functions/function/invocations" \
   -d '{"note_id": "1234567890"}'
 ```
 
+### Get Latest 100 Notes Lambda
+
+```bash
+# コンテナを起動
+docker run -p 9002:8080 \
+  get-latest-100-notes-lambda
+
+# テストリクエスト送信
+curl -XPOST "http://localhost:9002/2015-03-31/functions/function/invocations" \
+  -d '{}'
+```
+
 ## 環境変数
 
 ### 共通環境変数
@@ -124,3 +148,4 @@ curl -XPOST "http://localhost:9001/2015-03-31/functions/function/invocations" \
 # CloudWatch Logsでログを確認
 aws logs describe-log-groups --log-group-name-prefix /aws/lambda_handler/language-detect-lambda
 aws logs describe-log-groups --log-group-name-prefix /aws/lambda_handler/topic-detect-lambda
+aws logs describe-log-groups --log-group-name-prefix /aws/lambda_handler/get-latest-100-notes-lambda

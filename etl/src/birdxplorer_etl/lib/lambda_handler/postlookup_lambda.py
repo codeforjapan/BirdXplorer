@@ -1,12 +1,18 @@
-from datetime import datetime
 import json
-import os
-import requests
-import time
 import logging
+import os
+import time
+from datetime import datetime
 
+import requests
+
+from birdxplorer_common.storage import (
+    RowPostEmbedURLRecord,
+    RowPostMediaRecord,
+    RowPostRecord,
+    RowUserRecord,
+)
 from birdxplorer_etl.lib.sqlite.init import init_postgresql
-from birdxplorer_common.storage import RowUserRecord, RowPostRecord, RowPostMediaRecord, RowPostEmbedURLRecord
 
 # Lambda用のロガー設定
 logger = logging.getLogger()
@@ -14,13 +20,25 @@ logger.setLevel(logging.INFO)
 
 
 def create_url(id):
-    expansions = "expansions=attachments.poll_ids,attachments.media_keys,author_id,edit_history_tweet_ids,entities.mentions.username,geo.place_id,in_reply_to_user_id,referenced_tweets.id,referenced_tweets.id.author_id"
-    tweet_fields = "tweet.fields=attachments,author_id,context_annotations,conversation_id,created_at,edit_controls,entities,geo,id,in_reply_to_user_id,lang,public_metrics,possibly_sensitive,referenced_tweets,reply_settings,source,text,withheld"
+    expansions = (
+        "expansions=attachments.poll_ids,attachments.media_keys,author_id,"
+        "edit_history_tweet_ids,entities.mentions.username,geo.place_id,"
+        "in_reply_to_user_id,referenced_tweets.id,referenced_tweets.id.author_id"
+    )
+    tweet_fields = (
+        "tweet.fields=attachments,author_id,context_annotations,conversation_id,"
+        "created_at,edit_controls,entities,geo,id,in_reply_to_user_id,lang,"
+        "public_metrics,possibly_sensitive,referenced_tweets,reply_settings,source,text,withheld"
+    )
     media_fields = (
         "media.fields=duration_ms,height,media_key,preview_image_url,type,url,width,public_metrics,alt_text,variants"
     )
     place_fields = "place.fields=contained_within,country,country_code,full_name,geo,id,name,place_type"
-    user_fields = "user.fields=created_at,description,entities,id,location,most_recent_tweet_id,name,pinned_tweet_id,profile_image_url,protected,public_metrics,url,username,verified,verified_type,withheld"
+    user_fields = (
+        "user.fields=created_at,description,entities,id,location,most_recent_tweet_id,"
+        "name,pinned_tweet_id,profile_image_url,protected,public_metrics,url,"
+        "username,verified,verified_type,withheld"
+    )
 
     url = "https://api.twitter.com/2/tweets/{}?{}&{}&{}&{}&{}".format(
         id, tweet_fields, expansions, media_fields, place_fields, user_fields
@@ -33,10 +51,10 @@ def bearer_oauth(r):
     Method required by bearer token authentication.
     """
     # Lambda環境変数からトークンを取得
-    bearer_token = os.environ.get('X_BEARER_TOKEN')
+    bearer_token = os.environ.get("X_BEARER_TOKEN")
     if not bearer_token:
         raise ValueError("X_BEARER_TOKEN environment variable is not set")
-    
+
     r.headers["Authorization"] = f"Bearer {bearer_token}"
     r.headers["User-Agent"] = "v2TweetLookupPython"
     return r
@@ -56,9 +74,9 @@ def connect_to_endpoint(url):
 
 
 def check_existence(id):
-    url = "https://publish.twitter.com/oembed?url=https://x.com/CommunityNotes/status/{}&partner=&hide_thread=false".format(
-        id
-    )
+    url = (
+        "https://publish.twitter.com/oembed?url=https://x.com/CommunityNotes/status/{}" "&partner=&hide_thread=false"
+    ).format(id)
     status = requests.get(url).status_code
     return status == 200
 
@@ -75,7 +93,7 @@ def lookup(id):
 def lambda_handler(event, context):
     """
     AWS Lambda用のハンドラー関数
-    
+
     期待されるeventの形式:
     1. 直接呼び出し: {"tweet_id": "1234567890"}
     2. SQS経由: {"Records": [{"body": "{\"tweet_id\": \"1234567890\", \"processing_type\": \"tweet_lookup\"}"}]}
@@ -83,35 +101,33 @@ def lambda_handler(event, context):
     postgresql = init_postgresql()
     try:
         tweet_id = None
-        
+
         # SQSイベントの場合
-        if 'Records' in event:
-            for record in event['Records']:
+        if "Records" in event:
+            for record in event["Records"]:
                 try:
-                    message_body = json.loads(record['body'])
-                    if message_body.get('processing_type') == 'tweet_lookup':
-                        tweet_id = message_body.get('tweet_id')
+                    message_body = json.loads(record["body"])
+                    if message_body.get("processing_type") == "tweet_lookup":
+                        tweet_id = message_body.get("tweet_id")
                         break
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse SQS message body: {e}")
                     continue
-        
+
         # 直接呼び出しの場合
-        elif 'tweet_id' in event:
-            tweet_id = event['tweet_id']
-        
+        elif "tweet_id" in event:
+            tweet_id = event["tweet_id"]
+
         if tweet_id:
             logger.info(f"Looking up tweet: {tweet_id}")
-            
+
             post = lookup(tweet_id)
 
             if post is None or "data" not in post:
                 logger.error(f"Lambda execution error: failed get tweet: {tweet_id}")
                 return {
-                    'statusCode': 500,
-                    'body': json.dumps({
-                        'error': f"Lambda execution error: failed get tweet: {tweet_id}"
-                    })
+                    "statusCode": 500,
+                    "body": json.dumps({"error": f"Lambda execution error: failed get tweet: {tweet_id}"}),
                 }
 
             created_at = datetime.strptime(post["data"]["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ")
@@ -207,30 +223,17 @@ def lambda_handler(event, context):
                 postgresql.rollback()
 
             postgresql.close()
-            return {
-                'statusCode': 200,
-                'body': json.dumps({
-                    'tweet_id': tweet_id,
-                    'data': post
-                })
-            }
+            return {"statusCode": 200, "body": json.dumps({"tweet_id": tweet_id, "data": post})}
         else:
             postgresql.close()
             return {
-                'statusCode': 400,
-                'body': json.dumps({
-                    'error': 'Missing tweet_id in event or no valid tweet_lookup message found'
-                })
+                "statusCode": 400,
+                "body": json.dumps({"error": "Missing tweet_id in event or no valid tweet_lookup message found"}),
             }
-    
+
     except Exception as e:
         logger.error(f"Lambda execution error: {str(e)}")
-        return {
-            'statusCode': 500,
-            'body': json.dumps({
-                'error': str(e)
-            })
-        }
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
 
 
 # ローカルテスト用の関数
@@ -239,13 +242,11 @@ def test_local():
     ローカルでテストする場合の関数
     """
     # テスト用のイベント
-    test_event = {
-        'tweet_id': '1234567890'
-    }
-    
+    test_event = {"tweet_id": "1234567890"}
+
     # テスト用のコンテキスト（空のオブジェクト）
     test_context = {}
-    
+
     result = lambda_handler(test_event, test_context)
     print(json.dumps(result, indent=2))
 

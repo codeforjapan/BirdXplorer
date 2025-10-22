@@ -1,12 +1,13 @@
 import csv
+import logging
 import os
 import random
 import uuid
-import logging
 from pathlib import Path
 from typing import Generator
 
-from sqlalchemy import Integer, Numeric, and_, func, select, or_
+from constants import TARGET_KEYWORDS
+from sqlalchemy import Integer, Numeric, and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from birdxplorer_common.storage import (
@@ -22,7 +23,6 @@ from birdxplorer_etl.settings import (
     TARGET_NOTE_ESTIMATE_TOPIC_END_UNIX_MILLISECOND,
     TARGET_NOTE_ESTIMATE_TOPIC_START_UNIX_MILLISECOND,
 )
-from constants import TARGET_KEYWORDS
 
 
 def transform_data(sqlite: Session, postgresql: Session):
