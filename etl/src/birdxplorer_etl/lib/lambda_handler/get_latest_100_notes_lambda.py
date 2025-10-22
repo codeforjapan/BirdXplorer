@@ -14,12 +14,6 @@ from birdxplorer_etl.lib.x.community_notes_client import get_community_notes_cli
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# X account credentials from environment variables
-X_USERNAME = os.environ.get("X_TEST_USERNAME", "")
-X_PASSWORD = os.environ.get("X_TEST_PASSWORD", "")
-X_EMAIL = os.environ.get("X_TEST_EMAIL", "")
-X_EMAIL_PASSWORD = os.environ.get("X_TEST_EMAIL_PASSWORD", "")
-
 
 async def fetch_community_notes_async(limit: int = 100) -> Dict[str, Any]:
     """
@@ -34,22 +28,28 @@ async def fetch_community_notes_async(limit: int = 100) -> Dict[str, Any]:
     try:
         logger.info(f"Fetching {limit} community notes using X GraphQL API")
 
+        # X account credentials from environment variables
+        x_username = os.environ.get("X_TEST_USERNAME", "")
+        x_password = os.environ.get("X_TEST_PASSWORD", "")
+        x_email = os.environ.get("X_TEST_EMAIL", "")
+        x_email_password = os.environ.get("X_TEST_EMAIL_PASSWORD", "")
+
         # Validate credentials
-        if not all([X_USERNAME, X_PASSWORD, X_EMAIL, X_EMAIL_PASSWORD]):
+        if not all([x_username, x_password, x_email, x_email_password]):
             missing = [
                 name
                 for name, val in [
-                    ("X_TEST_USERNAME", X_USERNAME),
-                    ("X_TEST_PASSWORD", X_PASSWORD),
-                    ("X_TEST_EMAIL", X_EMAIL),
-                    ("X_TEST_EMAIL_PASSWORD", X_EMAIL_PASSWORD),
+                    ("X_TEST_USERNAME", x_username),
+                    ("X_TEST_PASSWORD", x_password),
+                    ("X_TEST_EMAIL", x_email),
+                    ("X_TEST_EMAIL_PASSWORD", x_email_password),
                 ]
                 if not val
             ]
             raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
 
         # Create and authenticate client
-        client = await get_community_notes_client(X_USERNAME, X_PASSWORD, X_EMAIL, X_EMAIL_PASSWORD)
+        client = await get_community_notes_client(x_username, x_password, x_email, x_email_password)
 
         # Fetch community notes
         notes = client.fetch_community_notes(limit=limit)
