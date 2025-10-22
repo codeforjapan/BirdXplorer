@@ -124,7 +124,7 @@ class TestGetLatest100NotesLambda:
     async def test_fetch_community_notes_async_success(self, mock_client: MagicMock):
         """Test successful fetching of community notes"""
         with patch.dict(
-            "os.environ",
+            "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.os.environ",
             {
                 "X_TEST_USERNAME": "test_user",
                 "X_TEST_PASSWORD": "test_pass",
@@ -148,7 +148,7 @@ class TestGetLatest100NotesLambda:
     @pytest.mark.asyncio
     async def test_fetch_community_notes_async_missing_credentials(self):
         """Test fetching with missing credentials"""
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.os.environ", {}, clear=True):
             result = await fetch_community_notes_async(limit=10)
 
             assert result["success"] is False
@@ -162,7 +162,7 @@ class TestGetLatest100NotesLambda:
     async def test_fetch_community_notes_async_authentication_failure(self):
         """Test fetching with authentication failure"""
         with patch.dict(
-            "os.environ",
+            "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.os.environ",
             {
                 "X_TEST_USERNAME": "test_user",
                 "X_TEST_PASSWORD": "test_pass",
@@ -188,7 +188,7 @@ class TestGetLatest100NotesLambda:
         mock_client.fetch_community_notes = MagicMock(return_value=None)
 
         with patch.dict(
-            "os.environ",
+            "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.os.environ",
             {
                 "X_TEST_USERNAME": "test_user",
                 "X_TEST_PASSWORD": "test_pass",
@@ -210,7 +210,7 @@ class TestGetLatest100NotesLambda:
     def test_lambda_handler_success(self, mock_client: MagicMock):
         """Test lambda handler with successful execution"""
         with patch.dict(
-            "os.environ",
+            "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.os.environ",
             {
                 "X_TEST_USERNAME": "test_user",
                 "X_TEST_PASSWORD": "test_pass",
@@ -239,7 +239,7 @@ class TestGetLatest100NotesLambda:
     def test_lambda_handler_default_limit(self, mock_client: MagicMock):
         """Test lambda handler with default limit"""
         with patch.dict(
-            "os.environ",
+            "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.os.environ",
             {
                 "X_TEST_USERNAME": "test_user",
                 "X_TEST_PASSWORD": "test_pass",
@@ -265,7 +265,7 @@ class TestGetLatest100NotesLambda:
     def test_lambda_handler_invalid_limit(self, mock_client: MagicMock):
         """Test lambda handler with invalid limit (should use default)"""
         with patch.dict(
-            "os.environ",
+            "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.os.environ",
             {
                 "X_TEST_USERNAME": "test_user",
                 "X_TEST_PASSWORD": "test_pass",
