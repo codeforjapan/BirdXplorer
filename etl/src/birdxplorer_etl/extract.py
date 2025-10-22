@@ -13,7 +13,6 @@ from lib.x.postlookup import lookup
 from sqlalchemy.orm import Session
 
 from birdxplorer_common.storage import (
-    RowNoteRatingRecord,
     RowNoteRecord,
     RowNoteStatusRecord,
     RowPostEmbedURLRecord,
@@ -101,9 +100,15 @@ def extract_data(sqlite: Session, postgresql: Session):
                     logging.error(f"Error processing note data from {note_url}: {e}")
                     continue
 
-            status_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/noteStatusHistory/noteStatusHistory-00000.zip"
+            status_url = (
+                f"https://ton.twimg.com/birdwatch-public-data/{dateString}/"
+                f"noteStatusHistory/noteStatusHistory-00000.zip"
+            )
             if settings.USE_DUMMY_DATA:
-                status_url = "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/noteStatus_sample.tsv"
+                status_url = (
+                    "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/"
+                    "refs/heads/main/etl/data/noteStatus_sample.tsv"
+                )
 
             logging.info(status_url)
             res = requests.get(status_url)
@@ -188,7 +193,7 @@ def extract_data(sqlite: Session, postgresql: Session):
 
     postExtract_targetNotes = (
         sqlite.query(RowNoteRecord)
-        .filter(RowNoteRecord.tweet_id != None)
+        .filter(RowNoteRecord.tweet_id.is_not(None))
         .filter(RowNoteRecord.created_at_millis >= settings.TARGET_TWITTER_POST_START_UNIX_MILLISECOND)
         .filter(RowNoteRecord.created_at_millis <= settings.TARGET_TWITTER_POST_END_UNIX_MILLISECOND)
         .filter(
@@ -212,7 +217,7 @@ def extract_data(sqlite: Session, postgresql: Session):
         logging.info(tweet_id)
         post = lookup(tweet_id)
 
-        if post == None or "data" not in post:
+        if post is None or "data" not in post:
             continue
 
         created_at = datetime.strptime(post["data"]["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)

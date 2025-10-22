@@ -50,6 +50,7 @@ dev=[
     "flake8",
     "pyproject-flake8",
     "pytest",
+    "pytest-asyncio",
     'prefect',
     "isort",
 ]
@@ -97,6 +98,7 @@ legacy_tox_ini = """
         VIRTUALENV_PIP = 24.0
         DATA_DIR = {env:BX_DATA_DIR}
     deps =
+        -e .
         -e .[dev]
         -e ../common
     commands =

@@ -124,7 +124,7 @@ def lambda_handler(event, context):
         # 全ての処理が完了したらコミット
         try:
             postgresql.commit()
-            logger.info(f"Successfully committed note transformations")
+            logger.info("Successfully committed note transformations")
 
             # 成功したnote_idをtopic-detect-queueに送信
             successful_note_ids = [result["note_id"] for result in results if result["status"] == "success"]

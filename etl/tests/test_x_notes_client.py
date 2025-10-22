@@ -3,11 +3,15 @@ Integration test for X authentication via twscrape with real account
 This test requires real X account credentials to be set in environment variables or .env file
 """
 
-import asyncio
 import os
-import pytest
 from pathlib import Path
-from birdxplorer_etl.lib.x.community_notes_client import XCommunityNotesClient, get_community_notes_client
+
+import pytest
+
+from birdxplorer_etl.lib.x.community_notes_client import (
+    XCommunityNotesClient,
+    get_community_notes_client,
+)
 
 
 def load_env_file():
@@ -54,8 +58,12 @@ class TestXAuthenticationIntegration:
             if not has_full_creds:
                 missing_info.extend(["X_TEST_PASSWORD", "X_TEST_EMAIL", "X_TEST_EMAIL_PASSWORD"])
 
+            missing_vars = ", ".join(set(missing_info))
             pytest.skip(
-                f"Missing required environment variables. Need either (X_TEST_USERNAME + X_TEST_COOKIES) or (X_TEST_USERNAME + X_TEST_PASSWORD + X_TEST_EMAIL + X_TEST_EMAIL_PASSWORD). Missing: {', '.join(set(missing_info))}"
+                f"Missing required environment variables. Need either "
+                f"(X_TEST_USERNAME + X_TEST_COOKIES) or "
+                f"(X_TEST_USERNAME + X_TEST_PASSWORD + X_TEST_EMAIL + X_TEST_EMAIL_PASSWORD). "
+                f"Missing: {missing_vars}"
             )
 
         if has_cookies:
@@ -75,7 +83,10 @@ class TestXAuthenticationIntegration:
 
         if not has_full_creds and not has_cookies:
             pytest.skip(
-                "Real X credentials not available. Set either (X_TEST_USERNAME + X_TEST_COOKIES) or (X_TEST_USERNAME + X_TEST_PASSWORD + X_TEST_EMAIL + X_TEST_EMAIL_PASSWORD) environment variables."
+                "Real X credentials not available. Set either "
+                "(X_TEST_USERNAME + X_TEST_COOKIES) or "
+                "(X_TEST_USERNAME + X_TEST_PASSWORD + X_TEST_EMAIL + X_TEST_EMAIL_PASSWORD) "
+                "environment variables."
             )
 
         if has_cookies:
