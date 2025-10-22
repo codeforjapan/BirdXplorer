@@ -5,7 +5,6 @@ import os
 import zipfile
 from datetime import datetime, timedelta
 from io import BytesIO
-from typing import Dict
 
 import boto3
 import requests
@@ -17,7 +16,6 @@ from birdxplorer_common.storage import (
     RowNoteRecord,
     RowNoteStatusRecord,
     RowPostRecord,
-    RowUserRecord,
 )
 
 
@@ -100,8 +98,10 @@ def extract_data(postgresql: Session):
                             elif value == "" or value is None or value == "empty":
                                 row[field] = "0"
                             elif value not in ["0", "1"]:
+                                note_id = row.get("note_id", "unknown")
                                 logging.warning(
-                                    f"Unexpected value '{value}' for believable field in note {row.get('note_id', 'unknown')}. Setting to '0'."
+                                    f"Unexpected value '{value}' for believable field in note {note_id}. "
+                                    f"Setting to '0'."
                                 )
                                 row[field] = "0"
                         else:
@@ -110,8 +110,10 @@ def extract_data(postgresql: Session):
                                 row[field] = "0"
                             elif value not in ["0", "1"]:
                                 # 予期しない値の場合はログに記録して0に設定
+                                note_id = row.get("note_id", "unknown")
                                 logging.warning(
-                                    f"Unexpected value '{value}' for field '{field}' in note {row.get('note_id', 'unknown')}. Setting to '0'."
+                                    f"Unexpected value '{value}' for field '{field}' in note {note_id}. "
+                                    f"Setting to '0'."
                                 )
                                 row[field] = "0"
 
@@ -121,8 +123,10 @@ def extract_data(postgresql: Session):
                     if value == "" or value is None or value == "empty":
                         row["harmful"] = "LITTLE_HARM"  # デフォルト値
                     elif value not in ["LITTLE_HARM", "CONSIDERABLE_HARM"]:
+                        note_id = row.get("note_id", "unknown")
                         logging.warning(
-                            f"Unexpected value '{value}' for harmful field in note {row.get('note_id', 'unknown')}. Setting to 'LITTLE_HARM'."
+                            f"Unexpected value '{value}' for harmful field in note {note_id}. "
+                            f"Setting to 'LITTLE_HARM'."
                         )
                         row["harmful"] = "LITTLE_HARM"
 
@@ -132,8 +136,10 @@ def extract_data(postgresql: Session):
                     if value == "" or value is None or value == "empty":
                         row["classification"] = "NOT_MISLEADING"  # デフォルト値
                     elif value not in ["NOT_MISLEADING", "MISINFORMED_OR_POTENTIALLY_MISLEADING"]:
+                        note_id = row.get("note_id", "unknown")
                         logging.warning(
-                            f"Unexpected value '{value}' for classification field in note {row.get('note_id', 'unknown')}. Setting to 'NOT_MISLEADING'."
+                            f"Unexpected value '{value}' for classification field in note {note_id}. "
+                            f"Setting to 'NOT_MISLEADING'."
                         )
                         row["classification"] = "NOT_MISLEADING"
 
@@ -173,9 +179,15 @@ def extract_data(postgresql: Session):
                 if note.tweet_id:
                     enqueue_tweets(note.tweet_id)
 
-            status_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/noteStatusHistory/noteStatusHistory-00000.zip"
+            status_url = (
+                f"https://ton.twimg.com/birdwatch-public-data/{dateString}/"
+                f"noteStatusHistory/noteStatusHistory-00000.zip"
+            )
             if settings.USE_DUMMY_DATA:
-                status_url = "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/noteStatus_sample.tsv"
+                status_url = (
+                    "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/"
+                    "refs/heads/main/etl/data/noteStatus_sample.tsv"
+                )
 
             logging.info(status_url)
             res = requests.get(status_url)
@@ -243,7 +255,7 @@ def extract_data(postgresql: Session):
     # Noteに紐づくtweetデータを取得
     postExtract_targetNotes = (
         postgresql.query(RowNoteRecord)
-        .filter(RowNoteRecord.tweet_id != None)
+        .filter(RowNoteRecord.tweet_id.is_not(None))
         .filter(RowNoteRecord.created_at_millis >= settings.TARGET_TWITTER_POST_START_UNIX_MILLISECOND)
         .filter(RowNoteRecord.created_at_millis <= settings.TARGET_TWITTER_POST_END_UNIX_MILLISECOND)
         .all()

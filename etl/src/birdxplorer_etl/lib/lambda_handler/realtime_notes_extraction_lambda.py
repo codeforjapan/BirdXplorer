@@ -77,9 +77,7 @@ async def fetch_and_save_notes_async() -> Dict[str, Any]:
             notes_data = client.fetch_community_notes_by_tweet_id(post_id)
 
             if notes_data:
-                notes = client.extract_required_data_from_notes_response(
-                    notes_data, post_id
-                )
+                notes = client.extract_required_data_from_notes_response(notes_data, post_id)
                 all_notes.extend(notes)
                 logger.info(f"Extracted {len(notes)} notes for post {post_id}")
             else:
@@ -102,14 +100,13 @@ async def fetch_and_save_notes_async() -> Dict[str, Any]:
                 )
                 saved_count += 1
                 logger.info(
-                    f"Saved note {note.note_id} (post_id: {note.post_id}, created_at: {note.created_at}, summary length: {len(note.summary)})"
+                    f"Saved note {note.note_id} (post_id: {note.post_id}, "
+                    f"created_at: {note.created_at}, summary length: {len(note.summary)})"
                 )
             except Exception as e:
                 logger.error(f"Failed to save note {note.note_id}: {str(e)}")
 
-        logger.info(
-            f"Successfully saved {saved_count}/{len(all_notes)} notes to database"
-        )
+        logger.info(f"Successfully saved {saved_count}/{len(all_notes)} notes to database")
 
         return {
             "success": True,
@@ -155,9 +152,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "total_notes": result.get("total_notes", 0),
             }
 
-            logger.info(
-                f"Lambda completed successfully: saved {result['notes_saved']} notes"
-            )
+            logger.info(f"Lambda completed successfully: saved {result['notes_saved']} notes")
 
             return {"statusCode": 200, "body": json.dumps(response_data)}
         else:

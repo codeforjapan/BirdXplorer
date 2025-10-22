@@ -281,7 +281,10 @@ class XAPIConfig:
 
     # Default headers for GraphQL requests
     DEFAULT_HEADERS = {
-        "Authorization": "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA",
+        "Authorization": (
+            "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D"
+            "1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
+        ),
         "x-twitter-active-user": "yes",
         "x-twitter-client-language": "en",
         "Referer": "https://x.com/",
@@ -530,8 +533,11 @@ class XCommunityNotesClient:
                         self.csrf_token = value
 
             if not self.auth_token or not self.csrf_token:
+                auth_found = self.auth_token is not None
+                ct0_found = self.csrf_token is not None
                 logger.error(
-                    f"Failed to extract required tokens from cookie string. Found auth_token: {self.auth_token is not None}, Found ct0: {self.csrf_token is not None}"
+                    f"Failed to extract required tokens from cookie string. "
+                    f"Found auth_token: {auth_found}, Found ct0: {ct0_found}"
                 )
                 return False
 
@@ -593,9 +599,8 @@ class XCommunityNotesClient:
 
                     # If this is not the last attempt, wait and retry
                     if attempt < XAPIConfig.MAX_RETRIES:
-                        logger.info(
-                            f"Retrying in {XAPIConfig.RETRY_DELAY} second(s)... (attempt {attempt + 1}/{XAPIConfig.MAX_RETRIES + 1})"
-                        )
+                        attempt_info = f"{attempt + 1}/{XAPIConfig.MAX_RETRIES + 1}"
+                        logger.info(f"Retrying in {XAPIConfig.RETRY_DELAY} second(s)... (attempt {attempt_info})")
                         time.sleep(XAPIConfig.RETRY_DELAY)
                     else:
                         logger.error(f"All {XAPIConfig.MAX_RETRIES + 1} attempts failed{context_str}. Giving up.")
@@ -606,13 +611,13 @@ class XCommunityNotesClient:
 
                 # If this is not the last attempt, wait and retry
                 if attempt < XAPIConfig.MAX_RETRIES:
-                    logger.info(
-                        f"Retrying in {XAPIConfig.RETRY_DELAY} second(s)... (attempt {attempt + 1}/{XAPIConfig.MAX_RETRIES + 1})"
-                    )
+                    attempt_info = f"{attempt + 1}/{XAPIConfig.MAX_RETRIES + 1}"
+                    logger.info(f"Retrying in {XAPIConfig.RETRY_DELAY} second(s)... (attempt {attempt_info})")
                     time.sleep(XAPIConfig.RETRY_DELAY)
                 else:
+                    total_attempts = XAPIConfig.MAX_RETRIES + 1
                     logger.error(
-                        f"All {XAPIConfig.MAX_RETRIES + 1} attempts failed{context_str} due to request exceptions. Giving up."
+                        f"All {total_attempts} attempts failed{context_str} due to request exceptions. " f"Giving up."
                     )
                     return None
 

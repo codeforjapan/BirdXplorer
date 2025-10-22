@@ -14,12 +14,11 @@ from birdxplorer_etl.lib.x.community_notes_client import get_community_notes_cli
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# X account credentials (hardcoded as requested)
-# TODO: Move these to environment variables for production
-X_USERNAME = "CloudierEddie"
-X_PASSWORD = "mAd7nyGJP2"
-X_EMAIL = "vltqjgbbnp193@hotmail.com"
-X_EMAIL_PASSWORD = "nnwrZercYN"
+# X account credentials from environment variables
+X_USERNAME = os.environ.get("X_TEST_USERNAME", "")
+X_PASSWORD = os.environ.get("X_TEST_PASSWORD", "")
+X_EMAIL = os.environ.get("X_TEST_EMAIL", "")
+X_EMAIL_PASSWORD = os.environ.get("X_TEST_EMAIL_PASSWORD", "")
 
 
 async def fetch_community_notes_async(limit: int = 100) -> Dict[str, Any]:
@@ -34,6 +33,20 @@ async def fetch_community_notes_async(limit: int = 100) -> Dict[str, Any]:
     """
     try:
         logger.info(f"Fetching {limit} community notes using X GraphQL API")
+
+        # Validate credentials
+        if not all([X_USERNAME, X_PASSWORD, X_EMAIL, X_EMAIL_PASSWORD]):
+            missing = [
+                name
+                for name, val in [
+                    ("X_TEST_USERNAME", X_USERNAME),
+                    ("X_TEST_PASSWORD", X_PASSWORD),
+                    ("X_TEST_EMAIL", X_EMAIL),
+                    ("X_TEST_EMAIL_PASSWORD", X_EMAIL_PASSWORD),
+                ]
+                if not val
+            ]
+            raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
 
         # Create and authenticate client
         client = await get_community_notes_client(X_USERNAME, X_PASSWORD, X_EMAIL, X_EMAIL_PASSWORD)
