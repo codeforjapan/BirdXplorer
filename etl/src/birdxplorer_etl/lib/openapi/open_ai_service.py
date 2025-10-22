@@ -1,13 +1,15 @@
-from birdxplorer_etl.settings import OPENAPI_TOKEN, TOPIC_SOURCE
-from birdxplorer_etl.lib.ai_model.ai_model_interface_base import AIModelInterface
-from birdxplorer_common.models import LanguageIdentifier
-from birdxplorer_common.storage import TopicRecord
-from birdxplorer_etl.lib.sqlite.init import init_postgresql
-from openai import OpenAI
-from typing import Dict, List
 import csv
 import json
 import os
+from typing import Dict, List
+
+from openai import OpenAI
+
+from birdxplorer_common.models import LanguageIdentifier
+from birdxplorer_common.storage import TopicRecord
+from birdxplorer_etl.lib.ai_model.ai_model_interface_base import AIModelInterface
+from birdxplorer_etl.lib.sqlite.init import init_postgresql
+from birdxplorer_etl.settings import OPENAPI_TOKEN, TOPIC_SOURCE
 
 
 class OpenAIService(AIModelInterface):
@@ -30,7 +32,7 @@ class OpenAIService(AIModelInterface):
         if not os.path.exists(topic_csv_file_path):
             print(f"Warning: Topic CSV file not found: {topic_csv_file_path}")
             return topics
-            
+
         with open(topic_csv_file_path, newline="", encoding="utf-8") as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
@@ -49,7 +51,7 @@ class OpenAIService(AIModelInterface):
         try:
             session = init_postgresql()
             topic_records = session.query(TopicRecord).all()
-            
+
             for record in topic_records:
                 # labelがJSON形式の場合の処理
                 if isinstance(record.label, str):
@@ -68,16 +70,16 @@ class OpenAIService(AIModelInterface):
                     # labelが辞書型の場合
                     if isinstance(record.label, dict) and "ja" in record.label:
                         topics[record.label["ja"]] = record.topic_id
-                    
+
             session.close()
             print(f"Loaded {len(topics)} topics from database")
-            
+
         except Exception as e:
             print(f"Error loading topics from database: {e}")
             # フォールバックとしてCSVから読み込み
             print("Falling back to CSV loading...")
             topics = self.load_topics_from_csv("./data/transformed/topic.csv")
-            
+
         return topics
 
     def detect_language(self, text: str) -> str:

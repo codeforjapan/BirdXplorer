@@ -1,0 +1,21 @@
+# AWS Lambda Container Image用のDockerfile (Get Latest 100 Notes Lambda)
+FROM public.ecr.aws/lambda/python:3.10
+
+# 作業ディレクトリを設定
+WORKDIR ${LAMBDA_TASK_ROOT}
+
+RUN yum update -y && \
+    yum install -y gcc gcc-c++ git && \
+    yum clean all && \
+    rm -rf /var/cache/yum
+
+COPY etl/. .
+
+RUN python -m pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -e .[prod]
+
+# Lambda関数のコードをコピー
+COPY etl/src/birdxplorer_etl/lib/lambda_handler/get_latest_100_notes_lambda.py ./
+
+# Lambda関数のハンドラーを指定
+CMD ["get_latest_100_notes_lambda.lambda_handler"]
