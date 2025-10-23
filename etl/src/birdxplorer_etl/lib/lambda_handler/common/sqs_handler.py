@@ -1,6 +1,7 @@
 import json
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
+
 import boto3
 from botocore.exceptions import ClientError
 

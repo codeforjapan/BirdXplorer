@@ -1,15 +1,15 @@
 import csv
+import io
 import json
 import logging
 import os
+import zipfile
 from datetime import datetime, timedelta, timezone
 
 import boto3
 import requests
 import settings
 import stringcase
-import zipfile
-import io
 from sqlalchemy.orm import Session
 
 from birdxplorer_common.storage import (
@@ -52,7 +52,7 @@ def extract_data(postgresql: Session):
                 reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
             else:
                 with zipfile.ZipFile(io.BytesIO(res.content)) as zip_file:
-                    tsv_filename = 'notes-00000.tsv'
+                    tsv_filename = "notes-00000.tsv"
                     if tsv_filename not in zip_file.namelist():
                         logging.error(f"TSV file {tsv_filename} not found in the zip file.")
                         break
@@ -197,7 +197,7 @@ def extract_data(postgresql: Session):
                 else:
                     # Handle real data as zip file
                     with zipfile.ZipFile(io.BytesIO(res.content)) as zip_file:
-                        tsv_filename = 'noteStatusHistory-00000.tsv'
+                        tsv_filename = "noteStatusHistory-00000.tsv"
                         if tsv_filename not in zip_file.namelist():
                             logging.error(f"TSV file {tsv_filename} not found in the zip file.")
                             break
