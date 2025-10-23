@@ -1,6 +1,7 @@
-from lib.sqlite.init import init_postgresql
-from extract_ecs import extract_data
 import logging
+
+from extract_ecs import extract_data
+from lib.sqlite.init import init_postgresql
 
 logging.basicConfig(level=logging.INFO)
 

@@ -166,3 +166,6 @@ cython_debug/
 
 # Serena MCP assistant
 .serena
+
+# accounts db for BirdXplorer
+accounts.db
