@@ -3,10 +3,10 @@ import logging
 
 from sqlalchemy import select
 
+from birdxplorer_common.storage import NoteRecord, NoteTopicAssociation, RowNoteRecord
 from birdxplorer_etl.lib.ai_model.ai_model_interface import get_ai_service
-from birdxplorer_etl.lib.sqlite.init import init_postgresql
-from birdxplorer_common.storage import RowNoteRecord, NoteTopicAssociation, NoteRecord
 from birdxplorer_etl.lib.lambda_handler.common.sqs_handler import SQSHandler
+from birdxplorer_etl.lib.sqlite.init import init_postgresql
 from birdxplorer_etl.settings import TWEET_LOOKUP_QUEUE_URL
 
 # Lambda用のロガー設定
@@ -47,15 +47,12 @@ def lambda_handler(event, context):
             logger.info(f"Detecting topics for note: {note_id}")
 
             ai_service = get_ai_service()
-            
+
             # PostgreSQLからノートデータを取得（言語情報も含む）
             note_query = postgresql.execute(
-                select(
-                    RowNoteRecord.note_id,
-                    RowNoteRecord.summary,
-                    RowNoteRecord.language
+                select(RowNoteRecord.note_id, RowNoteRecord.summary, RowNoteRecord.language).filter(
+                    RowNoteRecord.note_id == note_id
                 )
-                .filter(RowNoteRecord.note_id == note_id)
             )
 
             note_row = note_query.first()
@@ -101,10 +98,7 @@ def lambda_handler(event, context):
                 raise
 
             # notesテーブルからtweet_idを取得
-            notes_query = postgresql.execute(
-                select(NoteRecord.post_id)
-                .filter(NoteRecord.note_id == note_id)
-            )
+            notes_query = postgresql.execute(select(NoteRecord.post_id).filter(NoteRecord.note_id == note_id))
             notes_row = notes_query.first()
 
             tweet_id = None
@@ -118,18 +112,15 @@ def lambda_handler(event, context):
             if tweet_id and TWEET_LOOKUP_QUEUE_URL:
                 try:
                     sqs_handler = SQSHandler()
-                    tweet_lookup_message = {
-                        'tweet_id': tweet_id,
-                        'note_id': note_id,
-                        'processing_type': 'tweet_lookup'
-                    }
+                    tweet_lookup_message = {"tweet_id": tweet_id, "note_id": note_id, "processing_type": "tweet_lookup"}
                     message_id = sqs_handler.send_message(
-                        queue_url=TWEET_LOOKUP_QUEUE_URL,
-                        message_body=tweet_lookup_message
+                        queue_url=TWEET_LOOKUP_QUEUE_URL, message_body=tweet_lookup_message
                     )
 
                     if message_id:
-                        logger.info(f"Successfully sent tweet lookup message for tweet {tweet_id} (note {note_id}) to SQS: {message_id}")
+                        logger.info(
+                            f"Successfully sent tweet lookup message for tweet {tweet_id} (note {note_id}) to SQS: {message_id}"
+                        )
                     else:
                         logger.error(f"Failed to send tweet lookup message for tweet {tweet_id} (note {note_id})")
 
@@ -141,16 +132,18 @@ def lambda_handler(event, context):
                 logger.warning(f"TWEET_LOOKUP_QUEUE_URL is not configured, skipping SQS message")
 
             return {
-                'statusCode': 200,
-                'body': json.dumps({
-                    'message': f'Topic detection completed for note: {note_id}',
-                    'note_id': note_id,
-                    'summary': note_row.summary[:100] + '...' if len(note_row.summary) > 100 else note_row.summary,
-                    'detected_topics': topic_ids,
-                    'topics_count': len(topic_ids),
-                    'tweet_lookup_triggered': tweet_id is not None,
-                    'tweet_id': tweet_id
-                })
+                "statusCode": 200,
+                "body": json.dumps(
+                    {
+                        "message": f"Topic detection completed for note: {note_id}",
+                        "note_id": note_id,
+                        "summary": note_row.summary[:100] + "..." if len(note_row.summary) > 100 else note_row.summary,
+                        "detected_topics": topic_ids,
+                        "topics_count": len(topic_ids),
+                        "tweet_lookup_triggered": tweet_id is not None,
+                        "tweet_id": tweet_id,
+                    }
+                ),
             }
 
         else:
