@@ -7,6 +7,7 @@ on:
     paths:
       - 'etl/**'
       - 'common/**'
+      - 'migrate/**'
       - '.github/workflows/deploy-etl-lambda.yml'
   push:
     branches:
@@ -15,6 +16,7 @@ on:
     paths:
       - 'etl/**'
       - 'common/**'
+      - 'migrate/**'
       - '.github/workflows/deploy-etl-lambda.yml'
 
 env:
