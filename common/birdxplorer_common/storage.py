@@ -1,4 +1,4 @@
-from typing import Any, Generator, List, Tuple, Union
+from typing import Any, Generator, List, Optional, Tuple, Union
 
 from psycopg2.extensions import AsIs, register_adapter
 from pydantic import AnyUrl, HttpUrl
@@ -86,13 +86,13 @@ class NoteRecord(Base):
     __tablename__ = "notes"
 
     note_id: Mapped[NoteId] = mapped_column(primary_key=True)
-    note_author_participant_id: Mapped[ParticipantId] = mapped_column(nullable=False)
-    post_id: Mapped[PostId] = mapped_column(nullable=False)
+    note_author_participant_id: Mapped[Optional[ParticipantId]] = mapped_column(nullable=True)
+    post_id: Mapped[Optional[PostId]] = mapped_column(nullable=True)
     topics: Mapped[List[NoteTopicAssociation]] = relationship()
-    language: Mapped[LanguageIdentifier] = mapped_column(nullable=False)
+    language: Mapped[Optional[LanguageIdentifier]] = mapped_column(nullable=True)
     summary: Mapped[SummaryString] = mapped_column(nullable=False)
-    current_status: Mapped[String] = mapped_column(nullable=True)
-    created_at: Mapped[TwitterTimestamp] = mapped_column(nullable=False)
+    current_status: Mapped[Optional[String]] = mapped_column(nullable=True)
+    created_at: Mapped[Optional[TwitterTimestamp]] = mapped_column(nullable=True)
     has_been_helpfuled: Mapped[bool] = mapped_column(nullable=True, default=False)
     rate_count: Mapped[NonNegativeInt] = mapped_column(nullable=True, default=0)
     helpful_count: Mapped[int] = mapped_column(nullable=True, default=0)
@@ -409,7 +409,9 @@ class Storage:
                 .all()
             ):
                 yield TopicModel(
-                    topic_id=topic_record.topic_id, label=topic_record.label, reference_count=reference_count or 0
+                    topic_id=topic_record.topic_id,
+                    label=topic_record.label,
+                    reference_count=reference_count or 0,
                 )
 
     def get_notes(
@@ -471,7 +473,11 @@ class Storage:
                         )
                         for topic in note_record.topics
                     ],
-                    language=LanguageIdentifier.normalize(note_record.language),
+                    language=(
+                        LanguageIdentifier.normalize(note_record.language)
+                        if note_record.language
+                        else LanguageIdentifier.OTHER
+                    ),
                     summary=note_record.summary,
                     current_status=note_record.current_status,
                     created_at=note_record.created_at,
@@ -553,7 +559,10 @@ class Storage:
                 query = query.filter(PostRecord.text.like(f"%{search_text}%"))
             if search_url is not None:
                 query = (
-                    query.join(PostLinkAssociation, PostLinkAssociation.post_id == PostRecord.post_id)
+                    query.join(
+                        PostLinkAssociation,
+                        PostLinkAssociation.post_id == PostRecord.post_id,
+                    )
                     .join(LinkRecord, LinkRecord.link_id == PostLinkAssociation.link_id)
                     .filter(LinkRecord.url == search_url)
                 )
@@ -591,7 +600,10 @@ class Storage:
                 query = query.filter(PostRecord.text.like(f"%{search_text}%"))
             if search_url is not None:
                 query = (
-                    query.join(PostLinkAssociation, PostLinkAssociation.post_id == PostRecord.post_id)
+                    query.join(
+                        PostLinkAssociation,
+                        PostLinkAssociation.post_id == PostRecord.post_id,
+                    )
                     .join(LinkRecord, LinkRecord.link_id == PostLinkAssociation.link_id)
                     .filter(LinkRecord.url == search_url)
                 )
@@ -719,7 +731,11 @@ class Storage:
                     note_author_participant_id=note_record.note_author_participant_id,
                     post_id=note_record.post_id,
                     topics=[
-                        TopicModel(topic_id=topic.topic_id, label=topic.topic.label, reference_count=0)
+                        TopicModel(
+                            topic_id=topic.topic_id,
+                            label=topic.topic.label,
+                            reference_count=0,
+                        )
                         for topic in note_record.topics
                     ],
                     language=note_record.language,
@@ -784,6 +800,57 @@ class Storage:
             )
 
             return query.scalar() or 0
+
+    def upsert_note(
+        self,
+        note_id: NoteId,
+        summary: SummaryString,
+        post_id: Optional[PostId] = None,
+        created_at: Optional[TwitterTimestamp] = None,
+        note_author_participant_id: Optional[ParticipantId] = None,
+        language: Optional[LanguageIdentifier] = None,
+        current_status: Optional[str] = None,
+    ) -> None:
+        """
+        Insert or update a note in the database.
+
+        Args:
+            note_id: Note ID (required)
+            summary: Note summary (required)
+            post_id: Post ID (optional)
+            created_at: Creation timestamp (optional)
+            note_author_participant_id: Note author participant ID (optional)
+            language: Language identifier (optional)
+            current_status: Current status (optional)
+        """
+        from sqlalchemy.dialects.postgresql import insert
+
+        with Session(self.engine) as sess:
+            stmt = insert(NoteRecord).values(
+                note_id=note_id,
+                summary=summary,
+                post_id=post_id,
+                created_at=created_at,
+                note_author_participant_id=note_author_participant_id,
+                language=language,
+                current_status=current_status,
+            )
+
+            # On conflict, update the fields
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["note_id"],
+                set_={
+                    "summary": stmt.excluded.summary,
+                    "post_id": stmt.excluded.post_id,
+                    "created_at": stmt.excluded.created_at,
+                    "note_author_participant_id": stmt.excluded.note_author_participant_id,
+                    "language": stmt.excluded.language,
+                    "current_status": stmt.excluded.current_status,
+                },
+            )
+
+            sess.execute(stmt)
+            sess.commit()
 
 
 def gen_storage(settings: GlobalSettings) -> Storage:
