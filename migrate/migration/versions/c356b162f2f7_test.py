@@ -1,7 +1,7 @@
 """Test
 
 Revision ID: c356b162f2f7
-Revises: 1f33aeb4bebf
+Revises: add_language_to_row_notes
 Create Date: 2025-06-29 09:00:09.771045
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'c356b162f2f7'
-down_revision: Union[str, None] = '1f33aeb4bebf'
+down_revision: Union[str, None] = 'add_language_to_row_notes'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

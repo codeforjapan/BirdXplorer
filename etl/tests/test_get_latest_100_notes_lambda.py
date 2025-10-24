@@ -13,7 +13,10 @@ from birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda import (
     fetch_community_notes_async,
     lambda_handler,
 )
-from birdxplorer_etl.lib.x.community_notes_client import CommunityNote, XCommunityNotesClient
+from birdxplorer_etl.lib.x.community_notes_client import (
+    CommunityNote,
+    XCommunityNotesClient,
+)
 
 
 class TestGetLatest100NotesLambda:
