@@ -10,8 +10,10 @@ import logging
 import os
 from typing import Any, Dict, List
 
-from birdxplorer_common.settings import GlobalSettings
-from birdxplorer_common.storage import gen_storage
+from birdxplorer_common.storage import RowNoteRecord
+from birdxplorer_etl import settings
+from birdxplorer_etl.lib.lambda_handler.common.sqs_handler import SQSHandler
+from birdxplorer_etl.lib.sqlite.init import init_postgresql
 from birdxplorer_etl.lib.x.community_notes_client import (
     CommunityNote,
     get_community_notes_client,
@@ -85,33 +87,76 @@ async def fetch_and_save_notes_async() -> Dict[str, Any]:
 
         logger.info(f"Total notes extracted: {len(all_notes)}")
 
-        # Save notes to database
-        settings = GlobalSettings()
-        storage = gen_storage(settings)
+        # Save notes to RowNotes table
+        postgresql = init_postgresql()
+        sqs_handler = SQSHandler()
 
         saved_count = 0
+        queued_count = 0
+
         for note in all_notes:
             try:
-                storage.upsert_note(
+                existing_note = (
+                    postgresql.query(RowNoteRecord)
+                    .filter(RowNoteRecord.note_id == note.note_id)
+                    .first()
+                )
+
+                if existing_note:
+                    logger.info(f"Note {note.note_id} already exists, skipping")
+                    continue
+
+                row_note = RowNoteRecord(
                     note_id=note.note_id,
                     summary=note.summary,
-                    post_id=note.post_id,
-                    created_at=note.created_at,
+                    tweet_id=note.post_id,
+                    created_at_millis=note.created_at,
                 )
+
+                postgresql.add(row_note)
+                postgresql.commit()
                 saved_count += 1
+
                 logger.info(
-                    f"Saved note {note.note_id} (post_id: {note.post_id}, "
+                    f"Saved note {note.note_id} to RowNotes (post_id: {note.post_id}, "
                     f"created_at: {note.created_at}, summary length: {len(note.summary)})"
                 )
+
+                if settings.LANG_DETECT_QUEUE_URL:
+                    message_body = {
+                        "note_id": note.note_id,
+                        "processing_type": "language_detect"
+                    }
+
+                    message_id = sqs_handler.send_message(
+                        queue_url=settings.LANG_DETECT_QUEUE_URL,
+                        message_body=message_body
+                    )
+
+                    if message_id:
+                        queued_count += 1
+                        logger.info(f"Enqueued note {note.note_id} to language-detect queue, messageId={message_id}")
+                    else:
+                        logger.error(f"Failed to enqueue note {note.note_id} to language-detect queue")
+                else:
+                    logger.warning("LANG_DETECT_QUEUE_URL not configured, skipping SQS enqueue")
+
             except Exception as e:
                 logger.error(f"Failed to save note {note.note_id}: {str(e)}")
+                postgresql.rollback()
 
-        logger.info(f"Successfully saved {saved_count}/{len(all_notes)} notes to database")
+        postgresql.close()
+
+        logger.info(
+            f"Successfully saved {saved_count}/{len(all_notes)} notes to RowNotes table, "
+            f"queued {queued_count} notes to language-detect"
+        )
 
         return {
             "success": True,
             "notes_saved": saved_count,
             "total_notes": len(all_notes),
+            "notes_queued": queued_count,
         }
 
     except Exception as e:
@@ -145,14 +190,18 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         if result["success"]:
             response_data = {
-                "message": "Successfully extracted and saved community notes",
+                "message": "Successfully extracted and saved community notes to RowNotes",
                 "function": "realtime_notes_extraction",
                 "status": "success",
                 "notes_saved": result["notes_saved"],
                 "total_notes": result.get("total_notes", 0),
+                "notes_queued": result.get("notes_queued", 0),
             }
 
-            logger.info(f"Lambda completed successfully: saved {result['notes_saved']} notes")
+            logger.info(
+                f"Lambda completed successfully: saved {result['notes_saved']} notes, "
+                f"queued {result.get('notes_queued', 0)} notes to language-detect"
+            )
 
             return {"statusCode": 200, "body": json.dumps(response_data)}
         else:
