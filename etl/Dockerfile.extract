@@ -1,6 +1,6 @@
 ARG ENVIRONMENT="prod"
 
-FROM python:3.11
+FROM python:3.12
 
 WORKDIR /app
 
@@ -9,14 +9,30 @@ RUN apt-get update \
        gcc \
        libpq-dev \
        libpq5  \
-       postgresql-client-15 \
+       postgresql-client \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-COPY etl/. .
+# Copy README.md (required by common/pyproject.toml)
+COPY README.md /app/README.md
 
+# Copy common package
+COPY common/. /app/common/
+
+# Copy migrate package
+COPY migrate/. /app/migrate/
+
+# Copy etl package
+COPY etl/. /app/etl/
+
+# Install packages
 RUN python -m pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -e .[prod]
+    cd /app/common && pip install --no-cache-dir -e . && \
+    pip install --no-cache-dir alembic && \
+    cd /app/etl && pip install --no-cache-dir -e .[prod]
+
+# Set working directory to etl for running scripts
+WORKDIR /app/etl
 
 # 6. Entrypoint to run extract.py
 ENTRYPOINT ["python", "-u", "src/birdxplorer_etl/run_extract.py"]

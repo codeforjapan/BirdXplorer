@@ -1,10 +1,10 @@
 import csv
+import io
 import json
 import logging
 import os
 import zipfile
-from datetime import datetime, timedelta
-from io import BytesIO
+from datetime import datetime, timedelta, timezone
 
 import boto3
 import requests
@@ -51,7 +51,7 @@ def extract_data(postgresql: Session):
                 reader = csv.DictReader(tsv_data, delimiter="\t")
                 reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
             else:
-                with zipfile.ZipFile(BytesIO(res.content)) as zip_file:
+                with zipfile.ZipFile(io.BytesIO(res.content)) as zip_file:
                     tsv_filename = "notes-00000.tsv"
                     if tsv_filename not in zip_file.namelist():
                         logging.error(f"TSV file {tsv_filename} not found in the zip file.")
@@ -164,8 +164,6 @@ def extract_data(postgresql: Session):
                     # バッチ処理後にSQSキューイング
                     for note in rows_to_add:
                         enqueue_notes(note.note_id)
-                        if note.tweet_id:
-                            enqueue_tweets(note.tweet_id)
 
                     rows_to_add = []
 
@@ -176,8 +174,6 @@ def extract_data(postgresql: Session):
             # 最後のバッチのSQSキューイング
             for note in rows_to_add:
                 enqueue_notes(note.note_id)
-                if note.tweet_id:
-                    enqueue_tweets(note.tweet_id)
 
             status_url = (
                 f"https://ton.twimg.com/birdwatch-public-data/{dateString}/"
@@ -194,13 +190,13 @@ def extract_data(postgresql: Session):
 
             if res.status_code == 200:
                 if settings.USE_DUMMY_DATA:
-                    # ダミーデータの場合はTSVファイルを直接処理
+                    # Handle dummy data as TSV
                     tsv_data = res.content.decode("utf-8").splitlines()
                     reader = csv.DictReader(tsv_data, delimiter="\t")
                     reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
                 else:
-                    # zipファイルを解凍してTSVファイルを取得
-                    with zipfile.ZipFile(BytesIO(res.content)) as zip_file:
+                    # Handle real data as zip file
+                    with zipfile.ZipFile(io.BytesIO(res.content)) as zip_file:
                         tsv_filename = "noteStatusHistory-00000.tsv"
                         if tsv_filename not in zip_file.namelist():
                             logging.error(f"TSV file {tsv_filename} not found in the zip file.")

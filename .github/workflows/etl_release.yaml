@@ -40,17 +40,6 @@ jobs:
         run: |
           echo "deploy-env=${DEPLOY_ENV}" >> $GITHUB_OUTPUT
 
-  build:
-    needs:
-      - create-deploy-env
-    uses: ./.github/workflows/_build.yaml
-    with:
-      image-tags: ${{ github.sha }}
-      deploy-env: ${{ needs.create-deploy-env.outputs.deploy-env }}
-    secrets:
-      aws-ecr-repo-name: ${{ secrets.AWS_ECR_REPO_NAME }}
-      aws-ecr-tweet-repo-name: ${{ secrets.AWS_ECR_TWEET_REPO_NAME }}
-
 #  prod:
 #    if: ${{ needs.release.outputs.created }}
 #    needs:
