@@ -248,26 +248,6 @@ def extract_data(postgresql: Session):
 
     postgresql.commit()
 
-    # Noteに紐づくtweetデータを取得
-    postExtract_targetNotes = (
-        postgresql.query(RowNoteRecord)
-        .filter(RowNoteRecord.tweet_id.is_not(None))
-        .filter(RowNoteRecord.created_at_millis >= settings.TARGET_TWITTER_POST_START_UNIX_MILLISECOND)
-        .filter(RowNoteRecord.created_at_millis <= settings.TARGET_TWITTER_POST_END_UNIX_MILLISECOND)
-        .all()
-    )
-    logging.info(f"Target notes: {len(postExtract_targetNotes)}")
-    for note in postExtract_targetNotes:
-        tweet_id = note.tweet_id
-
-        is_tweetExist = postgresql.query(RowPostRecord).filter(RowPostRecord.post_id == str(tweet_id)).first()
-        if is_tweetExist is not None:
-            logging.info(f"tweet_id {tweet_id} is already exist")
-            note.row_post_id = tweet_id
-            continue
-
-        logging.info(tweet_id)
-
     return
 
 
