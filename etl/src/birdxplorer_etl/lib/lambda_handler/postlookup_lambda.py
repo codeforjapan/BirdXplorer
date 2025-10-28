@@ -2,7 +2,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import requests
 
@@ -130,8 +130,11 @@ def lambda_handler(event, context):
                     "body": json.dumps({"error": f"Lambda execution error: failed get tweet: {tweet_id}"}),
                 }
 
-            created_at = datetime.strptime(post["data"]["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ")
+            created_at = datetime.strptime(post["data"]["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ").replace(
+                tzinfo=timezone.utc
+            )
             created_at_millis = int(created_at.timestamp() * 1000)
+            now_millis = int(datetime.now(timezone.utc).timestamp() * 1000)
 
             is_userExist = (
                 postgresql.query(RowUserRecord).filter(RowUserRecord.user_id == post["data"]["author_id"]).first()
@@ -177,6 +180,7 @@ def lambda_handler(event, context):
                 quote_count=post["data"]["public_metrics"]["quote_count"],
                 reply_count=post["data"]["public_metrics"]["reply_count"],
                 lang=post["data"]["lang"],
+                extracted_at=now_millis,
             )
             postgresql.add(row_post)
 
