@@ -13,6 +13,7 @@ import stringcase
 from sqlalchemy.orm import Session
 
 from birdxplorer_common.storage import (
+    NoteRecord,
     RowNoteRecord,
     RowNoteStatusRecord,
 )
@@ -212,6 +213,7 @@ def extract_data(postgresql: Session):
                             reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
 
                 rows_to_add = []
+                notes_to_update_status = []
                 for index, row in enumerate(reader):
                     for key, value in list(row.items()):
                         if value == "":
@@ -238,12 +240,29 @@ def extract_data(postgresql: Session):
                             RowNoteStatusRecord.note_id == row["note_id"]
                         ).delete()
                         rows_to_add.append(RowNoteStatusRecord(**row))
+
+                        # NoteRecordが既に存在する場合、ステータス更新キューに追加
+                        existing_note_record = (
+                            postgresql.query(NoteRecord).filter(NoteRecord.note_id == row["note_id"]).first()
+                        )
+                        if existing_note_record:
+                            notes_to_update_status.append(row["note_id"])
+
                     if index % 1000 == 0:
                         postgresql.bulk_save_objects(rows_to_add)
-                        rows_to_add = []
                         postgresql.commit()
 
+                        for note_id in notes_to_update_status:
+                            enqueue_note_status_update(note_id)
+
+                        rows_to_add = []
+                        notes_to_update_status = []
+
                 postgresql.bulk_save_objects(rows_to_add)
+                postgresql.commit()
+
+                for note_id in notes_to_update_status:
+                    enqueue_note_status_update(note_id)
 
                 break
 
@@ -273,6 +292,29 @@ def enqueue_notes(note_id: str):
         logging.info(f"Enqueued note {note_id} to lang-detect queue, messageId={response.get('MessageId')}")
     except Exception as e:
         logging.error(f"Failed to enqueue note {note_id} to lang-detect queue: {e}")
+
+
+def enqueue_note_status_update(note_id: str):
+    """
+    ノートステータス更新用のSQSキューにメッセージを送信
+    既存のNoteRecordに対してステータス情報を更新
+    """
+    if not settings.NOTE_STATUS_UPDATE_QUEUE_URL:
+        logging.warning("NOTE_STATUS_UPDATE_QUEUE_URL not configured, skipping status update enqueue")
+        return
+
+    sqs_client = boto3.client("sqs", region_name=os.environ.get("AWS_REGION", "ap-northeast-1"))
+
+    status_update_message = json.dumps({"note_id": note_id, "processing_type": "note_status_update"})
+
+    try:
+        response = sqs_client.send_message(
+            QueueUrl=settings.NOTE_STATUS_UPDATE_QUEUE_URL,
+            MessageBody=status_update_message,
+        )
+        logging.info(f"Enqueued note {note_id} to note-status-update queue, messageId={response.get('MessageId')}")
+    except Exception as e:
+        logging.error(f"Failed to enqueue note {note_id} to note-status-update queue: {e}")
 
 
 def enqueue_tweets(tweet_id: str):
