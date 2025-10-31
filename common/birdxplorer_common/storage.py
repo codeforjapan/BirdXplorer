@@ -92,6 +92,7 @@ class NoteRecord(Base):
     language: Mapped[Optional[LanguageIdentifier]] = mapped_column(nullable=True)
     summary: Mapped[SummaryString] = mapped_column(nullable=False)
     current_status: Mapped[Optional[String]] = mapped_column(nullable=True)
+    locked_status: Mapped[Optional[String]] = mapped_column(nullable=True)
     created_at: Mapped[Optional[TwitterTimestamp]] = mapped_column(nullable=True)
     has_been_helpfuled: Mapped[bool] = mapped_column(nullable=True, default=False)
     rate_count: Mapped[NonNegativeInt] = mapped_column(nullable=True, default=0)
