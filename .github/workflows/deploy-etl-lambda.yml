@@ -49,6 +49,9 @@ jobs:
           - name: postlookup
             dockerfile: Dockerfile.postlookup
             repository: birdxplorer-etl-postlookup
+          - name: db_writer
+            dockerfile: Dockerfile.db_writer
+            repository: birdxplorer-etl-db-writer
     
     steps:
       - name: Checkout code
