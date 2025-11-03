@@ -216,8 +216,10 @@ def lambda_handler(event, context):
                     continue
 
                 # 条件2: キーワードマッチ（キーワードが空の場合は常にTrue）
-                # ノートのsummaryを取得
-                note_query = postgresql.execute(select(RowNoteRecord.summary).filter(RowNoteRecord.note_id == note_id))
+                # ノートのsummaryとpost_idを取得
+                note_query = postgresql.execute(
+                    select(RowNoteRecord.summary, RowNoteRecord.tweet_id).filter(RowNoteRecord.note_id == note_id)
+                )
                 note_row = note_query.first()
 
                 if not note_row:
@@ -228,8 +230,13 @@ def lambda_handler(event, context):
                     logger.info(f"Note {note_id} does not match any keywords, skipping topic detection")
                     continue
 
-                # 条件を満たす場合、topic-detect-queueに送信
-                topic_detect_message = {"note_id": note_id, "processing_type": "topic_detect"}
+                # 条件を満たす場合、topic-detect-queueに送信（summaryとpost_idを含める）
+                topic_detect_message = {
+                    "note_id": note_id,
+                    "summary": note_row.summary,
+                    "post_id": note_row.tweet_id,
+                    "processing_type": "topic_detect"
+                }
 
                 message_id = sqs_handler.send_message(
                     queue_url=settings.TOPIC_DETECT_QUEUE_URL, message_body=topic_detect_message
