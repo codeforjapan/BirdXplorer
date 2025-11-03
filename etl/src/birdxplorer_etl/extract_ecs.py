@@ -163,7 +163,7 @@ def extract_data(postgresql: Session):
 
                     # バッチ処理後にSQSキューイング
                     for note in rows_to_add:
-                        enqueue_notes(note.note_id)
+                        enqueue_notes(note.note_id, note.summary, note.tweet_id)
 
                     rows_to_add = []
 
@@ -173,7 +173,7 @@ def extract_data(postgresql: Session):
 
             # 最後のバッチのSQSキューイング
             for note in rows_to_add:
-                enqueue_notes(note.note_id)
+                enqueue_notes(note.note_id, note.summary, note.tweet_id)
 
             status_url = (
                 f"https://ton.twimg.com/birdwatch-public-data/{dateString}/"
@@ -251,21 +251,26 @@ def extract_data(postgresql: Session):
     return
 
 
-def enqueue_notes(note_id: str):
+def enqueue_notes(note_id: str, summary: str, post_id: str = None):
     """
     ノート処理用のSQSキューにメッセージを送信
-    lang-detect-queueに送信（topic-detectはnote-transform完了後に実行）
+    lang-detect-queueに送信（summaryとpost_idも含める）
     """
     sqs_client = boto3.client("sqs", region_name=os.environ.get("AWS_REGION", "ap-northeast-1"))
 
-    # note-transform-queue用のメッセージ
-    note_transform_message = json.dumps({"note_id": note_id, "processing_type": "note_transform"})
+    # lang-detect-queue用のメッセージ（summaryとpost_idを含める）
+    lang_detect_message = json.dumps({
+        "note_id": note_id,
+        "summary": summary,
+        "post_id": post_id,
+        "processing_type": "language_detect"
+    })
 
-    # lang-detect-queueに送信（高優先度）
+    # lang-detect-queueに送信
     try:
         response = sqs_client.send_message(
-            QueueUrl=settings.LANG_DETECT_QUEUE_URL,  # 既存の環境変数を使用
-            MessageBody=note_transform_message,
+            QueueUrl=settings.LANG_DETECT_QUEUE_URL,
+            MessageBody=lang_detect_message,
         )
         logging.info(f"Enqueued note {note_id} to lang-detect queue, messageId={response.get('MessageId')}")
     except Exception as e:
