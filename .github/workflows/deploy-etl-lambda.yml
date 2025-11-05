@@ -43,6 +43,9 @@ jobs:
           - name: note_transform
             dockerfile: Dockerfile.note_transform
             repository: birdxplorer-etl-note-transform
+          - name: note_status_update
+            dockerfile: Dockerfile.note_status_update
+            repository: birdxplorer-etl-note-status-update
           - name: topic_detect
             dockerfile: Dockerfile.topic_detect
             repository: birdxplorer-etl-topic
