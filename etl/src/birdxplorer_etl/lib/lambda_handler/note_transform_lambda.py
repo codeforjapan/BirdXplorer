@@ -181,6 +181,8 @@ def lambda_handler(event, context):
                         "note_id": note_id,
                         "status": "success",
                         "detected_language": str(detected_language),
+                        "summary": note_row.summary,  # summaryを保存
+                        "post_id": note_row.tweet_id,  # post_idを保存
                         "message": "Note transformed successfully",
                     }
                 )
@@ -207,6 +209,8 @@ def lambda_handler(event, context):
             for result in successful_results:
                 note_id = result["note_id"]
                 detected_language = result.get("detected_language", "")
+                summary = result.get("summary", "")
+                post_id = result.get("post_id")
 
                 # 条件1: 言語がjaまたはen
                 if detected_language not in ["ja", "en"]:
@@ -216,25 +220,15 @@ def lambda_handler(event, context):
                     continue
 
                 # 条件2: キーワードマッチ（キーワードが空の場合は常にTrue）
-                # ノートのsummaryとpost_idを取得
-                note_query = postgresql.execute(
-                    select(RowNoteRecord.summary, RowNoteRecord.tweet_id).filter(RowNoteRecord.note_id == note_id)
-                )
-                note_row = note_query.first()
-
-                if not note_row:
-                    logger.warning(f"Could not retrieve summary for note {note_id}")
-                    continue
-
-                if not check_keyword_match(note_row.summary, keywords):
+                if not check_keyword_match(summary, keywords):
                     logger.info(f"Note {note_id} does not match any keywords, skipping topic detection")
                     continue
 
                 # 条件を満たす場合、topic-detect-queueに送信（summaryとpost_idを含める）
                 topic_detect_message = {
                     "note_id": note_id,
-                    "summary": note_row.summary,
-                    "post_id": note_row.tweet_id,
+                    "summary": summary,
+                    "post_id": post_id,
                     "processing_type": "topic_detect"
                 }
 
