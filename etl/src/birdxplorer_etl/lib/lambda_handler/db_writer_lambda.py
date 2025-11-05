@@ -3,7 +3,14 @@ import logging
 
 from sqlalchemy import update
 
-from birdxplorer_common.storage import NoteTopicAssociation, RowNoteRecord
+from birdxplorer_common.storage import (
+    NoteTopicAssociation,
+    RowNoteRecord,
+    RowPostEmbedURLRecord,
+    RowPostMediaRecord,
+    RowPostRecord,
+    RowUserRecord,
+)
 from birdxplorer_etl.lib.sqlite.init import init_postgresql
 
 # Lambda用のロガー設定
@@ -21,8 +28,8 @@ def lambda_handler(event, context):
     {
         "Records": [{
             "body": "{
-                \"operation\": \"update_language\" | \"update_topics\",
-                \"note_id\": \"xxx\",
+                \"operation\": \"update_language\" | \"update_topics\" | \"save_post_data\",
+                \"note_id\": \"xxx\",  # update_language, update_topicsの場合
                 \"data\": { ... }
             }"
         }]
@@ -105,6 +112,113 @@ def lambda_handler(event, context):
                     
                     postgresql.commit()
                     logger.info(f"[SUCCESS] Topics updated for note {note_id}: {len(topic_ids)} topics")
+                
+                elif operation == "save_post_data":
+                    # Postlookup Lambdaから送信されたポストデータを保存
+                    post_data = data.get("post_data")
+                    if not post_data:
+                        logger.error(f"[ERROR] Missing post_data in data: {data}")
+                        continue
+                    
+                    logger.info(f"[DB_UPDATE] Saving post data for post_id: {post_data.get('post_id')}")
+                    
+                    # ユーザーデータの保存
+                    user_data = post_data.get("user")
+                    if user_data:
+                        is_user_exist = (
+                            postgresql.query(RowUserRecord)
+                            .filter(RowUserRecord.user_id == user_data["user_id"])
+                            .first()
+                        )
+                        
+                        if is_user_exist is None:
+                            row_user = RowUserRecord(
+                                user_id=user_data["user_id"],
+                                name=user_data.get("name"),
+                                user_name=user_data.get("user_name"),
+                                description=user_data.get("description"),
+                                profile_image_url=user_data.get("profile_image_url"),
+                                followers_count=user_data.get("followers_count"),
+                                following_count=user_data.get("following_count"),
+                                tweet_count=user_data.get("tweet_count"),
+                                verified=user_data.get("verified", False),
+                                verified_type=user_data.get("verified_type", ""),
+                                location=user_data.get("location", ""),
+                                url=user_data.get("url", ""),
+                            )
+                            postgresql.add(row_user)
+                            logger.info(f"[DB_INSERT] Added user: {user_data['user_id']}")
+                    
+                    # ポストデータの保存
+                    row_post = RowPostRecord(
+                        post_id=post_data["post_id"],
+                        author_id=post_data["author_id"],
+                        text=post_data["text"],
+                        created_at=post_data["created_at"],
+                        like_count=post_data["like_count"],
+                        repost_count=post_data["repost_count"],
+                        bookmark_count=post_data["bookmark_count"],
+                        impression_count=post_data["impression_count"],
+                        quote_count=post_data["quote_count"],
+                        reply_count=post_data["reply_count"],
+                        lang=post_data["lang"],
+                        extracted_at=post_data["extracted_at"],
+                    )
+                    postgresql.add(row_post)
+                    logger.info(f"[DB_INSERT] Added post: {post_data['post_id']}")
+                    
+                    try:
+                        postgresql.commit()
+                        logger.info(f"[SUCCESS] Post and user data committed")
+                    except Exception as e:
+                        logger.error(f"[ERROR] Failed to commit post/user: {e}")
+                        postgresql.rollback()
+                        raise
+                    
+                    # メディアデータの保存
+                    media_list = post_data.get("media", [])
+                    if media_list:
+                        media_recs = [
+                            RowPostMediaRecord(
+                                media_key=m["media_key"],
+                                type=m["type"],
+                                url=m["url"],
+                                width=m["width"],
+                                height=m["height"],
+                                post_id=post_data["post_id"],
+                            )
+                            for m in media_list
+                        ]
+                        postgresql.add_all(media_recs)
+                        logger.info(f"[DB_INSERT] Added {len(media_recs)} media records")
+                    
+                    # 埋め込みURLデータの保存
+                    embed_urls = post_data.get("embed_urls", [])
+                    if embed_urls:
+                        for url_data in embed_urls:
+                            is_url_exist = (
+                                postgresql.query(RowPostEmbedURLRecord)
+                                .filter(RowPostEmbedURLRecord.post_id == post_data["post_id"])
+                                .filter(RowPostEmbedURLRecord.url == url_data["url"])
+                                .first()
+                            )
+                            if is_url_exist is None:
+                                post_url = RowPostEmbedURLRecord(
+                                    post_id=post_data["post_id"],
+                                    url=url_data.get("url"),
+                                    expanded_url=url_data.get("expanded_url"),
+                                    unwound_url=url_data.get("unwound_url"),
+                                )
+                                postgresql.add(post_url)
+                                logger.info(f"[DB_INSERT] Added embed URL for post {post_data['post_id']}")
+                    
+                    try:
+                        postgresql.commit()
+                        logger.info(f"[SUCCESS] Media and URL data committed for post {post_data['post_id']}")
+                    except Exception as e:
+                        logger.error(f"[ERROR] Failed to commit media/URLs: {e}")
+                        postgresql.rollback()
+                        raise
                 
                 else:
                     logger.error(f"[ERROR] Unknown operation: {operation}")
