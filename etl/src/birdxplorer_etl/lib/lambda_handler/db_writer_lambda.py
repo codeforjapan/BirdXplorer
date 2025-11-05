@@ -61,11 +61,19 @@ def lambda_handler(event, context):
                 note_id = message_body.get("note_id")
                 data = message_body.get("data", {})
                 
-                if not operation or not note_id:
-                    logger.error(f"[ERROR] Missing operation or note_id: {message_body}")
+                if not operation:
+                    logger.error(f"[ERROR] Missing operation: {message_body}")
                     continue
                 
-                logger.info(f"[START] Processing {operation} for note_id: {note_id}")
+                # save_post_data以外はnote_idが必須
+                if operation != "save_post_data" and not note_id:
+                    logger.error(f"[ERROR] Missing note_id for operation {operation}: {message_body}")
+                    continue
+                
+                if note_id:
+                    logger.info(f"[START] Processing {operation} for note_id: {note_id}")
+                else:
+                    logger.info(f"[START] Processing {operation}")
                 
                 # 操作タイプに応じた処理
                 if operation == "update_language":
