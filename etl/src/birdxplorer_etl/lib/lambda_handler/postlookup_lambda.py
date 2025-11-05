@@ -6,13 +6,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from birdxplorer_common.storage import (
-    RowPostEmbedURLRecord,
-    RowPostMediaRecord,
-    RowPostRecord,
-    RowUserRecord,
-)
-from birdxplorer_etl.lib.sqlite.init import init_postgresql
+from birdxplorer_etl.lib.lambda_handler.common.sqs_handler import SQSHandler
 
 # Lambda用のロガー設定
 logger = logging.getLogger()
@@ -92,13 +86,20 @@ def lookup(id):
 
 def lambda_handler(event, context):
     """
-    AWS Lambda用のハンドラー関数
+    AWS Lambda用のハンドラー関数（VPC外で実行、RDSアクセスなし）
 
     期待されるeventの形式:
     1. 直接呼び出し: {"tweet_id": "1234567890"}
     2. SQS経由: {"Records": [{"body": "{\"tweet_id\": \"1234567890\", \"processing_type\": \"tweet_lookup\"}"}]}
     """
-    postgresql = init_postgresql()
+    logger.info("=" * 80)
+    logger.info("Postlookup Lambda started")
+    logger.info(f"Event: {json.dumps(event)}")
+    logger.info("=" * 80)
+    
+    sqs_handler = SQSHandler()
+    db_write_queue_url = os.environ.get("DB_WRITE_QUEUE_URL")
+    
     try:
         tweet_id = None
 
@@ -136,100 +137,114 @@ def lambda_handler(event, context):
             created_at_millis = int(created_at.timestamp() * 1000)
             now_millis = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-            is_userExist = (
-                postgresql.query(RowUserRecord).filter(RowUserRecord.user_id == post["data"]["author_id"]).first()
+            # ユーザーデータの準備
+            user_data = (
+                post["includes"]["users"][0]
+                if "includes" in post and "users" in post["includes"] and len(post["includes"]["users"]) > 0
+                else {}
             )
-            logging.info(is_userExist)
-            if is_userExist is None:
-                user_data = (
-                    post["includes"]["users"][0]
-                    if "includes" in post and "users" in post["includes"] and len(post["includes"]["users"]) > 0
-                    else {}
-                )
-                row_user = RowUserRecord(
-                    user_id=post["data"]["author_id"],
-                    name=user_data.get("name"),
-                    user_name=user_data.get("username"),
-                    description=user_data.get("description"),
-                    profile_image_url=user_data.get("profile_image_url"),
-                    followers_count=user_data.get("public_metrics", {}).get("followers_count"),
-                    following_count=user_data.get("public_metrics", {}).get("following_count"),
-                    tweet_count=user_data.get("public_metrics", {}).get("tweet_count"),
-                    verified=user_data.get("verified", False),
-                    verified_type=user_data.get("verified_type", ""),
-                    location=user_data.get("location", ""),
-                    url=user_data.get("url", ""),
-                )
-                postgresql.add(row_user)
+            
+            user_info = None
+            if user_data:
+                user_info = {
+                    "user_id": post["data"]["author_id"],
+                    "name": user_data.get("name"),
+                    "user_name": user_data.get("username"),
+                    "description": user_data.get("description"),
+                    "profile_image_url": user_data.get("profile_image_url"),
+                    "followers_count": user_data.get("public_metrics", {}).get("followers_count"),
+                    "following_count": user_data.get("public_metrics", {}).get("following_count"),
+                    "tweet_count": user_data.get("public_metrics", {}).get("tweet_count"),
+                    "verified": user_data.get("verified", False),
+                    "verified_type": user_data.get("verified_type", ""),
+                    "location": user_data.get("location", ""),
+                    "url": user_data.get("url", ""),
+                }
 
+            # メディアデータの準備
             media_data = (
                 post["includes"]["media"]
                 if "includes" in post and "media" in post["includes"] and len(post["includes"]["media"]) > 0
                 else []
             )
-
-            row_post = RowPostRecord(
-                post_id=post["data"]["id"],
-                author_id=post["data"]["author_id"],
-                text=post["data"]["text"],
-                created_at=created_at_millis,
-                like_count=post["data"]["public_metrics"]["like_count"],
-                repost_count=post["data"]["public_metrics"]["retweet_count"],
-                bookmark_count=post["data"]["public_metrics"]["bookmark_count"],
-                impression_count=post["data"]["public_metrics"]["impression_count"],
-                quote_count=post["data"]["public_metrics"]["quote_count"],
-                reply_count=post["data"]["public_metrics"]["reply_count"],
-                lang=post["data"]["lang"],
-                extracted_at=now_millis,
-            )
-            postgresql.add(row_post)
-
-            try:
-                postgresql.commit()
-            except Exception as e:
-                logging.error(f"Error: {e}")
-                postgresql.rollback()
-
-            media_recs = [
-                RowPostMediaRecord(
-                    media_key=f"{m['media_key']}-{post['data']['id']}",
-                    type=m["type"],
-                    url=m.get("url") or (m["variants"][0]["url"] if "variants" in m and m["variants"] else ""),
-                    width=m["width"],
-                    height=m["height"],
-                    post_id=post["data"]["id"],
-                )
+            
+            media_list = [
+                {
+                    "media_key": f"{m['media_key']}-{post['data']['id']}",
+                    "type": m["type"],
+                    "url": m.get("url") or (m["variants"][0]["url"] if "variants" in m and m["variants"] else ""),
+                    "width": m["width"],
+                    "height": m["height"],
+                }
                 for m in media_data
             ]
-            postgresql.add_all(media_recs)
 
+            # 埋め込みURLデータの準備
+            embed_urls = []
             if "entities" in post["data"] and "urls" in post["data"]["entities"]:
                 for url in post["data"]["entities"]["urls"]:
                     if "unwound_url" in url:
-                        is_urlExist = (
-                            postgresql.query(RowPostEmbedURLRecord)
-                            .filter(RowPostEmbedURLRecord.post_id == post["data"]["id"])
-                            .filter(RowPostEmbedURLRecord.url == url["url"])
-                            .first()
-                        )
-                        if is_urlExist is None:
-                            post_url = RowPostEmbedURLRecord(
-                                post_id=post["data"]["id"],
-                                url=url["url"] if url["url"] else None,
-                                expanded_url=url["expanded_url"] if url["expanded_url"] else None,
-                                unwound_url=url["unwound_url"] if url["unwound_url"] else None,
-                            )
-                            postgresql.add(post_url)
-            try:
-                postgresql.commit()
-            except Exception as e:
-                logging.error(f"Error: {e}")
-                postgresql.rollback()
+                        embed_urls.append({
+                            "url": url.get("url"),
+                            "expanded_url": url.get("expanded_url"),
+                            "unwound_url": url.get("unwound_url"),
+                        })
 
-            postgresql.close()
+            # DB Writer Lambdaに送信するメッセージを作成
+            post_data = {
+                "post_id": post["data"]["id"],
+                "author_id": post["data"]["author_id"],
+                "text": post["data"]["text"],
+                "created_at": created_at_millis,
+                "like_count": post["data"]["public_metrics"]["like_count"],
+                "repost_count": post["data"]["public_metrics"]["retweet_count"],
+                "bookmark_count": post["data"]["public_metrics"]["bookmark_count"],
+                "impression_count": post["data"]["public_metrics"]["impression_count"],
+                "quote_count": post["data"]["public_metrics"]["quote_count"],
+                "reply_count": post["data"]["public_metrics"]["reply_count"],
+                "lang": post["data"]["lang"],
+                "extracted_at": now_millis,
+                "user": user_info,
+                "media": media_list,
+                "embed_urls": embed_urls,
+            }
+
+            # DB Write Queueにメッセージを送信
+            if db_write_queue_url:
+                db_write_message = {
+                    "operation": "save_post_data",
+                    "data": {
+                        "post_data": post_data
+                    }
+                }
+                
+                logger.info(f"[SQS_SEND] Sending post data to db-write queue...")
+                message_id = sqs_handler.send_message(
+                    queue_url=db_write_queue_url,
+                    message_body=db_write_message
+                )
+                
+                if message_id:
+                    logger.info(f"[SQS_SUCCESS] Sent post data to db-write queue, messageId={message_id}")
+                else:
+                    logger.error(f"[SQS_FAILED] Failed to send post data to db-write queue")
+                    return {
+                        "statusCode": 500,
+                        "body": json.dumps({"error": "Failed to send post data to db-write queue"})
+                    }
+            else:
+                logger.error("[CONFIG_ERROR] DB_WRITE_QUEUE_URL not configured")
+                return {
+                    "statusCode": 500,
+                    "body": json.dumps({"error": "DB_WRITE_QUEUE_URL not configured"})
+                }
+
+            logger.info("=" * 80)
+            logger.info("[COMPLETED] Postlookup Lambda completed successfully")
+            logger.info("=" * 80)
+            
             return {"statusCode": 200, "body": json.dumps({"tweet_id": tweet_id, "data": post})}
         else:
-            postgresql.close()
             return {
                 "statusCode": 400,
                 "body": json.dumps({"error": "Missing tweet_id in event or no valid tweet_lookup message found"}),
