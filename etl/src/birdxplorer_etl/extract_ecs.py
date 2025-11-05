@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import zipfile
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import boto3
 import requests
@@ -13,9 +13,9 @@ import stringcase
 from sqlalchemy.orm import Session
 
 from birdxplorer_common.storage import (
+    NoteRecord,
     RowNoteRecord,
     RowNoteStatusRecord,
-    RowPostRecord,
 )
 
 
@@ -24,14 +24,11 @@ def extract_data(postgresql: Session):
 
     # Noteデータを取得してPostgreSQLに保存
     date = datetime.now()
-    latest_note = postgresql.query(RowNoteRecord).order_by(RowNoteRecord.created_at_millis.desc()).first()
+    two_days_ago = datetime.now() - timedelta(days=2)
+    two_days_ago_timestamp = int(two_days_ago.timestamp())
 
     while True:
-        if (
-            latest_note
-            and int(latest_note.created_at_millis) / 1000
-            > datetime.timestamp(date) - 24 * 60 * 60 * settings.COMMUNITY_NOTE_DAYS_AGO
-        ):
+        if datetime.timestamp(date) < two_days_ago_timestamp:
             break
 
         dateString = date.strftime("%Y/%m/%d")
@@ -63,9 +60,9 @@ def extract_data(postgresql: Session):
                         reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
 
             rows_to_add = []
+            rows_to_update = []
             for index, row in enumerate(reader):
-                if postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id == row["note_id"]).first():
-                    continue
+                existing_note = postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id == row["note_id"]).first()
 
                 # BinaryBoolフィールドの値を正規化
                 binary_bool_fields = [
@@ -154,24 +151,31 @@ def extract_data(postgresql: Session):
                     if value == "" and key not in ["harmful", "validation_difficulty"]:
                         row[key] = None
 
-                note_record = RowNoteRecord(**row)
-                rows_to_add.append(note_record)
+                if existing_note:
+                    for key, value in row.items():
+                        if hasattr(existing_note, key):
+                            setattr(existing_note, key, value)
+                    rows_to_update.append(existing_note)
+                else:
+                    note_record = RowNoteRecord(**row)
+                    rows_to_add.append(note_record)
 
                 if index % 1000 == 0:
                     postgresql.bulk_save_objects(rows_to_add)
                     postgresql.commit()
 
-                    # バッチ処理後にSQSキューイング
+                    # バッチ処理後にSQSキューイング（新規追加のみ）
                     for note in rows_to_add:
                         enqueue_notes(note.note_id, note.summary, note.tweet_id)
 
                     rows_to_add = []
+                    rows_to_update = []
 
             # 最後のバッチを処理
             postgresql.bulk_save_objects(rows_to_add)
             postgresql.commit()
 
-            # 最後のバッチのSQSキューイング
+            # 最後のバッチのSQSキューイング（新規追加のみ）
             for note in rows_to_add:
                 enqueue_notes(note.note_id, note.summary, note.tweet_id)
 
@@ -209,6 +213,7 @@ def extract_data(postgresql: Session):
                             reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
 
                 rows_to_add = []
+                notes_to_update_status = []
                 for index, row in enumerate(reader):
                     for key, value in list(row.items()):
                         if value == "":
@@ -235,12 +240,29 @@ def extract_data(postgresql: Session):
                             RowNoteStatusRecord.note_id == row["note_id"]
                         ).delete()
                         rows_to_add.append(RowNoteStatusRecord(**row))
+
+                        # NoteRecordが既に存在する場合、ステータス更新キューに追加
+                        existing_note_record = (
+                            postgresql.query(NoteRecord).filter(NoteRecord.note_id == row["note_id"]).first()
+                        )
+                        if existing_note_record:
+                            notes_to_update_status.append(row["note_id"])
+
                     if index % 1000 == 0:
                         postgresql.bulk_save_objects(rows_to_add)
-                        rows_to_add = []
                         postgresql.commit()
 
+                        for note_id in notes_to_update_status:
+                            enqueue_note_status_update(note_id)
+
+                        rows_to_add = []
+                        notes_to_update_status = []
+
                 postgresql.bulk_save_objects(rows_to_add)
+                postgresql.commit()
+
+                for note_id in notes_to_update_status:
+                    enqueue_note_status_update(note_id)
 
                 break
 
@@ -275,6 +297,29 @@ def enqueue_notes(note_id: str, summary: str, post_id: str = None):
         logging.info(f"Enqueued note {note_id} to lang-detect queue, messageId={response.get('MessageId')}")
     except Exception as e:
         logging.error(f"Failed to enqueue note {note_id} to lang-detect queue: {e}")
+
+
+def enqueue_note_status_update(note_id: str):
+    """
+    ノートステータス更新用のSQSキューにメッセージを送信
+    既存のNoteRecordに対してステータス情報を更新
+    """
+    if not settings.NOTE_STATUS_UPDATE_QUEUE_URL:
+        logging.warning("NOTE_STATUS_UPDATE_QUEUE_URL not configured, skipping status update enqueue")
+        return
+
+    sqs_client = boto3.client("sqs", region_name=os.environ.get("AWS_REGION", "ap-northeast-1"))
+
+    status_update_message = json.dumps({"note_id": note_id, "processing_type": "note_status_update"})
+
+    try:
+        response = sqs_client.send_message(
+            QueueUrl=settings.NOTE_STATUS_UPDATE_QUEUE_URL,
+            MessageBody=status_update_message,
+        )
+        logging.info(f"Enqueued note {note_id} to note-status-update queue, messageId={response.get('MessageId')}")
+    except Exception as e:
+        logging.error(f"Failed to enqueue note {note_id} to note-status-update queue: {e}")
 
 
 def enqueue_tweets(tweet_id: str):
