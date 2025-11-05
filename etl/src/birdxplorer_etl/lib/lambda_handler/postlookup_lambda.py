@@ -96,10 +96,10 @@ def lambda_handler(event, context):
     logger.info("Postlookup Lambda started")
     logger.info(f"Event: {json.dumps(event)}")
     logger.info("=" * 80)
-    
+
     sqs_handler = SQSHandler()
     db_write_queue_url = os.environ.get("DB_WRITE_QUEUE_URL")
-    
+
     try:
         tweet_id = None
 
@@ -143,7 +143,7 @@ def lambda_handler(event, context):
                 if "includes" in post and "users" in post["includes"] and len(post["includes"]["users"]) > 0
                 else {}
             )
-            
+
             user_info = None
             if user_data:
                 user_info = {
@@ -167,7 +167,7 @@ def lambda_handler(event, context):
                 if "includes" in post and "media" in post["includes"] and len(post["includes"]["media"]) > 0
                 else []
             )
-            
+
             media_list = [
                 {
                     "media_key": f"{m['media_key']}-{post['data']['id']}",
@@ -184,11 +184,13 @@ def lambda_handler(event, context):
             if "entities" in post["data"] and "urls" in post["data"]["entities"]:
                 for url in post["data"]["entities"]["urls"]:
                     if "unwound_url" in url:
-                        embed_urls.append({
-                            "url": url.get("url"),
-                            "expanded_url": url.get("expanded_url"),
-                            "unwound_url": url.get("unwound_url"),
-                        })
+                        embed_urls.append(
+                            {
+                                "url": url.get("url"),
+                                "expanded_url": url.get("expanded_url"),
+                                "unwound_url": url.get("unwound_url"),
+                            }
+                        )
 
             # DB Writer Lambdaに送信するメッセージを作成
             post_data = {
@@ -211,38 +213,27 @@ def lambda_handler(event, context):
 
             # DB Write Queueにメッセージを送信
             if db_write_queue_url:
-                db_write_message = {
-                    "operation": "save_post_data",
-                    "data": {
-                        "post_data": post_data
-                    }
-                }
-                
+                db_write_message = {"operation": "save_post_data", "data": {"post_data": post_data}}
+
                 logger.info(f"[SQS_SEND] Sending post data to db-write queue...")
-                message_id = sqs_handler.send_message(
-                    queue_url=db_write_queue_url,
-                    message_body=db_write_message
-                )
-                
+                message_id = sqs_handler.send_message(queue_url=db_write_queue_url, message_body=db_write_message)
+
                 if message_id:
                     logger.info(f"[SQS_SUCCESS] Sent post data to db-write queue, messageId={message_id}")
                 else:
                     logger.error(f"[SQS_FAILED] Failed to send post data to db-write queue")
                     return {
                         "statusCode": 500,
-                        "body": json.dumps({"error": "Failed to send post data to db-write queue"})
+                        "body": json.dumps({"error": "Failed to send post data to db-write queue"}),
                     }
             else:
                 logger.error("[CONFIG_ERROR] DB_WRITE_QUEUE_URL not configured")
-                return {
-                    "statusCode": 500,
-                    "body": json.dumps({"error": "DB_WRITE_QUEUE_URL not configured"})
-                }
+                return {"statusCode": 500, "body": json.dumps({"error": "DB_WRITE_QUEUE_URL not configured"})}
 
             logger.info("=" * 80)
             logger.info("[COMPLETED] Postlookup Lambda completed successfully")
             logger.info("=" * 80)
-            
+
             return {"statusCode": 200, "body": json.dumps({"tweet_id": tweet_id, "data": post})}
         else:
             return {

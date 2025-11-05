@@ -30,7 +30,7 @@ def lambda_handler(event, context):
     logger.info("Language Detection Lambda started")
     logger.info(f"Event: {json.dumps(event)}")
     logger.info("=" * 80)
-    
+
     sqs_handler = SQSHandler()
 
     try:
@@ -45,10 +45,10 @@ def lambda_handler(event, context):
                     logger.info(f"Record {idx}: {json.dumps(record)}")
                     message_body = json.loads(record["body"])
                     logger.info(f"SQS message body: {message_body}")
-                    
+
                     processing_type = message_body.get("processing_type")
                     logger.info(f"Processing type: {processing_type}")
-                    
+
                     if processing_type == "language_detect":
                         note_id = message_body.get("note_id")
                         summary = message_body.get("summary")
@@ -78,17 +78,12 @@ def lambda_handler(event, context):
                 db_write_message = {
                     "operation": "update_language",
                     "note_id": note_id,
-                    "data": {
-                        "language": detected_language
-                    }
+                    "data": {"language": detected_language},
                 }
-                
+
                 logger.info(f"[SQS_SEND] Sending language update to db-write queue...")
-                message_id = sqs_handler.send_message(
-                    queue_url=db_write_queue_url,
-                    message_body=db_write_message
-                )
-                
+                message_id = sqs_handler.send_message(queue_url=db_write_queue_url, message_body=db_write_message)
+
                 if message_id:
                     logger.info(f"[SQS_SUCCESS] Sent language update to db-write queue, messageId={message_id}")
                 else:
@@ -106,7 +101,9 @@ def lambda_handler(event, context):
                 )
 
                 if message_id:
-                    logger.info(f"[SQS_SUCCESS] Enqueued note {note_id} to note-transform queue, messageId={message_id}")
+                    logger.info(
+                        f"[SQS_SUCCESS] Enqueued note {note_id} to note-transform queue, messageId={message_id}"
+                    )
                 else:
                     logger.error(f"[SQS_FAILED] Failed to enqueue note {note_id} to note-transform queue")
             else:
@@ -143,6 +140,7 @@ def lambda_handler(event, context):
         logger.error(f"[EXCEPTION] Lambda execution error: {str(e)}")
         logger.error("=" * 80)
         import traceback
+
         logger.error(traceback.format_exc())
         return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
 

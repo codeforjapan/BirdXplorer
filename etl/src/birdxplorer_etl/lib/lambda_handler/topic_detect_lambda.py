@@ -47,7 +47,7 @@ def lambda_handler(event, context):
                 try:
                     message_body = json.loads(record["body"])
                     logger.info(f"SQS message body: {message_body}")
-                    
+
                     if message_body.get("processing_type") == "topic_detect":
                         note_id = message_body.get("note_id")
                         summary = message_body.get("summary")
@@ -67,9 +67,9 @@ def lambda_handler(event, context):
             # トピック一覧をAIサービスに渡す
             # topicsがNoneの場合、OpenAIServiceは従来通りload_topics()を呼ぶ
             ai_service = get_ai_service()
-            
+
             # OpenAIServiceの場合、topicsを設定
-            if topics and hasattr(ai_service, 'topics'):
+            if topics and hasattr(ai_service, "topics"):
                 ai_service.topics = topics
                 logger.info(f"[TOPICS] Set {len(topics)} topics to AI service")
 
@@ -85,20 +85,11 @@ def lambda_handler(event, context):
             # DB書き込みをSQSキューに送信
             db_write_queue_url = os.getenv("DB_WRITE_QUEUE_URL")
             if db_write_queue_url:
-                db_write_message = {
-                    "operation": "update_topics",
-                    "note_id": note_id,
-                    "data": {
-                        "topic_ids": topic_ids
-                    }
-                }
-                
+                db_write_message = {"operation": "update_topics", "note_id": note_id, "data": {"topic_ids": topic_ids}}
+
                 logger.info(f"[SQS_SEND] Sending topics update to db-write queue...")
-                message_id = sqs_handler.send_message(
-                    queue_url=db_write_queue_url,
-                    message_body=db_write_message
-                )
-                
+                message_id = sqs_handler.send_message(queue_url=db_write_queue_url, message_body=db_write_message)
+
                 if message_id:
                     logger.info(f"[SQS_SUCCESS] Sent topics update to db-write queue, messageId={message_id}")
                 else:
@@ -116,7 +107,9 @@ def lambda_handler(event, context):
                     )
 
                     if message_id:
-                        logger.info(f"[SQS_SUCCESS] Sent tweet lookup message for tweet {post_id}, messageId={message_id}")
+                        logger.info(
+                            f"[SQS_SUCCESS] Sent tweet lookup message for tweet {post_id}, messageId={message_id}"
+                        )
                     else:
                         logger.error(f"[SQS_FAILED] Failed to send tweet lookup message for tweet {post_id}")
 
@@ -141,7 +134,7 @@ def lambda_handler(event, context):
                     }
                 ),
             }
-            
+
             logger.info("=" * 80)
             logger.info(f"[COMPLETED] Topic detection completed successfully for note: {note_id}")
             logger.info(f"Result: {result}")
@@ -161,6 +154,7 @@ def lambda_handler(event, context):
         logger.error(f"[EXCEPTION] Lambda execution error: {str(e)}")
         logger.error("=" * 80)
         import traceback
+
         logger.error(traceback.format_exc())
         return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
 
