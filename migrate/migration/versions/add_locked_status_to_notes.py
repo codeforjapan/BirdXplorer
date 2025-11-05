@@ -1,7 +1,7 @@
 """add locked_status to notes
 
 Revision ID: a1b2c3d4e5f6
-Revises: add_language_to_row_notes
+Revises: 7e1ce7470664
 Create Date: 2025-11-05 17:11:00.000000
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'a1b2c3d4e5f6'
-down_revision: Union[str, None] = 'add_language_to_row_notes'
+down_revision: Union[str, None] = '7e1ce7470664'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
