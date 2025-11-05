@@ -96,11 +96,7 @@ async def fetch_and_save_notes_async() -> Dict[str, Any]:
 
         for note in all_notes:
             try:
-                existing_note = (
-                    postgresql.query(RowNoteRecord)
-                    .filter(RowNoteRecord.note_id == note.note_id)
-                    .first()
-                )
+                existing_note = postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id == note.note_id).first()
 
                 if existing_note:
                     logger.info(f"Note {note.note_id} already exists, skipping")
@@ -123,14 +119,10 @@ async def fetch_and_save_notes_async() -> Dict[str, Any]:
                 )
 
                 if settings.LANG_DETECT_QUEUE_URL:
-                    message_body = {
-                        "note_id": note.note_id,
-                        "processing_type": "language_detect"
-                    }
+                    message_body = {"note_id": note.note_id, "processing_type": "language_detect"}
 
                     message_id = sqs_handler.send_message(
-                        queue_url=settings.LANG_DETECT_QUEUE_URL,
-                        message_body=message_body
+                        queue_url=settings.LANG_DETECT_QUEUE_URL, message_body=message_body
                     )
 
                     if message_id:

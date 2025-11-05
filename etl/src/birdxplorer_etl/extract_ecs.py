@@ -281,12 +281,9 @@ def enqueue_notes(note_id: str, summary: str, post_id: str = None):
     sqs_client = boto3.client("sqs", region_name=os.environ.get("AWS_REGION", "ap-northeast-1"))
 
     # lang-detect-queue用のメッセージ（summaryとpost_idを含める）
-    lang_detect_message = json.dumps({
-        "note_id": note_id,
-        "summary": summary,
-        "post_id": post_id,
-        "processing_type": "language_detect"
-    })
+    lang_detect_message = json.dumps(
+        {"note_id": note_id, "summary": summary, "post_id": post_id, "processing_type": "language_detect"}
+    )
 
     # lang-detect-queueに送信
     try:
