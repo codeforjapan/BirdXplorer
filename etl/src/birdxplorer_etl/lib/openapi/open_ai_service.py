@@ -13,10 +13,11 @@ from birdxplorer_etl.settings import OPENAPI_TOKEN, TOPIC_SOURCE
 
 
 class OpenAIService(AIModelInterface):
-    def __init__(self):
+    def __init__(self, topics=None):
         self.api_key = OPENAPI_TOKEN
         self.client = OpenAI(api_key=self.api_key)
-        self.topics = self.load_topics()
+        # topicsが外部から渡された場合はそれを使用、なければload_topics()を呼ぶ
+        self.topics = topics if topics is not None else self.load_topics()
 
     def load_topics(self) -> Dict[str, int]:
         """環境変数TOPIC_SOURCEに基づいてCSVまたはDBからトピックを読み込む"""
