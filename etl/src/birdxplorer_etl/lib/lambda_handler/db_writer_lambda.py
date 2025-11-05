@@ -10,6 +10,7 @@ from birdxplorer_common.storage import (
     RowPostMediaRecord,
     RowPostRecord,
     RowUserRecord,
+    TopicRecord,
 )
 from birdxplorer_etl.lib.sqlite.init import init_postgresql
 
@@ -100,18 +101,38 @@ def lambda_handler(event, context):
                     
                     # 新しい関連付けを挿入
                     if topic_ids:
-                        for topic_id in topic_ids:
+                        # 存在するtopic_idのみをフィルタリング
+                        existing_topic_ids = (
+                            postgresql.query(TopicRecord.topic_id)
+                            .filter(TopicRecord.topic_id.in_(topic_ids))
+                            .all()
+                        )
+                        valid_topic_ids = [t.topic_id for t in existing_topic_ids]
+                        
+                        # 存在しないtopic_idを警告
+                        invalid_topic_ids = set(topic_ids) - set(valid_topic_ids)
+                        if invalid_topic_ids:
+                            logger.warning(
+                                f"[WARNING] Skipping non-existent topic IDs for note {note_id}: {list(invalid_topic_ids)}"
+                            )
+                        
+                        # 有効なtopic_idのみ挿入
+                        for topic_id in valid_topic_ids:
                             note_topic_association = NoteTopicAssociation(
                                 note_id=note_id,
                                 topic_id=topic_id
                             )
                             postgresql.add(note_topic_association)
                             logger.info(f"[DB_INSERT] Added topic association: note_id={note_id}, topic_id={topic_id}")
+                        
+                        logger.info(
+                            f"[SUCCESS] Topics updated for note {note_id}: "
+                            f"{len(valid_topic_ids)}/{len(topic_ids)} valid topics inserted"
+                        )
                     else:
                         logger.warning(f"[WARNING] No topics to save for note {note_id}")
                     
                     postgresql.commit()
-                    logger.info(f"[SUCCESS] Topics updated for note {note_id}: {len(topic_ids)} topics")
                 
                 elif operation == "save_post_data":
                     # Postlookup Lambdaから送信されたポストデータを保存

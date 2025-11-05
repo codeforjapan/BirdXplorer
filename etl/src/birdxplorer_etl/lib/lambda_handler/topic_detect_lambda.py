@@ -38,6 +38,7 @@ def lambda_handler(event, context):
         note_id = None
         summary = None
         post_id = None
+        topics = None
 
         # SQSイベントの場合
         if "Records" in event:
@@ -51,7 +52,10 @@ def lambda_handler(event, context):
                         note_id = message_body.get("note_id")
                         summary = message_body.get("summary")
                         post_id = message_body.get("post_id")
+                        topics = message_body.get("topics")  # トピック一覧を取得
                         logger.info(f"Found topic_detect message for note_id: {note_id}")
+                        if topics:
+                            logger.info(f"Received {len(topics)} topics from SQS message")
                         break
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse SQS message body: {e}")
@@ -60,7 +64,14 @@ def lambda_handler(event, context):
         if note_id and summary:
             logger.info(f"[START] Detecting topics for note: {note_id}")
 
+            # トピック一覧をAIサービスに渡す
+            # topicsがNoneの場合、OpenAIServiceは従来通りload_topics()を呼ぶ
             ai_service = get_ai_service()
+            
+            # OpenAIServiceの場合、topicsを設定
+            if topics and hasattr(ai_service, 'topics'):
+                ai_service.topics = topics
+                logger.info(f"[TOPICS] Set {len(topics)} topics to AI service")
 
             # トピック推定を実行
             logger.info(f"[PROCESSING] Calling AI service for topic detection...")
