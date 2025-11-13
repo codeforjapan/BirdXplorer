@@ -49,6 +49,9 @@ jobs:
           - name: postlookup
             dockerfile: Dockerfile.postlookup
             repository: birdxplorer-etl-postlookup
+          - name: db_writer
+            dockerfile: Dockerfile.db_writer
+            repository: birdxplorer-etl-db-writer
     
     steps:
       - name: Checkout code
@@ -97,8 +100,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          provenance: false
 
       - name: Output image details
         run: |
