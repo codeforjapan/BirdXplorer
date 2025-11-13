@@ -1,13 +1,10 @@
 import json
 import logging
+import os
 
-from sqlalchemy import select, update
-
-from birdxplorer_common.storage import RowNoteRecord
 from birdxplorer_etl import settings
 from birdxplorer_etl.lib.ai_model.ai_model_interface import get_ai_service
 from birdxplorer_etl.lib.lambda_handler.common.sqs_handler import SQSHandler
-from birdxplorer_etl.lib.sqlite.init import init_postgresql
 
 # Lambda用のロガー設定
 logger = logging.getLogger()
@@ -16,110 +13,136 @@ logger.setLevel(logging.INFO)
 
 def lambda_handler(event, context):
     """
-    言語判定Lambda関数
+    言語判定Lambda関数（VPC外で実行、RDSアクセスなし）
 
     期待されるeventの形式:
-    1. 直接呼び出し: {"note_id": "1234567890"}
-    2. SQS経由: {"Records": [{"body": "{\"note_id\": \"1234567890\", \"processing_type\": \"language_detect\"}"}]}
+    SQS経由: {
+        "Records": [{
+            "body": "{
+                \"note_id\": \"xxx\",
+                \"summary\": \"note text\",
+                \"processing_type\": \"language_detect\"
+            }"
+        }]
+    }
     """
-    postgresql = init_postgresql()
+    logger.info("=" * 80)
+    logger.info("Language Detection Lambda started")
+    logger.info(f"Event: {json.dumps(event)}")
+    logger.info("=" * 80)
+
     sqs_handler = SQSHandler()
 
     try:
         note_id = None
+        summary = None
 
         # SQSイベントの場合
         if "Records" in event:
-            for record in event["Records"]:
+            logger.info(f"Processing {len(event['Records'])} SQS records")
+            for idx, record in enumerate(event["Records"]):
                 try:
+                    logger.info(f"Record {idx}: {json.dumps(record)}")
                     message_body = json.loads(record["body"])
-                    if message_body.get("processing_type") == "language_detect":
+                    logger.info(f"SQS message body: {message_body}")
+
+                    processing_type = message_body.get("processing_type")
+                    logger.info(f"Processing type: {processing_type}")
+
+                    if processing_type == "language_detect":
                         note_id = message_body.get("note_id")
+                        summary = message_body.get("summary")
+                        logger.info(f"Found language_detect message for note_id: {note_id}")
                         break
+                    else:
+                        logger.warning(f"Unexpected processing_type: {processing_type}")
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse SQS message body: {e}")
+                    logger.error(f"Raw body: {record.get('body', 'N/A')}")
                     continue
 
-        # 直接呼び出しの場合
-        elif "note_id" in event:
-            note_id = event["note_id"]
-
-        if note_id:
-            logger.info(f"Detecting language for note: {note_id}")
+        if note_id and summary:
+            logger.info(f"[START] Detecting language for note: {note_id}")
 
             ai_service = get_ai_service()
 
-            # PostgreSQLからノートデータを取得
-            note_query = postgresql.execute(
-                select(RowNoteRecord.note_id, RowNoteRecord.summary).filter(RowNoteRecord.note_id == note_id)
-            )
-
-            note_row = note_query.first()
-
-            if note_row is None:
-                logger.error(f"Note not found: {note_id}")
-                return {"statusCode": 404, "body": json.dumps({"error": f"Note not found: {note_id}"})}
-
             # 言語判定を実行
-            detected_language = ai_service.detect_language(note_row.summary)
+            logger.info(f"[PROCESSING] Calling AI service for language detection...")
+            detected_language = ai_service.detect_language(summary)
 
-            logger.info(f"Language detected for note {note_id}: {detected_language}")
+            logger.info(f"[SUCCESS] Language detected for note {note_id}: {detected_language}")
 
-            # row_notesテーブルのlanguageカラムを更新
-            postgresql.execute(
-                update(RowNoteRecord).where(RowNoteRecord.note_id == note_id).values(language=detected_language)
-            )
+            # DB書き込みをSQSキューに送信
+            db_write_queue_url = os.getenv("DB_WRITE_QUEUE_URL")
+            if db_write_queue_url:
+                db_write_message = {
+                    "operation": "update_language",
+                    "note_id": note_id,
+                    "data": {"language": detected_language},
+                }
 
-            try:
-                postgresql.commit()
-                logger.info(f"Successfully updated language for note {note_id}")
+                logger.info(f"[SQS_SEND] Sending language update to db-write queue...")
+                message_id = sqs_handler.send_message(queue_url=db_write_queue_url, message_body=db_write_message)
 
-                # 次の処理（note-transform）をSQSキューにトリガー
-                if settings.NOTE_TRANSFORM_QUEUE_URL:
-                    note_transform_message = {"note_id": note_id, "processing_type": "note_transform"}
-
-                    message_id = sqs_handler.send_message(
-                        queue_url=settings.NOTE_TRANSFORM_QUEUE_URL, message_body=note_transform_message
-                    )
-
-                    if message_id:
-                        logger.info(f"Enqueued note {note_id} to note-transform queue, messageId={message_id}")
-                    else:
-                        logger.error(f"Failed to enqueue note {note_id} to note-transform queue")
+                if message_id:
+                    logger.info(f"[SQS_SUCCESS] Sent language update to db-write queue, messageId={message_id}")
                 else:
-                    logger.warning("NOTE_TRANSFORM_QUEUE_URL not configured, skipping SQS enqueue")
+                    logger.error(f"[SQS_FAILED] Failed to send language update to db-write queue")
+            else:
+                logger.error("[CONFIG_ERROR] DB_WRITE_QUEUE_URL not configured")
 
-            except Exception as e:
-                logger.error(f"Commit error: {e}")
-                postgresql.rollback()
-                raise
+            # 次の処理（note-transform）をSQSキューにトリガー
+            if settings.NOTE_TRANSFORM_QUEUE_URL:
+                note_transform_message = {"note_id": note_id, "processing_type": "note_transform"}
 
-            return {
+                logger.info(f"[SQS_SEND] Sending message to note-transform queue...")
+                message_id = sqs_handler.send_message(
+                    queue_url=settings.NOTE_TRANSFORM_QUEUE_URL, message_body=note_transform_message
+                )
+
+                if message_id:
+                    logger.info(
+                        f"[SQS_SUCCESS] Enqueued note {note_id} to note-transform queue, messageId={message_id}"
+                    )
+                else:
+                    logger.error(f"[SQS_FAILED] Failed to enqueue note {note_id} to note-transform queue")
+            else:
+                logger.warning("[CONFIG_WARNING] NOTE_TRANSFORM_QUEUE_URL not configured, skipping SQS enqueue")
+
+            result = {
                 "statusCode": 200,
                 "body": json.dumps(
                     {
                         "message": f"Language detection completed for note: {note_id}",
                         "note_id": note_id,
                         "detected_language": detected_language,
-                        "summary_preview": (
-                            note_row.summary[:100] + "..." if len(note_row.summary) > 100 else note_row.summary
-                        ),
+                        "summary_preview": summary[:100] + "..." if len(summary) > 100 else summary,
                         "next_queue": "note-transform" if settings.NOTE_TRANSFORM_QUEUE_URL else "none",
                     }
                 ),
             }
+            logger.info("=" * 80)
+            logger.info(f"[COMPLETED] Language detection completed successfully for note: {note_id}")
+            logger.info(f"Result: {result}")
+            logger.info("=" * 80)
+            return result
 
         else:
+            logger.error("[ERROR] Missing note_id or summary in event")
+            logger.error(f"Event was: {json.dumps(event)}")
             return {
                 "statusCode": 400,
-                "body": json.dumps({"error": "Missing note_id in event or no valid language_detect message found"}),
+                "body": json.dumps({"error": "Missing note_id or summary in event"}),
             }
 
     except Exception as e:
-        logger.error(f"Lambda execution error: {str(e)}")
+        logger.error("=" * 80)
+        logger.error(f"[EXCEPTION] Lambda execution error: {str(e)}")
+        logger.error("=" * 80)
+        import traceback
+
+        logger.error(traceback.format_exc())
         return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
-    finally:
-        postgresql.close()
 
 
 # ローカルテスト用の関数

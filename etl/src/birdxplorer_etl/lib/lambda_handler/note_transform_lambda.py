@@ -5,7 +5,12 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from birdxplorer_common.storage import NoteRecord, RowNoteRecord, RowNoteStatusRecord
+from birdxplorer_common.storage import (
+    NoteRecord,
+    RowNoteRecord,
+    RowNoteStatusRecord,
+    TopicRecord,
+)
 from birdxplorer_etl import settings
 from birdxplorer_etl.lib.ai_model.ai_model_interface import get_ai_service
 from birdxplorer_etl.lib.lambda_handler.common.sqs_handler import SQSHandler
@@ -75,6 +80,45 @@ def check_keyword_match(text, keywords):
     return False
 
 
+def load_topics_from_db(postgresql):
+    """
+    PostgreSQLデータベースからトピック一覧を読み込む
+
+    Returns:
+        dict: {topic_label: topic_id} の辞書
+    """
+    topics = {}
+    try:
+        topic_records = postgresql.query(TopicRecord).all()
+
+        for record in topic_records:
+            # labelがJSON形式の場合の処理
+            if isinstance(record.label, str):
+                try:
+                    labels = json.loads(record.label.replace("'", '"'))
+                    # 日本語のラベルのみを使用
+                    if isinstance(labels, dict) and "ja" in labels:
+                        topics[labels["ja"]] = record.topic_id
+                    elif isinstance(labels, str):
+                        # 単純な文字列の場合
+                        topics[labels] = record.topic_id
+                except json.JSONDecodeError:
+                    # JSON形式でない場合は直接使用
+                    topics[record.label] = record.topic_id
+            else:
+                # labelが辞書型の場合
+                if isinstance(record.label, dict) and "ja" in record.label:
+                    topics[record.label["ja"]] = record.topic_id
+
+        logger.info(f"Loaded {len(topics)} topics from database")
+
+    except Exception as e:
+        logger.error(f"Error loading topics from database: {e}")
+        topics = {}
+
+    return topics
+
+
 def lambda_handler(event, context):
     """
     ノート変換Lambda関数
@@ -92,6 +136,12 @@ def lambda_handler(event, context):
     """
     postgresql = init_postgresql()
     sqs_handler = SQSHandler()
+
+    # トピック一覧をDBから取得（Lambda起動時に一度だけ実行）
+    # Lambda関数がウォーム状態の間はキャッシュされる
+    if not hasattr(lambda_handler, "_topics_cache"):
+        lambda_handler._topics_cache = load_topics_from_db(postgresql)
+        logger.info(f"Initialized topics cache: {len(lambda_handler._topics_cache)} topics")
 
     try:
         # SQSイベントからメッセージを解析
@@ -181,6 +231,8 @@ def lambda_handler(event, context):
                         "note_id": note_id,
                         "status": "success",
                         "detected_language": str(detected_language),
+                        "summary": note_row.summary,  # summaryを保存
+                        "post_id": note_row.tweet_id,  # post_idを保存
                         "message": "Note transformed successfully",
                     }
                 )
@@ -207,6 +259,8 @@ def lambda_handler(event, context):
             for result in successful_results:
                 note_id = result["note_id"]
                 detected_language = result.get("detected_language", "")
+                summary = result.get("summary", "")
+                post_id = result.get("post_id")
 
                 # 条件1: 言語がjaまたはen
                 if detected_language not in ["ja", "en"]:
@@ -216,20 +270,18 @@ def lambda_handler(event, context):
                     continue
 
                 # 条件2: キーワードマッチ（キーワードが空の場合は常にTrue）
-                # ノートのsummaryを取得
-                note_query = postgresql.execute(select(RowNoteRecord.summary).filter(RowNoteRecord.note_id == note_id))
-                note_row = note_query.first()
-
-                if not note_row:
-                    logger.warning(f"Could not retrieve summary for note {note_id}")
-                    continue
-
-                if not check_keyword_match(note_row.summary, keywords):
+                if not check_keyword_match(summary, keywords):
                     logger.info(f"Note {note_id} does not match any keywords, skipping topic detection")
                     continue
 
-                # 条件を満たす場合、topic-detect-queueに送信
-                topic_detect_message = {"note_id": note_id, "processing_type": "topic_detect"}
+                # 条件を満たす場合、topic-detect-queueに送信（summary、post_id、topicsを含める）
+                topic_detect_message = {
+                    "note_id": note_id,
+                    "summary": summary,
+                    "post_id": post_id,
+                    "topics": lambda_handler._topics_cache,  # トピック一覧を含める
+                    "processing_type": "topic_detect",
+                }
 
                 message_id = sqs_handler.send_message(
                     queue_url=settings.TOPIC_DETECT_QUEUE_URL, message_body=topic_detect_message
