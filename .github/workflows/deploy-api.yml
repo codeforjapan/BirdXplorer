@@ -1,60 +1,32 @@
-name: Deploy ETL Lambda Functions to ECR
+name: Deploy API to ECR
 
 on:
   pull_request:
     branches:
       - main
     paths:
-      - 'etl/**'
+      - 'api/**'
       - 'common/**'
-      - 'migrate/**'
-      - '.github/workflows/deploy-etl-lambda.yml'
+      - '.github/workflows/deploy-api.yml'
   push:
     branches:
       - main
-      - refactro/fix-#175
     paths:
-      - 'etl/**'
+      - 'api/**'
       - 'common/**'
-      - 'migrate/**'
-      - '.github/workflows/deploy-etl-lambda.yml'
+      - '.github/workflows/deploy-api.yml'
 
 env:
   AWS_REGION: ap-northeast-1
 
 jobs:
   deploy:
-    name: Build and Push Lambda Images to ECR
+    name: Build and Push API Image to ECR
     runs-on: ubuntu-latest
     
     permissions:
       id-token: write
       contents: read
-    
-    strategy:
-      matrix:
-        lambda:
-          - name: etl_extract
-            dockerfile: Dockerfile.extract
-            repository: birdxplorer-etl
-          - name: language_detect
-            dockerfile: Dockerfile.language_detect
-            repository: birdxplorer-etl-lang
-          - name: note_transform
-            dockerfile: Dockerfile.note_transform
-            repository: birdxplorer-etl-note-transform
-          - name: topic_detect
-            dockerfile: Dockerfile.topic_detect
-            repository: birdxplorer-etl-topic
-          - name: postlookup
-            dockerfile: Dockerfile.postlookup
-            repository: birdxplorer-etl-postlookup
-          - name: db_writer
-            dockerfile: Dockerfile.db_writer
-            repository: birdxplorer-etl-db-writer
-          - name: note_status_update
-            dockerfile: Dockerfile.note_status_update
-            repository: birdxplorer-etl-note-status-update
     
     steps:
       - name: Checkout code
@@ -89,7 +61,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ steps.login-ecr.outputs.registry }}/${{ matrix.lambda.repository }}
+          images: ${{ steps.login-ecr.outputs.registry }}/birdxplorer-api
           tags: |
             type=raw,value=${{ steps.env-tag.outputs.tag }}
             type=sha,prefix=sha-,format=short
@@ -98,8 +70,8 @@ jobs:
         id: build
         uses: docker/build-push-action@v5
         with:
-          context: ./
-          file: ./etl/${{ matrix.lambda.dockerfile }}
+          context: ./api
+          file: ./api/Dockerfile.prd
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -110,8 +82,8 @@ jobs:
 
       - name: Output image details
         run: |
-          echo "Lambda Function: ${{ matrix.lambda.name }}"
-          echo "Repository: ${{ matrix.lambda.repository }}"
+          echo "Service: API"
+          echo "Repository: birdxplorer-api"
           echo "Environment: ${{ steps.env-tag.outputs.tag }}"
           echo "Tags: ${{ steps.meta.outputs.tags }}"
           echo "Image Digest: ${{ steps.build.outputs.digest }}"
