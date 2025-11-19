@@ -52,6 +52,9 @@ jobs:
           - name: db_writer
             dockerfile: Dockerfile.db_writer
             repository: birdxplorer-etl-db-writer
+          - name: note_status_update
+            dockerfile: Dockerfile.note_status_update
+            repository: birdxplorer-etl-note-status-update
     
     steps:
       - name: Checkout code
