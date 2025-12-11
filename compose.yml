@@ -29,11 +29,9 @@ services:
       - .env
     ports:
       - "8000:8000"
-    develop:
-      watch:
-        - action: rebuild
-          path: ./
-          target: /app
+    volumes:
+      - ./api/birdxplorer_api:/app/birdxplorer_api
+      - ./common/birdxplorer_common:/app/common/birdxplorer_common
 
 volumes:
   postgres_data:
