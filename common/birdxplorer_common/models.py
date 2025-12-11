@@ -705,7 +705,7 @@ class NoteStatusHistory(BaseModel):
 class Note(BaseModel):
     note_id: Annotated[NoteId, PydanticField(description="コミュニティノートの ID")]
     note_author_participant_id: Annotated[
-        ParticipantId, PydanticField(description="コミュニティノートの作成者の Participant ID")
+        Optional[ParticipantId], PydanticField(description="コミュニティノートの作成者の Participant ID")
     ]
     post_id: Annotated[PostId, PydanticField(description="コミュニティノートに対応する X の Post の ID")]
     language: Annotated[LanguageIdentifier, PydanticField(description="コミュニティノートの言語")]

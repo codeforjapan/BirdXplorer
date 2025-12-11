@@ -482,11 +482,11 @@ class Storage:
                     summary=note_record.summary,
                     current_status=note_record.current_status,
                     created_at=note_record.created_at,
-                    has_been_helpfuled=note_record.has_been_helpfuled,
-                    rate_count=note_record.rate_count,
-                    helpful_count=note_record.helpful_count,
-                    not_helpful_count=note_record.not_helpful_count,
-                    somewhat_helpful_count=note_record.somewhat_helpful_count,
+                    has_been_helpfuled=note_record.has_been_helpfuled if note_record.has_been_helpfuled is not None else False,
+                    rate_count=note_record.rate_count if note_record.rate_count is not None else 0,
+                    helpful_count=note_record.helpful_count if note_record.helpful_count is not None else 0,
+                    not_helpful_count=note_record.not_helpful_count if note_record.not_helpful_count is not None else 0,
+                    somewhat_helpful_count=note_record.somewhat_helpful_count if note_record.somewhat_helpful_count is not None else 0,
                     current_status_history=self._parse_status_history(note_record.current_status_history),
                 )
 
@@ -743,11 +743,11 @@ class Storage:
                     summary=note_record.summary,
                     current_status=note_record.current_status,
                     created_at=note_record.created_at,
-                    has_been_helpfuled=note_record.has_been_helpfuled,
-                    rate_count=note_record.rate_count,
-                    helpful_count=note_record.helpful_count,
-                    not_helpful_count=note_record.not_helpful_count,
-                    somewhat_helpful_count=note_record.somewhat_helpful_count,
+                    has_been_helpfuled=note_record.has_been_helpfuled if note_record.has_been_helpfuled is not None else False,
+                    rate_count=note_record.rate_count if note_record.rate_count is not None else 0,
+                    helpful_count=note_record.helpful_count if note_record.helpful_count is not None else 0,
+                    not_helpful_count=note_record.not_helpful_count if note_record.not_helpful_count is not None else 0,
+                    somewhat_helpful_count=note_record.somewhat_helpful_count if note_record.somewhat_helpful_count is not None else 0,
                     current_status_history=self._parse_status_history(note_record.current_status_history),
                 )
 
