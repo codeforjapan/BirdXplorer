@@ -484,7 +484,7 @@ def gen_router(storage: Storage) -> APIRouter:
         post_impression_count_from: Union[None, int] = Query(
             default=None, **V1DataSearchDocs.params["post_impression_count_from"]
         ),
-        post_includes_media: bool = Query(default=True, **V1DataSearchDocs.params["post_includes_media"]),
+        post_includes_media: Union[bool, None] = Query(default=None, **V1DataSearchDocs.params["post_includes_media"]),
         offset: int = Query(default=0, ge=0, **V1DataSearchDocs.params["offset"]),
         limit: int = Query(default=100, gt=0, le=1000, **V1DataSearchDocs.params["limit"]),
     ) -> SearchResponse:

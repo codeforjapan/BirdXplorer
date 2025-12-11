@@ -49,4 +49,4 @@ COPY --from=builder /usr/local/lib/python${PYTHON_VERSION_CODE}/site-packages /u
 COPY --chown=app:app api ./
 COPY ../common ./common
 
-ENTRYPOINT ["python", "-m", "uvicorn", "birdxplorer_api.main:app", "--host", "0.0.0.0"]
+ENTRYPOINT ["python", "-m", "uvicorn", "birdxplorer_api.main:app", "--host", "0.0.0.0", "--reload", "--reload-dir", "/app/birdxplorer_api", "--reload-dir", "/app/common/birdxplorer_common"]
