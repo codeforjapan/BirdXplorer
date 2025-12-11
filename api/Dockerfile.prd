@@ -2,7 +2,7 @@ ARG PYTHON_VERSION_CODE=3.10
 ARG ENVIRONMENT="prod"
 # ENVIRONMENT: dev or prod, refer to project.optional-dependencies in pyproject.toml
 
-FROM python:${PYTHON_VERSION_CODE}-bookworm as builder
+FROM python:${PYTHON_VERSION_CODE}-bookworm AS builder
 ARG PYTHON_VERSION_CODE
 ARG ENVIRONMENT
 
@@ -23,7 +23,7 @@ RUN if [ "${ENVIRONMENT}" = "prod" ]; then \
 RUN python -m pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -e ".[${ENVIRONMENT}]"
 
-FROM python:${PYTHON_VERSION_CODE}-slim-bookworm as runner
+FROM python:${PYTHON_VERSION_CODE}-slim-bookworm AS runner
 ARG PYTHON_VERSION_CODE
 ARG ENVIRONMENT
 
