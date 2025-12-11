@@ -8,6 +8,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, rela
 from sqlalchemy.orm.query import RowReturningQuery
 from sqlalchemy.types import CHAR, DECIMAL, JSON, Integer, String, Text, Uuid
 
+from .logger import get_logger
 from .models import (
     BinaryBool,
     LanguageIdentifier,
@@ -387,7 +388,9 @@ class Storage:
             text=post_record.text,
             media_details=media_details,
             created_at=post_record.created_at,
-            aggregated_at=post_record.aggregated_at,
+            aggregated_at=(
+                post_record.aggregated_at if post_record.aggregated_at is not None else post_record.created_at
+            ),
             like_count=post_record.like_count,
             repost_count=post_record.repost_count,
             impression_count=post_record.impression_count,
@@ -458,37 +461,49 @@ class Storage:
                 query = query.offset(offset)
             query = query.limit(limit)
             for note_record in query.all():
-                yield NoteModel(
-                    note_id=note_record.note_id,
-                    note_author_participant_id=note_record.note_author_participant_id,
-                    post_id=note_record.post_id,
-                    topics=[
-                        TopicModel(
-                            topic_id=topic.topic_id,
-                            label=topic.topic.label,
-                            reference_count=0,
-                            # reference_count=sess.query(func.count(NoteTopicAssociation.note_id))
-                            # .filter(NoteTopicAssociation.topic_id == topic.topic_id)
-                            # .scalar()
-                            # or 0,
-                        )
-                        for topic in note_record.topics
-                    ],
-                    language=(
-                        LanguageIdentifier.normalize(note_record.language)
-                        if note_record.language
-                        else LanguageIdentifier.OTHER
-                    ),
-                    summary=note_record.summary,
-                    current_status=note_record.current_status,
-                    created_at=note_record.created_at,
-                    has_been_helpfuled=note_record.has_been_helpfuled if note_record.has_been_helpfuled is not None else False,
-                    rate_count=note_record.rate_count if note_record.rate_count is not None else 0,
-                    helpful_count=note_record.helpful_count if note_record.helpful_count is not None else 0,
-                    not_helpful_count=note_record.not_helpful_count if note_record.not_helpful_count is not None else 0,
-                    somewhat_helpful_count=note_record.somewhat_helpful_count if note_record.somewhat_helpful_count is not None else 0,
-                    current_status_history=self._parse_status_history(note_record.current_status_history),
-                )
+                try:
+                    yield NoteModel(
+                        note_id=note_record.note_id,
+                        note_author_participant_id=note_record.note_author_participant_id,
+                        post_id=note_record.post_id,
+                        topics=[
+                            TopicModel(
+                                topic_id=topic.topic_id,
+                                label=topic.topic.label,
+                                reference_count=0,
+                                # reference_count=sess.query(func.count(NoteTopicAssociation.note_id))
+                                # .filter(NoteTopicAssociation.topic_id == topic.topic_id)
+                                # .scalar()
+                                # or 0,
+                            )
+                            for topic in note_record.topics
+                        ],
+                        language=(
+                            LanguageIdentifier.normalize(note_record.language)
+                            if note_record.language
+                            else LanguageIdentifier.OTHER
+                        ),
+                        summary=note_record.summary,
+                        current_status=note_record.current_status,
+                        created_at=note_record.created_at,
+                        has_been_helpfuled=(
+                            note_record.has_been_helpfuled if note_record.has_been_helpfuled is not None else False
+                        ),
+                        rate_count=note_record.rate_count if note_record.rate_count is not None else 0,
+                        helpful_count=note_record.helpful_count if note_record.helpful_count is not None else 0,
+                        not_helpful_count=(
+                            note_record.not_helpful_count if note_record.not_helpful_count is not None else 0
+                        ),
+                        somewhat_helpful_count=(
+                            note_record.somewhat_helpful_count if note_record.somewhat_helpful_count is not None else 0
+                        ),
+                        current_status_history=self._parse_status_history(note_record.current_status_history),
+                    )
+                except Exception as e:
+                    # Skip invalid records and log warning
+                    logger = get_logger()
+                    logger.warning(f"Skipping invalid note record (note_id={note_record.note_id}): {str(e)}")
+                    continue
 
     def get_number_of_notes(
         self,
@@ -726,33 +741,49 @@ class Storage:
 
             query = query.offset(offset).limit(limit)
 
-            for note_record, post_record in query.all():
-                note = NoteModel(
-                    note_id=note_record.note_id,
-                    note_author_participant_id=note_record.note_author_participant_id,
-                    post_id=note_record.post_id,
-                    topics=[
-                        TopicModel(
-                            topic_id=topic.topic_id,
-                            label=topic.topic.label,
-                            reference_count=0,
-                        )
-                        for topic in note_record.topics
-                    ],
-                    language=note_record.language,
-                    summary=note_record.summary,
-                    current_status=note_record.current_status,
-                    created_at=note_record.created_at,
-                    has_been_helpfuled=note_record.has_been_helpfuled if note_record.has_been_helpfuled is not None else False,
-                    rate_count=note_record.rate_count if note_record.rate_count is not None else 0,
-                    helpful_count=note_record.helpful_count if note_record.helpful_count is not None else 0,
-                    not_helpful_count=note_record.not_helpful_count if note_record.not_helpful_count is not None else 0,
-                    somewhat_helpful_count=note_record.somewhat_helpful_count if note_record.somewhat_helpful_count is not None else 0,
-                    current_status_history=self._parse_status_history(note_record.current_status_history),
-                )
+            results = query.all()
 
-                post = self._post_record_to_model(post_record, with_media=post_includes_media) if post_record else None
-                yield note, post
+            for note_record, post_record in results:
+                try:
+                    note = NoteModel(
+                        note_id=note_record.note_id,
+                        note_author_participant_id=note_record.note_author_participant_id,
+                        post_id=note_record.post_id,
+                        topics=[
+                            TopicModel(
+                                topic_id=topic.topic_id,
+                                label=topic.topic.label,
+                                reference_count=0,
+                            )
+                            for topic in note_record.topics
+                        ],
+                        language=note_record.language,
+                        summary=note_record.summary,
+                        current_status=note_record.current_status,
+                        created_at=note_record.created_at,
+                        has_been_helpfuled=(
+                            note_record.has_been_helpfuled if note_record.has_been_helpfuled is not None else False
+                        ),
+                        rate_count=note_record.rate_count if note_record.rate_count is not None else 0,
+                        helpful_count=note_record.helpful_count if note_record.helpful_count is not None else 0,
+                        not_helpful_count=(
+                            note_record.not_helpful_count if note_record.not_helpful_count is not None else 0
+                        ),
+                        somewhat_helpful_count=(
+                            note_record.somewhat_helpful_count if note_record.somewhat_helpful_count is not None else 0
+                        ),
+                        current_status_history=self._parse_status_history(note_record.current_status_history),
+                    )
+
+                    post = (
+                        self._post_record_to_model(post_record, with_media=post_includes_media) if post_record else None
+                    )
+                    yield note, post
+                except Exception as e:
+                    # Skip invalid records and log warning
+                    logger = get_logger()
+                    logger.warning(f"Skipping invalid note/post record (note_id={note_record.note_id}): {str(e)}")
+                    continue
 
     def count_search_results(
         self,
