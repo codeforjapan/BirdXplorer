@@ -168,7 +168,7 @@ PostListWithExamples: TypeAlias = Annotated[
 class SearchedNote(BaseModel):
     noteId: Annotated[NoteId, PydanticField(description="コミュニティノートのID")]
     noteAuthorParticipantId: Annotated[
-        ParticipantId, PydanticField(description="コミュニティノートの作成者のユーザーID")
+        Optional[ParticipantId], PydanticField(description="コミュニティノートの作成者のユーザーID")
     ]
     summary: Annotated[SummaryString, PydanticField(description="コミュニティノートの本文")]
     language: Annotated[LanguageIdentifier, PydanticField(description="コミュニティノートの言語")]
