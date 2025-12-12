@@ -375,6 +375,11 @@ class Storage:
         # media情報がいらない場合はクエリを発行したくないので先にwith_mediaをチェック
         media_details = cls._post_record_media_details_to_model(post_record) if with_media else []
 
+        # created_atとaggregated_atのデフォルト値設定
+        DEFAULT_TIMESTAMP = 1152921600001
+        created_at = post_record.created_at if post_record.created_at is not None else DEFAULT_TIMESTAMP
+        aggregated_at = post_record.aggregated_at if post_record.aggregated_at is not None else created_at
+
         return PostModel(
             post_id=post_record.post_id,
             x_user_id=post_record.user_id,
@@ -387,10 +392,8 @@ class Storage:
             ),
             text=post_record.text,
             media_details=media_details,
-            created_at=post_record.created_at,
-            aggregated_at=(
-                post_record.aggregated_at if post_record.aggregated_at is not None else post_record.created_at
-            ),
+            created_at=created_at,
+            aggregated_at=aggregated_at,
             like_count=post_record.like_count,
             repost_count=post_record.repost_count,
             impression_count=post_record.impression_count,
