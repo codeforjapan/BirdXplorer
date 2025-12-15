@@ -88,7 +88,8 @@ jobs:
         with:
           repository: codeforjapan/BirdXplorer-cdk
           path: BirdXplorer-cdk
-          token: ${{ secrets.GITHUB_TOKEN }}
+          ssh-key: ${{ secrets.CDK_DEPLOY_KEY }}
+          persist-credentials: false
       
       - name: Setup Node.js
         uses: actions/setup-node@v4
