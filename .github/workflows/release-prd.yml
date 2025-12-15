@@ -1,32 +1,58 @@
-name: Deploy ETL Lambda (dev)
+name: Release to Production
 
 on:
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'etl/**'
-      - 'common/**'
-      - 'migrate/**'
-      - '.github/workflows/deploy-etl-lambda.yml'
   push:
     branches: [ main ]
-    paths:
-      - 'etl/**'
-      - 'common/**'
-      - 'migrate/**'
-      - '.github/workflows/deploy-etl-lambda.yml'
+  workflow_dispatch:
 
 permissions:
   id-token: write
   contents: read
   actions: write
 
-jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-    outputs:
-      image-tag: ${{ steps.tag.outputs.tag }}
+concurrency:
+  group: cdk-prd
+  cancel-in-progress: false
 
+jobs:
+  release:
+    uses: ./.github/workflows/_release.yaml
+    secrets: inherit
+
+  build-push-api:
+    needs: release
+    if: needs.release.outputs.created == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ap-northeast-1
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: login-ecr
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: ./api
+          file: ./api/Dockerfile.prd
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/birdxplorer-api:${{ needs.release.outputs.tag_name }}
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+
+  build-push-etl:
+    needs: release
+    if: needs.release.outputs.created == 'true'
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         lambda:
@@ -49,10 +75,7 @@ jobs:
       - uses: aws-actions/amazon-ecr-login@v2
         id: login-ecr
 
-      - id: tag
-        run: |
-          sha=$(echo "${{ github.sha }}" | cut -c1-7)
-          echo "tag=dev-sha$sha" >> $GITHUB_OUTPUT
+      - uses: docker/setup-buildx-action@v3
 
       - uses: docker/build-push-action@v5
         with:
@@ -60,18 +83,21 @@ jobs:
           file: ./etl/${{ matrix.lambda.dockerfile }}
           push: true
           tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ matrix.lambda.repository }}:${{ steps.tag.outputs.tag }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ matrix.lambda.repository }}:${{ needs.release.outputs.tag_name }}
           platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          provenance: false
 
-  deploy-cdk:
-    needs: build-and-push
+  deploy-cdk-prd:
+    needs: [release, build-push-api, build-push-etl]
+    if: needs.release.outputs.created == 'true'
     uses: ./.github/workflows/_deploy.yaml
     with:
-      deploy-env: dev
-      image-tag: ${{ needs.build-and-push.outputs.image-tag }}
+      deploy-env: prd
+      image-tag: ${{ needs.release.outputs.tag_name }}
       verify-images: >
+        birdxplorer-api,
         birdxplorer-etl,
         birdxplorer-etl-lang,
         birdxplorer-etl-note-transform,
