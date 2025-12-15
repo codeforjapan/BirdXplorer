@@ -61,4 +61,5 @@ jobs:
       deploy-env: dev
       image-tag: ${{ needs.build-and-push.outputs.image-tag }}
       verify-images: "birdxplorer-api"
+      stacks: "devbird-xplorerApiStack"
     secrets: inherit

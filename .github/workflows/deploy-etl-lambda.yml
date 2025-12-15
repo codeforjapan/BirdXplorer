@@ -82,4 +82,5 @@ jobs:
         birdxplorer-etl-postlookup,
         birdxplorer-etl-db-writer,
         birdxplorer-etl-note-status-update
+      stacks: "devbird-xplorerStack"
     secrets: inherit
