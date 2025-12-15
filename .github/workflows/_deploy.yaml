@@ -1,0 +1,158 @@
+name: Deploy CDK Stack
+
+on:
+  workflow_call:
+    inputs:
+      deploy-env:
+        type: string
+        required: true
+        description: "Deployment environment (dev or prd)"
+      image-tag:
+        type: string
+        required: true
+        description: "Docker image tag to deploy"
+      verify-images:
+        type: string
+        required: false
+        description: "Comma-separated list of ECR repositories to verify (empty = skip verification)"
+        default: ""
+
+permissions:
+  actions: write
+  contents: read
+  id-token: write
+
+jobs:
+  deploy-cdk:
+    name: Deploy CDK to ${{ inputs.deploy-env }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    steps:
+      - name: Checkout BirdXplorer repository
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ap-northeast-1
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Verify ECR images exist
+        if: inputs.verify-images != ''
+        env:
+          IMAGE_TAG: ${{ inputs.image-tag }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          VERIFY_REPOS: ${{ inputs.verify-images }}
+        run: |
+          echo "Verifying images with tag: $IMAGE_TAG"
+          echo "Repositories to verify: $VERIFY_REPOS"
+          　
+          # カンマ区切りのリポジトリリストを配列に変換
+          IFS=',' read -ra REPOSITORIES <<< "$VERIFY_REPOS"
+          
+          MISSING_IMAGES=()
+          
+          for repo in "${REPOSITORIES[@]}"; do
+            # 前後の空白を削除
+            repo=$(echo "$repo" | xargs)
+            echo "Checking $repo:$IMAGE_TAG"
+            if ! aws ecr describe-images \
+              --repository-name="$repo" \
+              --image-ids=imageTag="$IMAGE_TAG" \
+              --region ap-northeast-1 \
+              > /dev/null 2>&1; then
+              echo "❌ Image not found: $repo:$IMAGE_TAG"
+              MISSING_IMAGES+=("$repo")
+            else
+              echo "✅ Image found: $repo:$IMAGE_TAG"
+            fi
+          done
+          
+          if [ ${#MISSING_IMAGES[@]} -gt 0 ]; then
+            echo ""
+            echo "Error: The following images are missing:"
+            printf '%s\n' "${MISSING_IMAGES[@]}"
+            exit 1
+          fi
+          
+          echo ""
+          echo "All required images are available in ECR"
+      
+      - name: Checkout BirdXplorer-cdk repository
+        uses: actions/checkout@v4
+        with:
+          repository: codeforjapan/BirdXplorer-cdk
+          path: BirdXplorer-cdk
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: BirdXplorer-cdk/package-lock.json
+      
+      - name: Install CDK dependencies
+        working-directory: BirdXplorer-cdk
+        run: npm ci
+      
+      - name: Install AWS CDK CLI
+        run: npm install -g aws-cdk
+      
+      - name: CDK Bootstrap (if needed)
+        working-directory: BirdXplorer-cdk
+        run: |
+          cdk bootstrap aws://588738601073/ap-northeast-1 \
+            -c stage=${{ inputs.deploy-env }} \
+            -c tag=${{ inputs.image-tag }}
+      
+      - name: CDK Diff
+        working-directory: BirdXplorer-cdk
+        run: |
+          cdk diff --all \
+            -c stage=${{ inputs.deploy-env }} \
+            -c tag=${{ inputs.image-tag }}
+        continue-on-error: true
+      
+      - name: CDK Deploy
+        working-directory: BirdXplorer-cdk
+        env:
+          AWS_DEFAULT_REGION: ap-northeast-1
+          DEPLOY_ENV: ${{ inputs.deploy-env }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+        run: |
+          echo "Deploying to environment: $DEPLOY_ENV"
+          echo "Using image tag: $IMAGE_TAG"
+          
+          cdk deploy --all \
+            -c stage=$DEPLOY_ENV \
+            -c tag=$IMAGE_TAG \
+            --require-approval never \
+            --verbose
+      
+      - name: Deployment Summary
+        if: success()
+        run: |
+          echo "## Deployment Successful ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ inputs.deploy-env }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image Tag**: ${{ inputs.image-tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Region**: ap-northeast-1" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp**: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Deployment Failed
+        if: failure()
+        run: |
+          echo "## Deployment Failed ❌" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ inputs.deploy-env }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image Tag**: ${{ inputs.image-tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Region**: ap-northeast-1" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp**: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Please check the logs above for error details." >> $GITHUB_STEP_SUMMARY
