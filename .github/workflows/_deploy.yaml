@@ -16,6 +16,11 @@ on:
         required: false
         description: "Comma-separated list of ECR repositories to verify (empty = skip verification)"
         default: ""
+      stacks:
+        type: string
+        required: false
+        description: "Space-separated list of stack names to deploy (empty = deploy all stacks)"
+        default: ""
 
 permissions:
   actions: write
@@ -119,15 +124,26 @@ jobs:
           AWS_DEFAULT_REGION: ap-northeast-1
           DEPLOY_ENV: ${{ inputs.deploy-env }}
           IMAGE_TAG: ${{ inputs.image-tag }}
+          STACKS: ${{ inputs.stacks }}
         run: |
           echo "Deploying to environment: $DEPLOY_ENV"
           echo "Using image tag: $IMAGE_TAG"
           
-          cdk deploy --all \
-            -c stage=$DEPLOY_ENV \
-            -c tag=$IMAGE_TAG \
-            --require-approval never \
-            --verbose
+          if [ -z "$STACKS" ]; then
+            echo "Deploying all stacks"
+            cdk deploy --all \
+              -c stage=$DEPLOY_ENV \
+              -c tag=$IMAGE_TAG \
+              --require-approval never \
+              --verbose
+          else
+            echo "Deploying specific stacks: $STACKS"
+            cdk deploy $STACKS \
+              -c stage=$DEPLOY_ENV \
+              -c tag=$IMAGE_TAG \
+              --require-approval never \
+              --verbose
+          fi
       
       - name: Deployment Summary
         if: success()
