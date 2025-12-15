@@ -49,6 +49,8 @@ jobs:
       - uses: aws-actions/amazon-ecr-login@v2
         id: login-ecr
 
+      - uses: docker/setup-buildx-action@v3
+
       - id: tag
         run: |
           sha=$(echo "${{ github.sha }}" | cut -c1-7)
