@@ -51,7 +51,7 @@ jobs:
         run: |
           echo "Verifying images with tag: $IMAGE_TAG"
           echo "Repositories to verify: $VERIFY_REPOS"
-          　
+          
           # カンマ区切りのリポジトリリストを配列に変換
           IFS=',' read -ra REPOSITORIES <<< "$VERIFY_REPOS"
           
