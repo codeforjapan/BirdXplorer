@@ -95,12 +95,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: BirdXplorer-cdk/package-lock.json
+          cache: 'yarn'
+          cache-dependency-path: BirdXplorer-cdk/yarn.lock
       
       - name: Install CDK dependencies
         working-directory: BirdXplorer-cdk
-        run: npm ci
+        run: yarn install --frozen-lockfile
       
       - name: Install AWS CDK CLI
         run: npm install -g aws-cdk
