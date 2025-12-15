@@ -35,7 +35,7 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ secrets.AWS_CDK_ROLE_TO_ASSUME }}
           aws-region: ap-northeast-1
       
       - name: Login to Amazon ECR
@@ -104,13 +104,6 @@ jobs:
       
       - name: Install AWS CDK CLI
         run: npm install -g aws-cdk
-      
-      - name: CDK Bootstrap (if needed)
-        working-directory: BirdXplorer-cdk
-        run: |
-          cdk bootstrap aws://588738601073/ap-northeast-1 \
-            -c stage=${{ inputs.deploy-env }} \
-            -c tag=${{ inputs.image-tag }}
       
       - name: CDK Diff
         working-directory: BirdXplorer-cdk
