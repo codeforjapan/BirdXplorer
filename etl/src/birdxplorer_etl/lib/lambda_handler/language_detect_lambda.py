@@ -60,6 +60,12 @@ def lambda_handler(event, context):
                     logger.error(f"Failed to parse SQS message body: {e}")
                     logger.error(f"Raw body: {record.get('body', 'N/A')}")
                     continue
+        # 直接invocationの場合
+        else:
+            logger.info("Direct invocation detected")
+            note_id = event.get("note_id")
+            summary = event.get("summary")
+            logger.info(f"Direct invocation for note_id: {note_id}")
 
         if note_id and summary:
             logger.info(f"[START] Detecting language for note: {note_id}")
