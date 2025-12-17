@@ -75,8 +75,8 @@ jobs:
       - name: test
         working-directory: etl
         env:
-          X_TEST_USERNAME: ${{ secrets.X_TEST_USERNAME }}
-          X_TEST_PASSWORD: ${{ secrets.X_TEST_PASSWORD }}
-          X_TEST_EMAIL: ${{ secrets.X_TEST_EMAIL }}
-          X_TEST_EMAIL_PASSWORD: ${{ secrets.X_TEST_EMAIL_PASSWORD }}
+          X_USERNAME: ${{ secrets.X_USERNAME }}
+          X_PASSWORD: ${{ secrets.X_PASSWORD }}
+          X_EMAIL: ${{ secrets.X_EMAIL }}
+          X_EMAIL_PASSWORD: ${{ secrets.X_EMAIL_PASSWORD }}
         run: pytest

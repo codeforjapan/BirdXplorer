@@ -33,6 +33,7 @@ dependencies = [
     "openai",
     "boto3",
     "twscrape",
+    "brotli",
 ]
 
 [project.urls]
