@@ -129,10 +129,10 @@ class TestGetLatest100NotesLambda:
         with patch.dict(
             "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.os.environ",
             {
-                "X_TEST_USERNAME": "test_user",
-                "X_TEST_PASSWORD": "test_pass",
-                "X_TEST_EMAIL": "test@example.com",
-                "X_TEST_EMAIL_PASSWORD": "test_email_pass",
+                "X_USERNAME": "test_user",
+                "X_PASSWORD": "test_pass",
+                "X_EMAIL": "test@example.com",
+                "X_EMAIL_PASSWORD": "test_email_pass",
             },
         ):
             with patch(
@@ -167,10 +167,10 @@ class TestGetLatest100NotesLambda:
         with patch.dict(
             "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.os.environ",
             {
-                "X_TEST_USERNAME": "test_user",
-                "X_TEST_PASSWORD": "test_pass",
-                "X_TEST_EMAIL": "test@example.com",
-                "X_TEST_EMAIL_PASSWORD": "test_email_pass",
+                "X_USERNAME": "test_user",
+                "X_PASSWORD": "test_pass",
+                "X_EMAIL": "test@example.com",
+                "X_EMAIL_PASSWORD": "test_email_pass",
             },
         ):
             with patch(
@@ -193,10 +193,10 @@ class TestGetLatest100NotesLambda:
         with patch.dict(
             "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.os.environ",
             {
-                "X_TEST_USERNAME": "test_user",
-                "X_TEST_PASSWORD": "test_pass",
-                "X_TEST_EMAIL": "test@example.com",
-                "X_TEST_EMAIL_PASSWORD": "test_email_pass",
+                "X_USERNAME": "test_user",
+                "X_PASSWORD": "test_pass",
+                "X_EMAIL": "test@example.com",
+                "X_EMAIL_PASSWORD": "test_email_pass",
             },
         ):
             with patch(
@@ -215,10 +215,10 @@ class TestGetLatest100NotesLambda:
         with patch.dict(
             "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.os.environ",
             {
-                "X_TEST_USERNAME": "test_user",
-                "X_TEST_PASSWORD": "test_pass",
-                "X_TEST_EMAIL": "test@example.com",
-                "X_TEST_EMAIL_PASSWORD": "test_email_pass",
+                "X_USERNAME": "test_user",
+                "X_PASSWORD": "test_pass",
+                "X_EMAIL": "test@example.com",
+                "X_EMAIL_PASSWORD": "test_email_pass",
             },
         ):
             with patch(
@@ -244,10 +244,10 @@ class TestGetLatest100NotesLambda:
         with patch.dict(
             "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.os.environ",
             {
-                "X_TEST_USERNAME": "test_user",
-                "X_TEST_PASSWORD": "test_pass",
-                "X_TEST_EMAIL": "test@example.com",
-                "X_TEST_EMAIL_PASSWORD": "test_email_pass",
+                "X_USERNAME": "test_user",
+                "X_PASSWORD": "test_pass",
+                "X_EMAIL": "test@example.com",
+                "X_EMAIL_PASSWORD": "test_email_pass",
             },
         ):
             with patch(
@@ -270,10 +270,10 @@ class TestGetLatest100NotesLambda:
         with patch.dict(
             "birdxplorer_etl.lib.lambda_handler.get_latest_100_notes_lambda.os.environ",
             {
-                "X_TEST_USERNAME": "test_user",
-                "X_TEST_PASSWORD": "test_pass",
-                "X_TEST_EMAIL": "test@example.com",
-                "X_TEST_EMAIL_PASSWORD": "test_email_pass",
+                "X_USERNAME": "test_user",
+                "X_PASSWORD": "test_pass",
+                "X_EMAIL": "test@example.com",
+                "X_EMAIL_PASSWORD": "test_email_pass",
             },
         ):
             with patch(

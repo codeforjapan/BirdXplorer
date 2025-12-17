@@ -1,0 +1,171 @@
+# BirdXplorer ETL Docker Compose Configuration
+#
+# このファイルは、BirdXplorerのETLプロセス全体をローカル環境で実行するための
+# Docker Compose設定ファイルです。
+#
+# 含まれるサービス:
+#   - db: PostgreSQL 13 データベース
+#   - realtime-notes-extraction-lambda: リアルタイムNote抽出Lambda関数（ポート9001）
+#   - language-detect-lambda: 言語検出Lambda関数（ポート9002）
+#   - note-transform-lambda: Note変換Lambda関数（ポート9003）
+#   - topic-detect-lambda: トピック検出Lambda関数（ポート9004）
+#   - postlookup-lambda: 投稿取得Lambda関数（ポート9005）
+#   - db-writer-lambda: DB書き込みLambda関数（ポート9006）
+#   - note-status-update-lambda: ステータス更新Lambda関数（ポート9007）
+#
+# 使用方法:
+#   1. etl/.env ファイルに環境変数を設定
+#   2. docker compose -f compose-etl.yml up -d でサービスを起動
+#   3. docker compose -f compose-etl.yml logs -f でログを確認
+#   4. docker compose -f compose-etl.yml down でサービスを停止
+#
+# 詳細は docs/etl-local-testing-guide.md を参照してください。
+
+version: "3.8"
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:13
+    container_name: birdxplorer-postgres-etl
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: birdxplorer
+      POSTGRES_DB: birdxplorer
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_etl_data:/var/lib/postgresql/data
+    networks:
+      - birdxplorer-etl
+
+  # Realtime Notes Extraction Lambda
+  realtime-notes-extraction-lambda:
+    build:
+      context: ./
+      dockerfile: ./etl/Dockerfile.realtime_notes_extraction
+    container_name: bx-realtime-notes-extraction
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ./etl/.env
+    ports:
+      - "9001:8080"
+    networks:
+      - birdxplorer-etl
+    restart: unless-stopped
+
+  # Language Detection Lambda
+  language-detect-lambda:
+    build:
+      context: ./
+      dockerfile: ./etl/Dockerfile.language_detect
+    container_name: bx-language-detect
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ./etl/.env
+    ports:
+      - "9002:8080"
+    networks:
+      - birdxplorer-etl
+    restart: unless-stopped
+
+  # Note Transform Lambda
+  note-transform-lambda:
+    build:
+      context: ./
+      dockerfile: ./etl/Dockerfile.note_transform
+    container_name: bx-note-transform
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ./etl/.env
+    ports:
+      - "9003:8080"
+    networks:
+      - birdxplorer-etl
+    restart: unless-stopped
+
+  # Topic Detection Lambda
+  topic-detect-lambda:
+    build:
+      context: ./
+      dockerfile: ./etl/Dockerfile.topic_detect
+    container_name: bx-topic-detect
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ./etl/.env
+    ports:
+      - "9004:8080"
+    networks:
+      - birdxplorer-etl
+    restart: unless-stopped
+
+  # Post Lookup Lambda
+  postlookup-lambda:
+    build:
+      context: ./
+      dockerfile: ./etl/Dockerfile.postlookup
+    container_name: bx-postlookup
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ./etl/.env
+    ports:
+      - "9005:8080"
+    networks:
+      - birdxplorer-etl
+    restart: unless-stopped
+
+  # DB Writer Lambda
+  db-writer-lambda:
+    build:
+      context: ./
+      dockerfile: ./etl/Dockerfile.db_writer
+    container_name: bx-db-writer
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ./etl/.env
+    ports:
+      - "9006:8080"
+    networks:
+      - birdxplorer-etl
+    restart: unless-stopped
+
+  # Note Status Update Lambda
+  note-status-update-lambda:
+    build:
+      context: ./
+      dockerfile: ./etl/Dockerfile.note_status_update
+    container_name: bx-note-status-update
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ./etl/.env
+    ports:
+      - "9007:8080"
+    networks:
+      - birdxplorer-etl
+    restart: unless-stopped
+
+networks:
+  birdxplorer-etl:
+    driver: bridge
+
+volumes:
+  postgres_etl_data:

@@ -35,11 +35,11 @@ class TestXAuthenticationIntegration:
 
     def setup_method(self):
         """Setup test data from environment variables"""
-        self.username = os.getenv("X_TEST_USERNAME")
-        self.password = os.getenv("X_TEST_PASSWORD")
-        self.email = os.getenv("X_TEST_EMAIL")
-        self.email_password = os.getenv("X_TEST_EMAIL_PASSWORD")
-        self.cookies = os.getenv("X_TEST_COOKIES")
+        self.username = os.getenv("X_USERNAME")
+        self.password = os.getenv("X_PASSWORD")
+        self.email = os.getenv("X_EMAIL")
+        self.email_password = os.getenv("X_EMAIL_PASSWORD")
+        self.cookies = os.getenv("X_COOKIES")
 
     def test_credentials_available(self):
         """Test that required credentials are available"""
@@ -52,17 +52,17 @@ class TestXAuthenticationIntegration:
         if not has_full_creds and not has_cookies:
             missing_info = []
             if not self.username:
-                missing_info.append("X_TEST_USERNAME")
+                missing_info.append("X_USERNAME")
             if not has_cookies:
-                missing_info.append("X_TEST_COOKIES")
+                missing_info.append("X_COOKIES")
             if not has_full_creds:
-                missing_info.extend(["X_TEST_PASSWORD", "X_TEST_EMAIL", "X_TEST_EMAIL_PASSWORD"])
+                missing_info.extend(["X_PASSWORD", "X_EMAIL", "X_EMAIL_PASSWORD"])
 
             missing_vars = ", ".join(set(missing_info))
             pytest.skip(
                 f"Missing required environment variables. Need either "
-                f"(X_TEST_USERNAME + X_TEST_COOKIES) or "
-                f"(X_TEST_USERNAME + X_TEST_PASSWORD + X_TEST_EMAIL + X_TEST_EMAIL_PASSWORD). "
+                f"(X_USERNAME + X_COOKIES) or "
+                f"(X_USERNAME + X_PASSWORD + X_EMAIL + X_EMAIL_PASSWORD). "
                 f"Missing: {missing_vars}"
             )
 
@@ -84,8 +84,8 @@ class TestXAuthenticationIntegration:
         if not has_full_creds and not has_cookies:
             pytest.skip(
                 "Real X credentials not available. Set either "
-                "(X_TEST_USERNAME + X_TEST_COOKIES) or "
-                "(X_TEST_USERNAME + X_TEST_PASSWORD + X_TEST_EMAIL + X_TEST_EMAIL_PASSWORD) "
+                "(X_USERNAME + X_COOKIES) or "
+                "(X_USERNAME + X_PASSWORD + X_EMAIL + X_EMAIL_PASSWORD) "
                 "environment variables."
             )
 

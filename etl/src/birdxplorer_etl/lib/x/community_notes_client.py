@@ -66,7 +66,7 @@ class CommunityNote:
             return None
 
         # Extract created_at from note data
-        created_at = note_data.get("created_at_millis")
+        created_at = note_data.get("created_at")
 
         return cls(
             note_id=note_data["rest_id"],
@@ -272,9 +272,9 @@ class XAPIConfig:
     """Configuration constants for X API"""
 
     # API Endpoints
-    TIMELINE_URL = "https://x.com/i/api/graphql/jWHk--0VWuZ38aY2WDXUVA/GenericTimelineById"
-    BIRDWATCH_GLOBAL_URL = "https://x.com/i/api/graphql/J5pGd3g_8gGG28OGzHci8g/GenericTimelineById"
-    BIRDWATCH_NOTES_URL = "https://x.com/i/api/graphql/305KT9GmMLc2mVsLRL8EXg/BirdwatchFetchNotes"
+    TIMELINE_URL = "https://x.com/i/api/graphql/XJCnrsQ8mk0kr0pjfSp-8A/GenericTimelineById"
+    BIRDWATCH_GLOBAL_URL = "https://x.com/i/api/graphql/XJCnrsQ8mk0kr0pjfSp-8A/GenericTimelineById"
+    BIRDWATCH_NOTES_URL = "https://x.com/i/api/graphql/fxPFF519LMucq7mV6ix36A/BirdwatchFetchNotes"
 
     # Timeline ID for community notes
     TIMELINE_ID = "VGltZWxpbmU6CwA6AAAAEjkyMTMwNjQ4ODQyNTEwNzQ1NgA="
@@ -285,18 +285,32 @@ class XAPIConfig:
             "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D"
             "1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
         ),
-        "x-twitter-active-user": "yes",
-        "x-twitter-client-language": "en",
-        "Referer": "https://x.com/",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+        ),
         "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Content-Type": "application/json",
+        "Referer": "https://x.com/i/communitynotes/new",
         "Origin": "https://x.com",
+        "x-twitter-active-user": "yes",
+        "x-twitter-auth-type": "OAuth2Session",
+        "x-twitter-client-language": "en",
+        "sec-ch-ua": '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin",
     }
 
     # Common GraphQL features
     COMMON_FEATURES = {
         "rweb_video_screen_enabled": False,
-        "payments_enabled": False,
         "profile_label_improvements_pcf_label_in_post_enabled": True,
+        "responsive_web_profile_redirect_enabled": False,
         "rweb_tipjar_consumption_enabled": True,
         "verified_phone_label_enabled": False,
         "creator_subscriptions_tweet_preview_api_enabled": True,
@@ -338,6 +352,8 @@ class XAPIConfig:
 
     # Notes-specific features
     NOTES_FEATURES = {
+        "responsive_web_birdwatch_live_note_enabled": False,
+        "responsive_web_birdwatch_note_internal_insights_enabled": False,
         "responsive_web_birdwatch_enforce_author_user_quotas": True,
         "responsive_web_birdwatch_media_notes_enabled": True,
         "responsive_web_birdwatch_url_notes_enabled": False,
@@ -345,8 +361,8 @@ class XAPIConfig:
         "responsive_web_birdwatch_fast_notes_badge_enabled": False,
         "responsive_web_grok_community_note_auto_translation_is_enabled": False,
         "responsive_web_graphql_timeline_navigation_enabled": True,
-        "payments_enabled": False,
         "profile_label_improvements_pcf_label_in_post_enabled": True,
+        "responsive_web_profile_redirect_enabled": False,
         "rweb_tipjar_consumption_enabled": True,
         "verified_phone_label_enabled": False,
         "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
@@ -588,14 +604,18 @@ class XCommunityNotesClient:
                     timeout=XAPIConfig.REQUEST_TIMEOUT,
                 )
 
+                # Log the actual request URL for debugging
+                logger.info(f"Request URL: {response.url}")
+
                 if response.status_code == 200:
                     # Success - parse and return data
-                    data = json.loads(response.content)
+                    data = response.json()
                     logger.info(f"Successfully fetched response{context_str}")
                     return data
                 else:
                     # Non-200 status code
                     logger.warning(f"Request{context_str} failed with status {response.status_code}: {response.text}")
+                    logger.debug(f"Request headers: {headers}")
 
                     # If this is not the last attempt, wait and retry
                     if attempt < XAPIConfig.MAX_RETRIES:
@@ -701,16 +721,19 @@ class XCommunityNotesClient:
                 "withQuickPromoteEligibilityTweetFields": True,
             }
 
-            # Build request parameters
-            params = {
-                "variables": json.dumps(variables),
-                "features": json.dumps(XAPIConfig.BIRDWATCH_FEATURES),
-            }
+            # Build complete URL with pre-encoded parameters
+            # This avoids double encoding by requests library
+            from urllib.parse import urlencode
 
-            # Use the centralized retry logic
-            return self._make_request_with_retry(
-                XAPIConfig.BIRDWATCH_GLOBAL_URL, params, "BirdwatchFetchGlobalTimeline"
-            )
+            params_dict = {
+                "variables": json.dumps(variables, separators=(",", ":")),
+                "features": json.dumps(XAPIConfig.BIRDWATCH_FEATURES, separators=(",", ":")),
+            }
+            query_string = urlencode(params_dict)
+            full_url = f"{XAPIConfig.BIRDWATCH_GLOBAL_URL}?{query_string}"
+
+            # Use the centralized retry logic with empty params (URL already contains query string)
+            return self._make_request_with_retry(full_url, {}, "BirdwatchFetchGlobalTimeline")
 
         except Exception as e:
             logger.error(f"Failed to fetch BirdwatchFetchGlobalTimeline: {str(e)}")
@@ -749,13 +772,18 @@ class XCommunityNotesClient:
                 "tweet_id": tweet_id,
             }
 
-            params = {
-                "variables": json.dumps(variables),
-                "features": json.dumps(XAPIConfig.NOTES_FEATURES),
-            }
+            # Build complete URL with pre-encoded parameters
+            from urllib.parse import urlencode
 
-            # Use the centralized retry logic
-            return self._make_request_with_retry(XAPIConfig.BIRDWATCH_NOTES_URL, params, f"tweet {tweet_id}")
+            params_dict = {
+                "variables": json.dumps(variables, separators=(",", ":")),
+                "features": json.dumps(XAPIConfig.NOTES_FEATURES, separators=(",", ":")),
+            }
+            query_string = urlencode(params_dict)
+            full_url = f"{XAPIConfig.BIRDWATCH_NOTES_URL}?{query_string}"
+
+            # Use the centralized retry logic with empty params
+            return self._make_request_with_retry(full_url, {}, f"tweet {tweet_id}")
 
         except Exception as e:
             logger.error(f"Error fetching community notes for tweet {tweet_id}: {str(e)}")
