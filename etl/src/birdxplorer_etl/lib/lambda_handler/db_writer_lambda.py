@@ -29,8 +29,8 @@ def lambda_handler(event, context):
     {
         "Records": [{
             "body": "{
-                \"operation\": \"update_language\" | \"update_topics\" | \"save_post_data\",
-                \"note_id\": \"xxx\",  # update_language, update_topicsの場合
+                \"operation\": \"insert_note\" | \"update_language\" | \"update_topics\" | \"save_post_data\",
+                \"note_id\": \"xxx\",  # insert_note, update_language, update_topicsの場合
                 \"data\": { ... }
             }"
         }]
@@ -73,7 +73,43 @@ def lambda_handler(event, context):
                     logger.info(f"[START] Processing {operation}")
 
                 # 操作タイプに応じた処理
-                if operation == "update_language":
+                if operation == "insert_note":
+                    # ノートの挿入（既存チェック付き）
+                    note_data = data
+                    required_fields = ["note_id", "summary", "tweet_id", "created_at_millis"]
+
+                    # 必須フィールドのチェック
+                    missing_fields = [field for field in required_fields if field not in note_data]
+                    if missing_fields:
+                        logger.error(f"[ERROR] Missing required fields for insert_note: {missing_fields}")
+                        continue
+
+                    # 既存ノートのチェック
+                    existing_note = (
+                        postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id == note_data["note_id"]).first()
+                    )
+
+                    if existing_note:
+                        logger.info(f"[SKIP] Note {note_data['note_id']} already exists, skipping insert")
+                        continue
+
+                    # 新しいノートを挿入
+                    logger.info(
+                        f"[DB_INSERT] Inserting note {note_data['note_id']} "
+                        f"(tweet_id: {note_data['tweet_id']}, summary length: {len(note_data['summary'])})"
+                    )
+
+                    row_note = RowNoteRecord(
+                        note_id=note_data["note_id"],
+                        summary=note_data["summary"],
+                        tweet_id=note_data["tweet_id"],
+                        created_at_millis=note_data["created_at_millis"],
+                    )
+                    postgresql.add(row_note)
+                    postgresql.commit()
+                    logger.info(f"[SUCCESS] Note {note_data['note_id']} inserted successfully")
+
+                elif operation == "update_language":
                     language = data.get("language")
                     if not language:
                         logger.error(f"[ERROR] Missing language in data: {data}")
