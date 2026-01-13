@@ -8,7 +8,11 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
 
-from birdxplorer_common.models import DailyNotesCreationDataItem, GraphListResponse
+from birdxplorer_common.models import (
+    DailyNotesCreationDataItem,
+    DailyPostCountDataItem,
+    GraphListResponse,
+)
 from birdxplorer_common.storage import Storage
 
 # Type definitions for query parameters
@@ -154,8 +158,92 @@ def gen_router(storage: Storage) -> APIRouter:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
+    @router.get("/daily-posts", response_model=GraphListResponse[DailyPostCountDataItem])
+    def get_daily_posts(
+        range: str = Query(..., description="Month range in format YYYY-MM_YYYY-MM"),
+        status: StatusType = Query("all", description="Filter by note publication status"),
+    ) -> GraphListResponse[DailyPostCountDataItem]:
+        """Get daily post volume trends.
+
+        Returns aggregated daily counts of posts for the specified month range,
+        optionally filtered by associated community note status.
+
+        **Status Filter:**
+        - `all`: All posts regardless of note status (default)
+        - `published`: Posts with published notes
+        - `temporarilyPublished`: Posts with temporarily published notes
+        - `evaluating`: Posts with notes being evaluated
+        - `unpublished`: Posts with no notes or unpublished notes
+
+        **Date Range Format:**
+        - Format: `YYYY-MM_YYYY-MM` (e.g., "2025-01_2025-03")
+        - Maximum range: 1 year (12 months)
+        - Both months inclusive
+
+        Args:
+            range: Month range for aggregation (required)
+            status: Filter by specific note status or "all" (default: "all")
+
+        Returns:
+            GraphListResponse containing:
+            - data: List of daily aggregated post counts
+            - updatedAt: Last data update timestamp (YYYY-MM-DD format)
+
+        Raises:
+            HTTPException: 400 if range format is invalid or exceeds limits
+        """
+        try:
+            # Parse and validate month range
+            start_month, end_month = _parse_month_range(range)
+
+            # Calculate actual date range (first day to last day of months)
+            from calendar import monthrange
+
+            start_date = start_month
+            # Get last day of end month
+            last_day = monthrange(end_month.year, end_month.month)[1]
+            end_date = end_month.replace(day=last_day)
+
+            # Validate range doesn't exceed 1 year
+            days_diff = (end_date - start_date).days
+            if days_diff > 365:
+                raise ValueError("Date range cannot exceed 1 year (365 days)")
+
+            # Fetch data from storage
+            raw_data = storage.get_daily_post_counts(
+                start_date=start_date.isoformat(),
+                end_date=end_date.isoformat(),
+                status_filter=status,
+            )
+
+            # Fill gaps for continuous time series
+            # If no data, create template for post structure
+            if not raw_data:
+                template = {"date": start_date.isoformat(), "post_count": 0}
+                if status != "all":
+                    template["status"] = status
+                raw_data = [template]
+
+            filled_data = storage._fill_daily_gaps(
+                data=raw_data,
+                start_date=start_date.isoformat(),
+                end_date=end_date.isoformat(),
+            )
+
+            # Convert to Pydantic models
+            items = [DailyPostCountDataItem(**item) for item in filled_data]
+
+            # Get metadata timestamp
+            updated_at = storage.get_graph_updated_at("posts")
+
+            return GraphListResponse(data=items, updated_at=updated_at)
+
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
     # TODO: Add remaining endpoint implementations
-    # T034: GET /api/v1/graphs/daily-posts
     # T047: GET /api/v1/graphs/notes-annual
     # T062: GET /api/v1/graphs/notes-evaluation
     # T071: GET /api/v1/graphs/notes-evaluation-status

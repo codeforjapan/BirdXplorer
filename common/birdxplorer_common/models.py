@@ -974,3 +974,33 @@ class DailyNotesCreationDataItem(BaseModel):
         ge=0,
         description="Count of notes with temporarily published status on this date",
     )
+
+
+class DailyPostCountDataItem(BaseModel):
+    """Daily post counts within a specified month range.
+
+    Represents post volume for a single day, optionally filtered by
+    associated community note status.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel,
+    )
+
+    date: str = PydanticField(
+        ...,
+        description="Date in YYYY-MM-DD format (UTC timezone)",
+        examples=["2025-01-15"],
+    )
+
+    post_count: int = PydanticField(
+        ...,
+        ge=0,
+        description="Total number of posts created on this date",
+    )
+
+    status: Optional[str] = PydanticField(
+        None,
+        description="Publication status of associated notes (if status filter applied)",
+    )

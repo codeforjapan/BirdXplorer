@@ -497,6 +497,16 @@ def mock_storage(
 
     mock.get_daily_note_counts.side_effect = _get_daily_note_counts
 
+    def _get_daily_post_counts(
+        start_date: str,
+        end_date: str,
+        status_filter: Union[str, None] = None,
+    ) -> List[dict[str, Union[str, int]]]:
+        # Return empty list for mock - tests can override if needed
+        return []
+
+    mock.get_daily_post_counts.side_effect = _get_daily_post_counts
+
     def _fill_daily_gaps(
         data: List[dict[str, Union[str, int]]], start_date: str, end_date: str
     ) -> List[dict[str, Union[str, int]]]:
