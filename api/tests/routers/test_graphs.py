@@ -195,3 +195,71 @@ def test_daily_posts_without_notes_default_unpublished(client: TestClient, note_
 
     res_json = response.json()
     assert "data" in res_json
+
+
+# User Story 3: Notes Annual Tests (T041-T043)
+def test_notes_annual_get_success(client: TestClient, note_samples: List[Note]) -> None:
+    """Test GET /api/v1/graphs/notes-annual returns valid response."""
+    response = client.get("/api/v1/graphs/notes-annual?range=2006-01_2006-12")
+
+    # Print error for debugging if not 200
+    if response.status_code != 200:
+        print(f"\nError response: {response.json()}")
+
+    assert response.status_code == 200
+
+    res_json = response.json()
+    assert "data" in res_json
+    assert "updatedAt" in res_json
+    assert isinstance(res_json["data"], list)
+    assert isinstance(res_json["updatedAt"], str)
+
+    # Verify data item structure if data exists
+    if res_json["data"]:
+        item = res_json["data"][0]
+        assert "month" in item
+        assert "published" in item
+        assert "evaluating" in item
+        assert "unpublished" in item
+        assert "temporarilyPublished" in item  # camelCase
+        assert "publicationRate" in item  # camelCase
+
+
+def test_notes_annual_publication_rate_calculation(client: TestClient, note_samples: List[Note]) -> None:
+    """Test publication rate calculation (published / total)."""
+    response = client.get("/api/v1/graphs/notes-annual?range=2006-01_2006-12")
+    assert response.status_code == 200
+
+    res_json = response.json()
+    for item in res_json["data"]:
+        total = item["published"] + item["evaluating"] + item["unpublished"] + item["temporarilyPublished"]
+        if total > 0:
+            expected_rate = item["published"] / total
+            # Publication rate should match expected calculation
+            assert abs(item["publicationRate"] - expected_rate) < 0.001
+        else:
+            # Zero notes should have 0.0 rate
+            assert item["publicationRate"] == 0.0
+
+
+def test_notes_annual_zero_division_handling(client: TestClient, note_samples: List[Note]) -> None:
+    """Test zero-division handling (0 notes returns 0.0 rate)."""
+    # Request range with no data
+    response = client.get("/api/v1/graphs/notes-annual?range=2000-01_2000-02")
+    assert response.status_code == 200
+
+    res_json = response.json()
+    # All months should have 0.0 publication rate when no notes
+    for item in res_json["data"]:
+        assert item["publicationRate"] == 0.0
+
+
+def test_notes_annual_range_validation_max_24_months(client: TestClient) -> None:
+    """Test range validation (max 24 months)."""
+    # Request range exceeding 24 months
+    response = client.get("/api/v1/graphs/notes-annual?range=2020-01_2023-01")
+    assert response.status_code == 400
+
+    res_json = response.json()
+    assert "detail" in res_json
+    assert "24 months" in res_json["detail"].lower() or "exceed" in res_json["detail"].lower()

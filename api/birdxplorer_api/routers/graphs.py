@@ -12,6 +12,7 @@ from birdxplorer_common.models import (
     DailyNotesCreationDataItem,
     DailyPostCountDataItem,
     GraphListResponse,
+    MonthlyNoteDataItem,
 )
 from birdxplorer_common.storage import Storage
 
@@ -243,8 +244,91 @@ def gen_router(storage: Storage) -> APIRouter:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
+    @router.get("/notes-annual", response_model=GraphListResponse[MonthlyNoteDataItem])
+    def get_notes_annual(
+        range: str = Query(..., description="Month range in format YYYY-MM_YYYY-MM"),
+        status: StatusType = Query("all", description="Filter by note publication status"),
+    ) -> GraphListResponse[MonthlyNoteDataItem]:
+        """Get monthly note publication rates.
+
+        Returns aggregated monthly counts of community notes with publication rate
+        (ratio of published notes to total notes) for the specified month range.
+
+        **Publication Rate**: published_count / total_notes (0.0 if no notes)
+
+        **Status Filter:**
+        - `all`: All notes regardless of status (default)
+        - `published`: Only published notes
+        - `temporarilyPublished`: Only temporarily published notes
+        - `evaluating`: Only notes being evaluated
+        - `unpublished`: Only unpublished notes
+
+        **Date Range Format:**
+        - Format: `YYYY-MM_YYYY-MM` (e.g., "2024-01_2024-12")
+        - Maximum range: 24 months
+        - Both months inclusive
+
+        Args:
+            range: Month range for aggregation (required)
+            status: Filter by specific note status or "all" (default: "all")
+
+        Returns:
+            GraphListResponse containing:
+            - data: List of monthly aggregated note counts with publication rates
+            - updatedAt: Last data update timestamp (YYYY-MM-DD format)
+
+        Raises:
+            HTTPException: 400 if range format is invalid or exceeds limits
+        """
+        try:
+            # Parse and validate month range
+            start_month, end_month = _parse_month_range(range)
+
+            # Validate range doesn't exceed 24 months
+            months_diff = (end_month.year - start_month.year) * 12 + (end_month.month - start_month.month)
+            if months_diff > 24:
+                raise ValueError("Date range cannot exceed 24 months")
+
+            # Fetch data from storage
+            raw_data = storage.get_monthly_note_counts(
+                start_month=start_month.strftime("%Y-%m"),
+                end_month=end_month.strftime("%Y-%m"),
+                status_filter=status,
+            )
+
+            # Fill gaps for continuous time series
+            # If no data, create template for monthly note structure
+            if not raw_data:
+                template = {
+                    "month": start_month.strftime("%Y-%m"),
+                    "published": 0,
+                    "evaluating": 0,
+                    "unpublished": 0,
+                    "temporarilyPublished": 0,
+                    "publication_rate": 0.0,
+                }
+                raw_data = [template]
+
+            filled_data = storage._fill_monthly_gaps(
+                data=raw_data,
+                start_month=start_month.strftime("%Y-%m"),
+                end_month=end_month.strftime("%Y-%m"),
+            )
+
+            # Convert to Pydantic models
+            items = [MonthlyNoteDataItem(**item) for item in filled_data]
+
+            # Get metadata timestamp
+            updated_at = storage.get_graph_updated_at("notes")
+
+            return GraphListResponse(data=items, updated_at=updated_at)
+
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
     # TODO: Add remaining endpoint implementations
-    # T047: GET /api/v1/graphs/notes-annual
     # T062: GET /api/v1/graphs/notes-evaluation
     # T071: GET /api/v1/graphs/notes-evaluation-status
     # T084: GET /api/v1/graphs/post-influence

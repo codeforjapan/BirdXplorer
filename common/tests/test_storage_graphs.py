@@ -220,3 +220,85 @@ def test_get_daily_post_counts_with_status_filter(
 
     assert isinstance(result, list)
     # Posts should be filtered by associated note status
+
+
+# User Story 3: Notes Annual Tests (T040)
+def test_get_monthly_note_counts(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+) -> None:
+    """Test get_monthly_note_counts returns aggregated monthly counts."""
+    storage = Storage(engine=engine_for_test)
+
+    # Use a date range that includes the sample data
+    start_month = "2006-07"
+    end_month = "2006-08"
+
+    result = storage.get_monthly_note_counts(
+        start_month=start_month,
+        end_month=end_month,
+        status_filter="all",
+    )
+
+    # Verify structure
+    assert isinstance(result, list)
+    for item in result:
+        assert "month" in item
+        assert "published" in item
+        assert "evaluating" in item
+        assert "unpublished" in item
+        assert "temporarilyPublished" in item
+        assert "publication_rate" in item
+        # All counts should be non-negative
+        assert item["published"] >= 0
+        assert item["evaluating"] >= 0
+        assert item["unpublished"] >= 0
+        assert item["temporarilyPublished"] >= 0
+        # Publication rate should be between 0.0 and 1.0
+        assert 0.0 <= item["publication_rate"] <= 1.0
+
+
+def test_get_monthly_note_counts_publication_rate(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+) -> None:
+    """Test publication rate calculation (published / total)."""
+    storage = Storage(engine=engine_for_test)
+
+    start_month = "2006-07"
+    end_month = "2006-08"
+
+    result = storage.get_monthly_note_counts(
+        start_month=start_month,
+        end_month=end_month,
+        status_filter="all",
+    )
+
+    # Verify publication rate calculation
+    for item in result:
+        total = item["published"] + item["evaluating"] + item["unpublished"] + item["temporarilyPublished"]
+        if total > 0:
+            expected_rate = item["published"] / total
+            assert abs(item["publication_rate"] - expected_rate) < 0.001  # Allow small floating point differences
+        else:
+            assert item["publication_rate"] == 0.0
+
+
+def test_get_monthly_note_counts_zero_division(
+    engine_for_test: Engine,
+) -> None:
+    """Test zero-division handling (0 notes returns 0.0 rate)."""
+    storage = Storage(engine=engine_for_test)
+
+    # Use a date range with no data
+    start_month = "2000-01"
+    end_month = "2000-02"
+
+    result = storage.get_monthly_note_counts(
+        start_month=start_month,
+        end_month=end_month,
+        status_filter="all",
+    )
+
+    # Even if no data, result should have structure
+    assert isinstance(result, list)

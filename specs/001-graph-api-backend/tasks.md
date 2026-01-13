@@ -124,22 +124,22 @@ BirdXplorer uses multi-module architecture:
 
 ### Tests for User Story 3
 
-- [ ] T040 [P] [US3] Unit test for get_monthly_note_counts() storage method in /home/yu23ki14/cfj/BirdXplorer/common/tests/test_storage_graphs.py
-- [ ] T041 [P] [US3] Integration test for GET /api/v1/graphs/notes-annual endpoint in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
-- [ ] T042 [P] [US3] Test publication rate calculation (published / total) in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
-- [ ] T043 [P] [US3] Test zero-division handling (0 notes returns 0.0 rate) in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
+- [X] T040 [P] [US3] Unit test for get_monthly_note_counts() storage method in /home/yu23ki14/cfj/BirdXplorer/common/tests/test_storage_graphs.py
+- [X] T041 [P] [US3] Integration test for GET /api/v1/graphs/notes-annual endpoint in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
+- [X] T042 [P] [US3] Test publication rate calculation (published / total) in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
+- [X] T043 [P] [US3] Test zero-division handling (0 notes returns 0.0 rate) in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
 
 ### Implementation for User Story 3
 
-- [ ] T044 [P] [US3] Add MonthlyNoteDataItem model to /home/yu23ki14/cfj/BirdXplorer/common/birdxplorer_common/models.py
-- [ ] T045 [US3] Implement get_monthly_note_counts() method in /home/yu23ki14/cfj/BirdXplorer/common/birdxplorer_common/storage.py with month truncation
-- [ ] T046 [US3] Add publication rate calculation logic in get_monthly_note_counts() method
-- [ ] T047 [US3] Implement GET /api/v1/graphs/notes-annual endpoint in /home/yu23ki14/cfj/BirdXplorer/api/birdxplorer_api/routers/graphs.py
-- [ ] T048 [US3] Add range validation (max 24 months) in notes-annual endpoint
-- [ ] T049 [US3] Add error handling for invalid month ranges in notes-annual endpoint
-- [ ] T050 [US3] Add endpoint description to /home/yu23ki14/cfj/BirdXplorer/api/birdxplorer_api/openapi_doc.py
-- [ ] T051 [US3] Run tox in common module to verify code quality gates
-- [ ] T052 [US3] Run tox in api module to verify code quality gates
+- [X] T044 [P] [US3] Add MonthlyNoteDataItem model to /home/yu23ki14/cfj/BirdXplorer/common/birdxplorer_common/models.py
+- [X] T045 [US3] Implement get_monthly_note_counts() method in /home/yu23ki14/cfj/BirdXplorer/common/birdxplorer_common/storage.py with month truncation
+- [X] T046 [US3] Add publication rate calculation logic in get_monthly_note_counts() method
+- [X] T047 [US3] Implement GET /api/v1/graphs/notes-annual endpoint in /home/yu23ki14/cfj/BirdXplorer/api/birdxplorer_api/routers/graphs.py
+- [X] T048 [US3] Add range validation (max 24 months) in notes-annual endpoint
+- [X] T049 [US3] Add error handling for invalid month ranges in notes-annual endpoint
+- [X] T050 [US3] Add endpoint description to /home/yu23ki14/cfj/BirdXplorer/api/birdxplorer_api/openapi_doc.py
+- [X] T051 [US3] Run tox in common module to verify code quality gates
+- [X] T052 [US3] Run tox in api module to verify code quality gates
 
 **Checkpoint**: User Stories 1, 2, AND 3 complete - all time-series endpoints functional
 

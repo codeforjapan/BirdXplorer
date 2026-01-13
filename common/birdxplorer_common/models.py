@@ -1004,3 +1004,53 @@ class DailyPostCountDataItem(BaseModel):
         None,
         description="Publication status of associated notes (if status filter applied)",
     )
+
+
+class MonthlyNoteDataItem(BaseModel):
+    """Monthly community note counts with publication rate.
+
+    Aggregates note creation data by month and calculates the percentage
+    of notes that achieved published status.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel,
+    )
+
+    month: str = PydanticField(
+        ...,
+        description="Month in YYYY-MM format",
+        examples=["2025-01"],
+    )
+
+    published: int = PydanticField(
+        ...,
+        ge=0,
+        description="Count of notes with published status in this month",
+    )
+
+    evaluating: int = PydanticField(
+        ...,
+        ge=0,
+        description="Count of notes with evaluating status in this month",
+    )
+
+    unpublished: int = PydanticField(
+        ...,
+        ge=0,
+        description="Count of notes with unpublished status in this month",
+    )
+
+    temporarily_published: int = PydanticField(
+        ...,
+        ge=0,
+        description="Count of notes with temporarily published status in this month",
+    )
+
+    publication_rate: float = PydanticField(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Ratio of published notes to total notes (0.0 to 1.0). Returns 0.0 if no notes.",
+    )

@@ -507,6 +507,16 @@ def mock_storage(
 
     mock.get_daily_post_counts.side_effect = _get_daily_post_counts
 
+    def _get_monthly_note_counts(
+        start_month: str,
+        end_month: str,
+        status_filter: Union[str, None] = None,
+    ) -> List[dict[str, Union[str, int, float]]]:
+        # Return empty list for mock - tests can override if needed
+        return []
+
+    mock.get_monthly_note_counts.side_effect = _get_monthly_note_counts
+
     def _fill_daily_gaps(
         data: List[dict[str, Union[str, int]]], start_date: str, end_date: str
     ) -> List[dict[str, Union[str, int]]]:
@@ -516,6 +526,16 @@ def mock_storage(
         return Storage._fill_daily_gaps(data, start_date, end_date)
 
     mock._fill_daily_gaps.side_effect = _fill_daily_gaps
+
+    def _fill_monthly_gaps(
+        data: List[dict[str, Union[str, int, float]]], start_month: str, end_month: str
+    ) -> List[dict[str, Union[str, int, float]]]:
+        # Pass through for mock - already tested in common module
+        from birdxplorer_common.storage import Storage
+
+        return Storage._fill_monthly_gaps(data, start_month, end_month)
+
+    mock._fill_monthly_gaps.side_effect = _fill_monthly_gaps
 
     def _get_graph_updated_at(table: str) -> str:
         # Return a fixed date for testing
