@@ -302,3 +302,34 @@ def test_get_monthly_note_counts_zero_division(
 
     # Even if no data, result should have structure
     assert isinstance(result, list)
+
+
+# User Story 4: Notes Evaluation Tests (T053)
+def test_get_note_evaluation_points(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """Test get_note_evaluation_points returns individual note metrics."""
+    storage = Storage(engine=engine_for_test)
+
+    # Get evaluation points
+    result = storage.get_note_evaluation_points(
+        period=None,  # All time
+        status_filter="all",
+        limit=200,
+    )
+
+    # Verify structure
+    assert isinstance(result, list)
+    for item in result:
+        assert "note_id" in item
+        assert "name" in item
+        assert "helpful_count" in item
+        assert "not_helpful_count" in item
+        assert "impression_count" in item
+        assert "status" in item
+        # Counts should be non-negative
+        assert item["helpful_count"] >= 0
+        assert item["not_helpful_count"] >= 0
+        assert item["impression_count"] >= 0

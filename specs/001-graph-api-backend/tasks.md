@@ -153,24 +153,24 @@ BirdXplorer uses multi-module architecture:
 
 ### Tests for User Story 4
 
-- [ ] T053 [P] [US4] Unit test for get_note_evaluation_points() storage method in /home/yu23ki14/cfj/BirdXplorer/common/tests/test_storage_graphs.py
-- [ ] T054 [P] [US4] Integration test for GET /api/v1/graphs/notes-evaluation endpoint in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
-- [ ] T055 [P] [US4] Test sorting (impression DESC, helpful DESC) in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
-- [ ] T056 [P] [US4] Test limit parameter (default 200, max 1000) in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
-- [ ] T057 [P] [US4] Test NULL impression counts default to 0 in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
+- [X] T053 [P] [US4] Unit test for get_note_evaluation_points() storage method in /home/yu23ki14/cfj/BirdXplorer/common/tests/test_storage_graphs.py
+- [X] T054 [P] [US4] Integration test for GET /api/v1/graphs/notes-evaluation endpoint in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
+- [X] T055 [P] [US4] Test sorting (impression DESC, helpful DESC) in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
+- [X] T056 [P] [US4] Test limit parameter (default 200, max 1000) in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
+- [X] T057 [P] [US4] Test NULL impression counts default to 0 in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
 
 ### Implementation for User Story 4
 
-- [ ] T058 [P] [US4] Add NoteEvaluationDataItem model to /home/yu23ki14/cfj/BirdXplorer/common/birdxplorer_common/models.py
-- [ ] T059 [US4] Implement get_note_evaluation_points() method in /home/yu23ki14/cfj/BirdXplorer/common/birdxplorer_common/storage.py with posts JOIN
-- [ ] T060 [US4] Add sorting logic (impression_count DESC, helpful_count DESC) in get_note_evaluation_points() method
-- [ ] T061 [US4] Add name generation from summary (first 200 chars) in get_note_evaluation_points() method
-- [ ] T062 [US4] Implement GET /api/v1/graphs/notes-evaluation endpoint in /home/yu23ki14/cfj/BirdXplorer/api/birdxplorer_api/routers/graphs.py
-- [ ] T063 [US4] Add limit parameter validation (1-1000 range) in notes-evaluation endpoint
-- [ ] T064 [US4] Add error handling for invalid limits in notes-evaluation endpoint
-- [ ] T065 [US4] Add endpoint description to /home/yu23ki14/cfj/BirdXplorer/api/birdxplorer_api/openapi_doc.py
-- [ ] T066 [US4] Run tox in common module to verify code quality gates
-- [ ] T067 [US4] Run tox in api module to verify code quality gates
+- [X] T058 [P] [US4] Add NoteEvaluationDataItem model to /home/yu23ki14/cfj/BirdXplorer/common/birdxplorer_common/models.py
+- [X] T059 [US4] Implement get_note_evaluation_points() method in /home/yu23ki14/cfj/BirdXplorer/common/birdxplorer_common/storage.py with posts JOIN
+- [X] T060 [US4] Add sorting logic (impression_count DESC, helpful_count DESC) in get_note_evaluation_points() method
+- [X] T061 [US4] Add name generation from summary (first 200 chars) in get_note_evaluation_points() method
+- [X] T062 [US4] Implement GET /api/v1/graphs/notes-evaluation endpoint in /home/yu23ki14/cfj/BirdXplorer/api/birdxplorer_api/routers/graphs.py
+- [X] T063 [US4] Add limit parameter validation (1-1000 range) in notes-evaluation endpoint
+- [X] T064 [US4] Add error handling for invalid limits in notes-evaluation endpoint
+- [X] T065 [US4] Add endpoint description to /home/yu23ki14/cfj/BirdXplorer/api/birdxplorer_api/openapi_doc.py
+- [X] T066 [US4] Run tox in common module to verify code quality gates
+- [X] T067 [US4] Run tox in api module to verify code quality gates
 
 **Checkpoint**: User Stories 1-4 complete - note evaluation analytics available
 

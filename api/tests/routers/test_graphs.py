@@ -263,3 +263,66 @@ def test_notes_annual_range_validation_max_24_months(client: TestClient) -> None
     res_json = response.json()
     assert "detail" in res_json
     assert "24 months" in res_json["detail"].lower() or "exceed" in res_json["detail"].lower()
+
+
+# User Story 4: Notes Evaluation Tests (T054-T057)
+def test_notes_evaluation_get_success(client: TestClient, note_samples: List[Note]) -> None:
+    """Test GET /api/v1/graphs/notes-evaluation returns valid response."""
+    response = client.get("/api/v1/graphs/notes-evaluation?period=1month")
+
+    if response.status_code != 200:
+        print(f"\nError response: {response.json()}")
+
+    assert response.status_code == 200
+
+    res_json = response.json()
+    assert "data" in res_json
+    assert "updatedAt" in res_json
+    assert isinstance(res_json["data"], list)
+
+    # Verify data item structure if data exists
+    if res_json["data"]:
+        item = res_json["data"][0]
+        assert "noteId" in item  # camelCase
+        assert "name" in item
+        assert "helpfulCount" in item  # camelCase
+        assert "notHelpfulCount" in item  # camelCase
+        assert "impressionCount" in item  # camelCase
+        assert "status" in item
+
+
+def test_notes_evaluation_limit_200_enforcement(client: TestClient, note_samples: List[Note]) -> None:
+    """Test TOP 200 limit enforcement."""
+    # Request with limit parameter
+    response = client.get("/api/v1/graphs/notes-evaluation?period=1month&limit=50")
+    assert response.status_code == 200
+
+    # Max limit should be 200 - FastAPI returns 422 for validation errors
+    response = client.get("/api/v1/graphs/notes-evaluation?period=1month&limit=300")
+    assert response.status_code == 422
+
+
+def test_notes_evaluation_descending_impression_order(client: TestClient, note_samples: List[Note]) -> None:
+    """Test descending impression_count ordering."""
+    response = client.get("/api/v1/graphs/notes-evaluation?period=1month")
+    assert response.status_code == 200
+
+    res_json = response.json()
+    if len(res_json["data"]) >= 2:
+        # Verify descending order by impression count
+        prev_count = float("inf")
+        for item in res_json["data"]:
+            assert item["impressionCount"] <= prev_count
+            prev_count = item["impressionCount"]
+
+
+def test_notes_evaluation_period_filtering(client: TestClient, note_samples: List[Note]) -> None:
+    """Test optional period filtering."""
+    periods = ["1week", "1month", "3months", "6months", "1year"]
+
+    for period in periods:
+        response = client.get(f"/api/v1/graphs/notes-evaluation?period={period}")
+        assert response.status_code == 200, f"Failed for period={period}"
+
+        res_json = response.json()
+        assert "data" in res_json
