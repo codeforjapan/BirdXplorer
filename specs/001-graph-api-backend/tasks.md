@@ -184,17 +184,17 @@ BirdXplorer uses multi-module architecture:
 
 ### Tests for User Story 5
 
-- [ ] T068 [P] [US5] Integration test for GET /api/v1/graphs/notes-evaluation-status endpoint in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
-- [ ] T069 [P] [US5] Test sorting (helpful DESC, not_helpful ASC) in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
-- [ ] T070 [P] [US5] Test default limit of 100 notes in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
+- [X] T068 [P] [US5] Integration test for GET /api/v1/graphs/notes-evaluation-status endpoint in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
+- [X] T069 [P] [US5] Test sorting (helpful DESC, not_helpful ASC) in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
+- [X] T070 [P] [US5] Test default limit of 100 notes in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
 
 ### Implementation for User Story 5
 
-- [ ] T071 [US5] Implement GET /api/v1/graphs/notes-evaluation-status endpoint in /home/yu23ki14/cfj/BirdXplorer/api/birdxplorer_api/routers/graphs.py
-- [ ] T072 [US5] Reuse get_note_evaluation_points() with different sort order (helpful DESC, not_helpful ASC)
-- [ ] T073 [US5] Add default limit of 100 (no max override) in notes-evaluation-status endpoint
-- [ ] T074 [US5] Add endpoint description to /home/yu23ki14/cfj/BirdXplorer/api/birdxplorer_api/openapi_doc.py
-- [ ] T075 [US5] Run tox in api module to verify code quality gates
+- [X] T071 [US5] Implement GET /api/v1/graphs/notes-evaluation-status endpoint in /home/yu23ki14/cfj/BirdXplorer/api/birdxplorer_api/routers/graphs.py
+- [X] T072 [US5] Reuse get_note_evaluation_points() with different sort order (helpful DESC, not_helpful ASC)
+- [X] T073 [US5] Add default limit of 100 (no max override) in notes-evaluation-status endpoint
+- [X] T074 [US5] Add endpoint description to /home/yu23ki14/cfj/BirdXplorer/api/birdxplorer_api/openapi_doc.py
+- [X] T075 [US5] Run tox in api module to verify code quality gates
 
 **Checkpoint**: User Stories 1-5 complete - moderation view available
 
