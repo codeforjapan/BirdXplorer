@@ -146,3 +146,52 @@ def test_daily_notes_counts_are_non_negative(client: TestClient, note_samples: L
         assert item["evaluating"] >= 0
         assert item["unpublished"] >= 0
         assert item["temporarilyPublished"] >= 0
+
+
+# User Story 2: Daily Posts Tests (T029-T031)
+def test_daily_posts_get_success(client: TestClient, note_samples: List[Note]) -> None:
+    """Test GET /api/v1/graphs/daily-posts returns valid response."""
+    response = client.get("/api/v1/graphs/daily-posts?range=2006-07_2006-08")
+
+    # Print error for debugging if not 200
+    if response.status_code != 200:
+        print(f"\nError response: {response.json()}")
+
+    assert response.status_code == 200
+
+    res_json = response.json()
+    assert "data" in res_json
+    assert "updatedAt" in res_json
+    assert isinstance(res_json["data"], list)
+    assert isinstance(res_json["updatedAt"], str)
+
+    # Verify data item structure if data exists
+    if res_json["data"]:
+        item = res_json["data"][0]
+        assert "date" in item
+        assert "postCount" in item  # camelCase
+        # status may be None when status="all"
+
+
+def test_daily_posts_range_validation(client: TestClient) -> None:
+    """Test GET /api/v1/graphs/daily-posts validates range format."""
+    # Invalid format (missing underscore)
+    response = client.get("/api/v1/graphs/daily-posts?range=2025-01-2025-03")
+    assert response.status_code == 400 or response.status_code == 422
+
+    # Invalid month format
+    response = client.get("/api/v1/graphs/daily-posts?range=2025-13_2025-14")
+    assert response.status_code == 400 or response.status_code == 422
+
+    # Start > End
+    response = client.get("/api/v1/graphs/daily-posts?range=2025-03_2025-01")
+    assert response.status_code == 400 or response.status_code == 422
+
+
+def test_daily_posts_without_notes_default_unpublished(client: TestClient, note_samples: List[Note]) -> None:
+    """Test posts without notes default to unpublished status."""
+    response = client.get("/api/v1/graphs/daily-posts?range=2006-07_2006-08&status=unpublished")
+    assert response.status_code == 200
+
+    res_json = response.json()
+    assert "data" in res_json

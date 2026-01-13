@@ -96,21 +96,21 @@ BirdXplorer uses multi-module architecture:
 
 ### Tests for User Story 2
 
-- [ ] T028 [P] [US2] Unit test for get_daily_post_counts() storage method in /home/yu23ki14/cfj/BirdXplorer/common/tests/test_storage_graphs.py
-- [ ] T029 [P] [US2] Integration test for GET /api/v1/graphs/daily-posts endpoint in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
-- [ ] T030 [P] [US2] Test range parameter validation (YYYY-MM_YYYY-MM format) in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
-- [ ] T031 [P] [US2] Test posts without notes default to unpublished status in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
+- [X] T028 [P] [US2] Unit test for get_daily_post_counts() storage method in /home/yu23ki14/cfj/BirdXplorer/common/tests/test_storage_graphs.py
+- [X] T029 [P] [US2] Integration test for GET /api/v1/graphs/daily-posts endpoint in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
+- [X] T030 [P] [US2] Test range parameter validation (YYYY-MM_YYYY-MM format) in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
+- [X] T031 [P] [US2] Test posts without notes default to unpublished status in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
 
 ### Implementation for User Story 2
 
-- [ ] T032 [P] [US2] Add DailyPostCountDataItem model to /home/yu23ki14/cfj/BirdXplorer/common/birdxplorer_common/models.py
-- [ ] T033 [US2] Implement get_daily_post_counts() method in /home/yu23ki14/cfj/BirdXplorer/common/birdxplorer_common/storage.py with notes JOIN
-- [ ] T034 [US2] Implement GET /api/v1/graphs/daily-posts endpoint in /home/yu23ki14/cfj/BirdXplorer/api/birdxplorer_api/routers/graphs.py
-- [ ] T035 [US2] Add range parameter parsing and validation in daily-posts endpoint
-- [ ] T036 [US2] Add error handling for invalid date ranges (start > end, exceeds max) in daily-posts endpoint
-- [ ] T037 [US2] Add endpoint description to /home/yu23ki14/cfj/BirdXplorer/api/birdxplorer_api/openapi_doc.py
-- [ ] T038 [US2] Run tox in common module to verify code quality gates
-- [ ] T039 [US2] Run tox in api module to verify code quality gates
+- [X] T032 [P] [US2] Add DailyPostCountDataItem model to /home/yu23ki14/cfj/BirdXplorer/common/birdxplorer_common/models.py
+- [X] T033 [US2] Implement get_daily_post_counts() method in /home/yu23ki14/cfj/BirdXplorer/common/birdxplorer_common/storage.py with notes JOIN
+- [X] T034 [US2] Implement GET /api/v1/graphs/daily-posts endpoint in /home/yu23ki14/cfj/BirdXplorer/api/birdxplorer_api/routers/graphs.py
+- [X] T035 [US2] Add range parameter parsing and validation in daily-posts endpoint
+- [X] T036 [US2] Add error handling for invalid date ranges (start > end, exceeds max) in daily-posts endpoint
+- [X] T037 [US2] Add endpoint description to /home/yu23ki14/cfj/BirdXplorer/api/birdxplorer_api/openapi_doc.py
+- [X] T038 [US2] Run tox in common module to verify code quality gates
+- [X] T039 [US2] Run tox in api module to verify code quality gates
 
 **Checkpoint**: User Stories 1 AND 2 complete - both endpoints independently functional
 

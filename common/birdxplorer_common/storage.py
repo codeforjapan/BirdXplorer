@@ -2,7 +2,16 @@ from typing import Any, Generator, List, Optional, Tuple, Union
 
 from psycopg2.extensions import AsIs, register_adapter
 from pydantic import AnyUrl, HttpUrl
-from sqlalchemy import ForeignKey, and_, case, create_engine, func, select
+from sqlalchemy import (
+    ForeignKey,
+    and_,
+    case,
+    create_engine,
+    distinct,
+    func,
+    or_,
+    select,
+)
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 from sqlalchemy.orm.query import RowReturningQuery
@@ -435,15 +444,31 @@ class Storage:
                 result.append(by_date[date_str])
             else:
                 # Fill with zeros for missing date
-                result.append(
-                    {
-                        "date": date_str,
-                        "published": 0,
-                        "evaluating": 0,
-                        "unpublished": 0,
-                        "temporarilyPublished": 0,
-                    }
-                )
+                # Detect data structure from first item if available
+                if data and len(data) > 0:
+                    first_item = data[0]
+                    zero_item: dict[str, Any] = {"date": date_str}
+                    # Copy structure from first item, setting numeric values to 0
+                    for key, value in first_item.items():
+                        if key != "date":
+                            if isinstance(value, int):
+                                zero_item[key] = 0
+                            elif isinstance(value, float):
+                                zero_item[key] = 0.0
+                            else:
+                                zero_item[key] = value  # Preserve non-numeric values
+                    result.append(zero_item)
+                else:
+                    # Default structure for notes data
+                    result.append(
+                        {
+                            "date": date_str,
+                            "published": 0,
+                            "evaluating": 0,
+                            "unpublished": 0,
+                            "temporarilyPublished": 0,
+                        }
+                    )
             current += timedelta(days=1)
 
         return result
@@ -620,6 +645,103 @@ class Storage:
                         "temporarilyPublished": int(row.temporarilyPublished),
                     }
                 )
+
+            return data
+
+    def get_daily_post_counts(
+        self,
+        start_date: str,
+        end_date: str,
+        status_filter: Optional[str] = None,
+    ) -> List[dict[str, Any]]:
+        """Get daily aggregated post counts with optional note status filter.
+
+        Args:
+            start_date: Start date in YYYY-MM-DD format (inclusive)
+            end_date: End date in YYYY-MM-DD format (inclusive)
+            status_filter: Optional status filter for associated notes
+                ("all", "published", "evaluating", "unpublished", "temporarilyPublished")
+
+        Returns:
+            List of dictionaries with keys: date, post_count, status (optional)
+
+        Example response format:
+            [
+                {"date": "2025-01-01", "post_count": 150, "status": "published"},
+                {"date": "2025-01-02", "post_count": 142, "status": "published"},
+                ...
+            ]
+        """
+        from datetime import datetime, timezone
+
+        # Convert date strings to TwitterTimestamp (milliseconds)
+        start_dt = datetime.fromisoformat(start_date).replace(tzinfo=timezone.utc)
+        end_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+        start_ts = int(start_dt.timestamp() * 1000)
+        end_ts = int(end_dt.timestamp() * 1000)
+
+        # Get publication status CASE expression
+        status_expr = self._get_publication_status_case()
+
+        # Build query - posts LEFT JOIN notes to include posts without notes
+        if status_filter == "all" or status_filter is None:
+            # When no filter, just count all posts
+            query = (
+                select(
+                    func.date_trunc("day", func.to_timestamp(PostRecord.created_at / 1000)).label("day"),
+                    func.count(PostRecord.post_id).label("post_count"),
+                )
+                .where(
+                    PostRecord.created_at >= start_ts,
+                    PostRecord.created_at <= end_ts,
+                )
+                .group_by("day")
+                .order_by("day")
+            )
+        else:
+            # When filtering by status, join with notes and filter
+            query = (
+                select(
+                    func.date_trunc("day", func.to_timestamp(PostRecord.created_at / 1000)).label("day"),
+                    func.count(distinct(PostRecord.post_id)).label("post_count"),
+                )
+                .select_from(PostRecord)
+                .outerjoin(NoteRecord, PostRecord.post_id == NoteRecord.post_id)
+                .where(
+                    PostRecord.created_at >= start_ts,
+                    PostRecord.created_at <= end_ts,
+                )
+            )
+
+            # Apply status filter
+            # Posts without notes are considered "unpublished"
+            if status_filter == "unpublished":
+                query = query.where(or_(NoteRecord.note_id.is_(None), status_expr == "unpublished"))
+            else:
+                query = query.where(status_expr == status_filter)
+
+            query = query.group_by("day").order_by("day")
+
+        # Execute query
+        with Session(self._engine) as session:
+            result = session.execute(query)
+            rows = result.fetchall()
+
+            # Convert to list of dictionaries
+            data = []
+            for row in rows:
+                # Convert timestamp to date string
+                date_str = row.day.strftime("%Y-%m-%d")
+                item: dict[str, Any] = {
+                    "date": date_str,
+                    "post_count": int(row.post_count),
+                }
+
+                # Add status only if filtering by specific status
+                if status_filter and status_filter != "all":
+                    item["status"] = status_filter
+
+                data.append(item)
 
             return data
 

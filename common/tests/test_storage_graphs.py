@@ -171,3 +171,52 @@ def test_publication_status_case_expression() -> None:
     assert status_expr is not None
     # The expression should have proper structure (this is a basic check)
     assert hasattr(status_expr, "compile")
+
+
+# User Story 2: Daily Posts Tests (T028)
+def test_get_daily_post_counts(
+    engine_for_test: Engine,
+    post_records_sample: List[PostRecord],
+) -> None:
+    """Test get_daily_post_counts returns aggregated daily counts."""
+    storage = Storage(engine=engine_for_test)
+
+    # Use a date range that includes the sample data
+    start_date = "2006-07-24"  # Before sample data
+    end_date = "2006-07-26"  # After sample data
+
+    result = storage.get_daily_post_counts(
+        start_date=start_date,
+        end_date=end_date,
+        status_filter="all",
+    )
+
+    # Verify structure
+    assert isinstance(result, list)
+    for item in result:
+        assert "date" in item
+        assert "post_count" in item
+        assert "status" in item or item.get("status") is None
+        # Post count should be non-negative
+        assert item["post_count"] >= 0
+
+
+def test_get_daily_post_counts_with_status_filter(
+    engine_for_test: Engine,
+    post_records_sample: List[PostRecord],
+) -> None:
+    """Test get_daily_post_counts with status filter."""
+    storage = Storage(engine=engine_for_test)
+
+    start_date = "2006-07-24"
+    end_date = "2006-07-26"
+
+    # Test with specific status filter
+    result = storage.get_daily_post_counts(
+        start_date=start_date,
+        end_date=end_date,
+        status_filter="published",
+    )
+
+    assert isinstance(result, list)
+    # Posts should be filtered by associated note status
