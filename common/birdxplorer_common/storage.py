@@ -9,9 +9,18 @@ from sqlalchemy.orm.query import RowReturningQuery
 from sqlalchemy.types import CHAR, DECIMAL, JSON, Integer, String, Text, Uuid
 
 from .logger import get_logger
-from .models import BinaryBool, LanguageIdentifier
+from .models import (
+    BinaryBool,
+    LanguageIdentifier,
+)
 from .models import Link as LinkModel
-from .models import LinkId, Media, MediaDetails, MediaType, NonNegativeInt
+from .models import (
+    LinkId,
+    Media,
+    MediaDetails,
+    MediaType,
+    NonNegativeInt,
+)
 from .models import Note as NoteModel
 from .models import (
     NoteId,
@@ -21,7 +30,10 @@ from .models import (
     ParticipantId,
 )
 from .models import Post as PostModel
-from .models import PostId, SummaryString
+from .models import (
+    PostId,
+    SummaryString,
+)
 from .models import Topic as TopicModel
 from .models import (
     TopicId,
@@ -342,12 +354,13 @@ class Storage:
             return []
 
     @classmethod
-    def _get_publication_status_case(cls) -> case:
+    def _get_publication_status_case(cls) -> Any:
         """Reusable CASE expression for publication status derivation.
 
         Calculates publication status from NoteRecord.current_status and NoteRecord.has_been_helpfuled:
         - published: current_status = CURRENTLY_RATED_HELPFUL
-        - temporarilyPublished: has_been_helpfuled = True AND current_status IN (NEEDS_MORE_RATINGS, CURRENTLY_RATED_NOT_HELPFUL)
+        - temporarilyPublished: has_been_helpfuled = True AND current_status IN
+          (NEEDS_MORE_RATINGS, CURRENTLY_RATED_NOT_HELPFUL)
         - evaluating: current_status = NEEDS_MORE_RATINGS AND has_been_helpfuled = False
         - unpublished: all other cases
 
@@ -391,13 +404,17 @@ class Storage:
             List of dictionaries with all dates filled, gaps set to zero counts
 
         Examples:
-            >>> data = [{"date": "2025-01-01", "published": 5}]
-            >>> Storage._fill_daily_gaps(data, "2025-01-01", "2025-01-03")
-            [
-                {"date": "2025-01-01", "published": 5},
-                {"date": "2025-01-02", "published": 0},
-                {"date": "2025-01-03", "published": 0}
-            ]
+            >>> data = [
+            ...     {"date": "2025-01-01", "published": 5, "evaluating": 10,
+            ...      "unpublished": 2, "temporarilyPublished": 1}
+            ... ]
+            >>> result = Storage._fill_daily_gaps(data, "2025-01-01", "2025-01-03")
+            >>> len(result)
+            3
+            >>> result[0]["date"]
+            '2025-01-01'
+            >>> result[1]["published"]
+            0
         """
         from datetime import date as date_type
         from datetime import timedelta
@@ -449,16 +466,19 @@ class Storage:
             List of dictionaries with all months filled, gaps set to zero counts
 
         Examples:
-            >>> data = [{"month": "2025-01", "published": 10, "publication_rate": 0.5}]
-            >>> Storage._fill_monthly_gaps(data, "2025-01", "2025-03")
-            [
-                {"month": "2025-01", "published": 10, "publication_rate": 0.5},
-                {"month": "2025-02", "published": 0, "publication_rate": 0.0},
-                {"month": "2025-03", "published": 0, "publication_rate": 0.0}
-            ]
+            >>> data = [
+            ...     {"month": "2025-01", "published": 10, "evaluating": 20, "unpublished": 5,
+            ...      "temporarilyPublished": 2, "publication_rate": 0.27}
+            ... ]
+            >>> result = Storage._fill_monthly_gaps(data, "2025-01", "2025-03")
+            >>> len(result)
+            3
+            >>> result[0]["month"]
+            '2025-01'
+            >>> result[1]["published"]
+            0
         """
         from datetime import date as date_type
-        from datetime import timedelta
 
         # Parse month strings (YYYY-MM) to first day of month
         start = date_type.fromisoformat(f"{start_month}-01")
@@ -539,13 +559,13 @@ class Storage:
         Args:
             start_date: Start date in YYYY-MM-DD format (inclusive)
             end_date: End date in YYYY-MM-DD format (inclusive)
-            status_filter: Optional status filter ("all", "published", "evaluating", "unpublished", "temporarilyPublished")
+            status_filter: Optional status filter
+                ("all", "published", "evaluating", "unpublished", "temporarilyPublished")
 
         Returns:
             List of dictionaries with keys: date, published, evaluating, unpublished, temporarilyPublished
 
-        Examples:
-            >>> storage.get_daily_note_counts("2025-01-01", "2025-01-07", "all")
+        Example response format:
             [
                 {"date": "2025-01-01", "published": 5, "evaluating": 10, "unpublished": 2, "temporarilyPublished": 1},
                 {"date": "2025-01-02", "published": 3, "evaluating": 12, "unpublished": 4, "temporarilyPublished": 0},

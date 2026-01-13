@@ -7,6 +7,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    Generic,
     List,
     Literal,
     Optional,
@@ -18,7 +19,9 @@ from typing import (
 from uuid import UUID
 
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import ConfigDict
+from pydantic import (
+    ConfigDict,
+)
 from pydantic import Field as PydanticField
 from pydantic import (
     GetCoreSchemaHandler,
@@ -598,7 +601,8 @@ class PublicationStatus(str, Enum):
 
     Calculated from NoteRecord.current_status and NoteRecord.has_been_helpfuled:
     - published: current_status = CURRENTLY_RATED_HELPFUL
-    - temporarilyPublished: has_been_helpfuled = True AND current_status IN (NEEDS_MORE_RATINGS, CURRENTLY_RATED_NOT_HELPFUL)
+    - temporarilyPublished: has_been_helpfuled = True AND current_status IN
+      (NEEDS_MORE_RATINGS, CURRENTLY_RATED_NOT_HELPFUL)
     - evaluating: current_status = NEEDS_MORE_RATINGS AND has_been_helpfuled = False
     - unpublished: all other cases
     """
@@ -906,7 +910,7 @@ class PaginationMeta(BaseModel):
 T = TypeVar("T")
 
 
-class GraphListResponse(BaseModel):
+class GraphListResponse(BaseModel, Generic[T]):
     """Generic response wrapper for graph API endpoints.
 
     Provides consistent response structure with data array and metadata.
