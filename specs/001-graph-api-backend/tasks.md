@@ -68,10 +68,10 @@ BirdXplorer uses multi-module architecture:
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T016 [P] [US1] Unit test for get_daily_note_counts() storage method in /home/yu23ki14/cfj/BirdXplorer/common/tests/test_storage_graphs.py
-- [ ] T017 [P] [US1] Integration test for GET /api/v1/graphs/daily-notes endpoint in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
-- [ ] T018 [P] [US1] Test status filter parameter for daily-notes endpoint in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
-- [ ] T019 [P] [US1] Test date gap filling for daily-notes endpoint in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
+- [X] T016 [P] [US1] Unit test for get_daily_note_counts() storage method in /home/yu23ki14/cfj/BirdXplorer/common/tests/test_storage_graphs.py
+- [X] T017 [P] [US1] Integration test for GET /api/v1/graphs/daily-notes endpoint in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
+- [X] T018 [P] [US1] Test status filter parameter for daily-notes endpoint in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
+- [X] T019 [P] [US1] Test date gap filling for daily-notes endpoint in /home/yu23ki14/cfj/BirdXplorer/api/tests/routers/test_graphs.py
 
 ### Implementation for User Story 1
 

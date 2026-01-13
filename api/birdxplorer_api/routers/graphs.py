@@ -4,10 +4,9 @@ Provides time-series aggregations and evaluation metrics for community notes and
 """
 
 from datetime import date, timedelta
-from typing import Any, Dict, List, Literal
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from typing_extensions import Annotated
 
 from birdxplorer_common.models import DailyNotesCreationDataItem, GraphListResponse
 from birdxplorer_common.storage import Storage
@@ -55,8 +54,8 @@ def _parse_month_range(range_str: str) -> tuple[date, date]:
         ValueError: If format is invalid or start > end
 
     Examples:
-        >>> _parse_month_range("2025-01_2025-03")
-        (date(2025, 1, 1), date(2025, 3, 1))
+        >>> _parse_month_range("2025-01_2025-03")  # doctest: +ELLIPSIS
+        (datetime.date(2025, 1, 1), datetime.date(2025, 3, 1))
     """
     from datetime import datetime
 
@@ -72,14 +71,6 @@ def _parse_month_range(range_str: str) -> tuple[date, date]:
 
     if start_date > end_date:
         raise ValueError("Start month must be before or equal to end month")
-
-    # Calculate month difference
-    month_diff = (end_date.year - start_date.year) * 12 + (end_date.month - start_date.month)
-
-    # Check constraints based on the endpoint using this
-    # daily-posts: max 1 year (12 months)
-    # notes-annual: max 24 months
-    # We'll validate in the endpoint itself, just return the parsed dates here
 
     return start_date, end_date
 
