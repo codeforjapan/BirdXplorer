@@ -19,3 +19,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Error handling**: Custom exceptions inherit from BaseError
 - **Exception naming**: Follow pattern `<Problem>Error`
 - **Testing**: Use pytest with appropriate fixtures
+
+## Active Technologies
+- Python 3.10.12+ (existing project standard) + FastAPI, SQLAlchemy 2.x, Pydantic (existing stack) (001-graph-api-backend)
+- PostgreSQL 15.4+ with existing `notes` and `posts` tables (001-graph-api-backend)
+
+## Recent Changes
+- 001-graph-api-backend: Added Python 3.10.12+ (existing project standard) + FastAPI, SQLAlchemy 2.x, Pydantic (existing stack)
