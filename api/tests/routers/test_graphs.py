@@ -366,3 +366,63 @@ def test_notes_evaluation_status_descending_helpful_order(client: TestClient, no
         for item in res_json["data"]:
             assert item["helpfulCount"] <= prev_count
             prev_count = item["helpfulCount"]
+
+
+# User Story 6: Post Influence Tests (T077-T080)
+def test_post_influence_get_success(client: TestClient, note_samples: List[Note]) -> None:
+    """Test GET /api/v1/graphs/post-influence returns valid response."""
+    response = client.get("/api/v1/graphs/post-influence?period=1month")
+
+    if response.status_code != 200:
+        print(f"\nError response: {response.json()}")
+
+    assert response.status_code == 200
+
+    res_json = response.json()
+    assert "data" in res_json
+    assert "updatedAt" in res_json
+    assert isinstance(res_json["data"], list)
+
+    # Verify data item structure if data exists
+    if res_json["data"]:
+        item = res_json["data"][0]
+        assert "postId" in item  # camelCase
+        assert "name" in item
+        assert "repostCount" in item  # camelCase
+        assert "likeCount" in item  # camelCase
+        assert "impressionCount" in item  # camelCase
+        assert "status" in item
+
+
+def test_post_influence_limit_200_enforcement(client: TestClient, note_samples: List[Note]) -> None:
+    """Test TOP 200 limit enforcement."""
+    # Request with limit parameter
+    response = client.get("/api/v1/graphs/post-influence?period=1month&limit=50")
+    assert response.status_code == 200
+
+    # Max limit should be 200 - FastAPI returns 422 for validation errors
+    response = client.get("/api/v1/graphs/post-influence?period=1month&limit=300")
+    assert response.status_code == 422
+
+
+def test_post_influence_descending_impression_order(client: TestClient, note_samples: List[Note]) -> None:
+    """Test descending impression_count ordering."""
+    response = client.get("/api/v1/graphs/post-influence?period=1month")
+    assert response.status_code == 200
+
+    res_json = response.json()
+    if len(res_json["data"]) >= 2:
+        # Verify descending order by impression count
+        prev_count = float("inf")
+        for item in res_json["data"]:
+            assert item["impressionCount"] <= prev_count
+            prev_count = item["impressionCount"]
+
+
+def test_post_influence_status_filtering(client: TestClient, note_samples: List[Note]) -> None:
+    """Test status filtering for posts (by associated note status)."""
+    response = client.get("/api/v1/graphs/post-influence?period=1month&status=published")
+    assert response.status_code == 200
+
+    res_json = response.json()
+    assert "data" in res_json

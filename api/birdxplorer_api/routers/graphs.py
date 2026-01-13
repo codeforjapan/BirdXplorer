@@ -14,6 +14,7 @@ from birdxplorer_common.models import (
     GraphListResponse,
     MonthlyNoteDataItem,
     NoteEvaluationDataItem,
+    PostInfluenceDataItem,
 )
 from birdxplorer_common.storage import Storage
 
@@ -470,7 +471,74 @@ def gen_router(storage: Storage) -> APIRouter:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
-    # TODO: Add remaining endpoint implementations
-    # T084: GET /api/v1/graphs/post-influence
+    @router.get("/post-influence", response_model=GraphListResponse[PostInfluenceDataItem])
+    def get_post_influence(
+        period: PeriodType = Query(..., description="Time period for data aggregation"),
+        status: StatusType = Query("all", description="Filter by note publication status"),
+        limit: int = Query(200, ge=1, le=200, description="Maximum number of results (max 200)"),
+    ) -> GraphListResponse[PostInfluenceDataItem]:
+        """Get individual post influence metrics.
+
+        Returns top posts by impression count with engagement metrics (reposts, likes),
+        ordered descending by impression count for analyzing viral content.
+
+        **Metrics:**
+        - repostCount: Number of times post was reposted
+        - likeCount: Number of likes on the post
+        - impressionCount: Number of times post was displayed
+
+        **Ordering**: Results ordered by impressionCount DESC
+
+        **Status Filter:**
+        - `all`: All posts regardless of note status (default)
+        - `published`: Posts with published notes
+        - `temporarilyPublished`: Posts with temporarily published notes
+        - `evaluating`: Posts with notes being evaluated
+        - `unpublished`: Posts with no notes or unpublished notes
+
+        **Time Periods:**
+        - `1week`: Last 7 days
+        - `1month`: Last 30 days
+        - `3months`: Last 90 days
+        - `6months`: Last 180 days
+        - `1year`: Last 365 days
+
+        Args:
+            period: Time period for filtering (required)
+            status: Filter by specific note status or "all" (default: "all")
+            limit: Maximum number of results (default: 200, max: 200)
+
+        Returns:
+            GraphListResponse containing:
+            - data: List of individual post influence metrics
+            - updatedAt: Last data update timestamp (YYYY-MM-DD format)
+
+        Raises:
+            HTTPException: 400 if parameters are invalid
+        """
+        try:
+            # Validate limit
+            if limit > 200:
+                raise ValueError("Limit cannot exceed 200")
+
+            # Fetch data from storage
+            raw_data = storage.get_post_influence_points(
+                period=period,
+                status_filter=status,
+                limit=limit,
+            )
+
+            # Convert to Pydantic models
+            items = [PostInfluenceDataItem(**item) for item in raw_data]
+
+            # Get metadata timestamp
+            updated_at = storage.get_graph_updated_at("posts")
+
+            return GraphListResponse(data=items, updated_at=updated_at)
+
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
     return router

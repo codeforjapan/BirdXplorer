@@ -304,6 +304,35 @@ def test_get_monthly_note_counts_zero_division(
     assert isinstance(result, list)
 
 
+# User Story 6: Post Influence Tests (T076)
+def test_get_post_influence_points(
+    engine_for_test: Engine,
+    post_records_sample: List[PostRecord],
+) -> None:
+    """Test get_post_influence_points returns individual post metrics."""
+    storage = Storage(engine=engine_for_test)
+
+    # Get influence points
+    result = storage.get_post_influence_points(
+        period=None,  # All time
+        status_filter="all",
+        limit=200,
+    )
+
+    # Verify structure
+    assert isinstance(result, list)
+    for item in result:
+        assert "post_id" in item
+        assert "name" in item
+        assert "repost_count" in item
+        assert "like_count" in item
+        assert "impression_count" in item
+        # Counts should be non-negative
+        assert item["repost_count"] >= 0
+        assert item["like_count"] >= 0
+        assert item["impression_count"] >= 0
+
+
 # User Story 4: Notes Evaluation Tests (T053)
 def test_get_note_evaluation_points(
     engine_for_test: Engine,

@@ -1101,3 +1101,50 @@ class NoteEvaluationDataItem(BaseModel):
         ...,
         description="Publication status of the note",
     )
+
+
+class PostInfluenceDataItem(BaseModel):
+    """Individual post engagement metrics for influence analysis.
+
+    Provides engagement counts (reposts, likes, impressions) for individual posts,
+    ordered by impression count descending.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel,
+    )
+
+    post_id: str = PydanticField(
+        ...,
+        description="Unique identifier for the post",
+        examples=["1234567890123456789"],
+    )
+
+    name: str = PydanticField(
+        ...,
+        description="Post text or first 100 characters",
+    )
+
+    repost_count: int = PydanticField(
+        ...,
+        ge=0,
+        description="Number of reposts/retweets received",
+    )
+
+    like_count: int = PydanticField(
+        ...,
+        ge=0,
+        description="Number of likes received",
+    )
+
+    impression_count: int = PydanticField(
+        ...,
+        ge=0,
+        description="Number of times the post was displayed",
+    )
+
+    status: Optional[str] = PydanticField(
+        None,
+        description="Publication status of associated note (if status filter applied)",
+    )
