@@ -847,6 +847,114 @@ class Storage:
 
             return data
 
+    def get_note_evaluation_points(
+        self,
+        period: Optional[str] = None,
+        status_filter: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[dict[str, Any]]:
+        """Get individual note evaluation metrics ordered by impression count.
+
+        Args:
+            period: Optional time period filter ("1week", "1month", "3months", "6months", "1year")
+            status_filter: Optional status filter
+                ("all", "published", "evaluating", "unpublished", "temporarilyPublished")
+            limit: Maximum number of results to return (default: 200, max: 200)
+
+        Returns:
+            List of dictionaries with keys: note_id, name, helpful_count, not_helpful_count,
+            impression_count, status. Ordered by impression_count DESC.
+
+        Example response format:
+            [
+                {
+                    "note_id": "1234567890123456789",
+                    "name": "Note about...",
+                    "helpful_count": 127,
+                    "not_helpful_count": 8,
+                    "impression_count": 45623,
+                    "status": "published"
+                },
+                ...
+            ]
+        """
+        from datetime import date as date_type
+        from datetime import datetime, timedelta, timezone
+
+        # Validate and cap limit
+        if limit > 200:
+            limit = 200
+
+        # Get publication status CASE expression
+        status_expr = self._get_publication_status_case()
+
+        # Build query with notes-posts JOIN
+        query = (
+            select(
+                NoteRecord.note_id,
+                NoteRecord.summary.label("name"),
+                NoteRecord.helpful_count.label("helpful_count"),
+                NoteRecord.not_helpful_count.label("not_helpful_count"),
+                PostRecord.impression_count.label("impression_count"),
+                status_expr.label("status"),
+            )
+            .select_from(NoteRecord)
+            .join(PostRecord, NoteRecord.post_id == PostRecord.post_id)
+        )
+
+        # Add period filter if specified
+        if period:
+            # Calculate date range
+            end_date = date_type.today()
+            days_map = {
+                "1week": 7,
+                "1month": 30,
+                "3months": 90,
+                "6months": 180,
+                "1year": 365,
+            }
+            days = days_map.get(period, 30)
+            start_date = end_date - timedelta(days=days - 1)
+
+            # Convert to TwitterTimestamp
+            start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+            end_dt = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
+            start_ts = int(start_dt.timestamp() * 1000)
+            end_ts = int(end_dt.timestamp() * 1000)
+
+            query = query.where(
+                NoteRecord.created_at >= start_ts,
+                NoteRecord.created_at <= end_ts,
+            )
+
+        # Add status filter if specified
+        if status_filter and status_filter != "all":
+            query = query.where(status_expr == status_filter)
+
+        # Order by impression count descending and apply limit
+        query = query.order_by(PostRecord.impression_count.desc()).limit(limit)
+
+        # Execute query
+        with Session(self._engine) as session:
+            result = session.execute(query)
+            rows = result.fetchall()
+
+            # Convert to list of dictionaries
+            data = []
+            for row in rows:
+                data.append(
+                    {
+                        "note_id": str(row.note_id),
+                        "name": row.name[:100] if row.name else "",  # Truncate to 100 chars
+                        "helpful_count": int(row.helpful_count) if row.helpful_count else 0,
+                        "not_helpful_count": int(row.not_helpful_count) if row.not_helpful_count else 0,
+                        "impression_count": int(row.impression_count) if row.impression_count else 0,
+                        "status": row.status,
+                    }
+                )
+
+            return data
+
     @classmethod
     def _media_record_to_model(cls, media_record: MediaRecord) -> Media:
         return Media(

@@ -1054,3 +1054,50 @@ class MonthlyNoteDataItem(BaseModel):
         le=1.0,
         description="Ratio of published notes to total notes (0.0 to 1.0). Returns 0.0 if no notes.",
     )
+
+
+class NoteEvaluationDataItem(BaseModel):
+    """Individual note evaluation metrics for moderation review.
+
+    Provides helpfulness ratings and impression counts for individual notes,
+    ordered by impression count descending.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel,
+    )
+
+    note_id: str = PydanticField(
+        ...,
+        description="Unique identifier for the note",
+        examples=["1234567890123456789"],
+    )
+
+    name: str = PydanticField(
+        ...,
+        description="Note summary text or first 100 characters",
+    )
+
+    helpful_count: int = PydanticField(
+        ...,
+        ge=0,
+        description="Number of helpful ratings received",
+    )
+
+    not_helpful_count: int = PydanticField(
+        ...,
+        ge=0,
+        description="Number of not-helpful ratings received",
+    )
+
+    impression_count: int = PydanticField(
+        ...,
+        ge=0,
+        description="Number of times the note was displayed",
+    )
+
+    status: str = PydanticField(
+        ...,
+        description="Publication status of the note",
+    )

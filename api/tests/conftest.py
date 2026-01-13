@@ -537,6 +537,16 @@ def mock_storage(
 
     mock._fill_monthly_gaps.side_effect = _fill_monthly_gaps
 
+    def _get_note_evaluation_points(
+        period: Union[str, None] = None,
+        status_filter: Union[str, None] = None,
+        limit: int = 200,
+    ) -> List[dict[str, Union[str, int]]]:
+        # Return empty list for mock - tests can override if needed
+        return []
+
+    mock.get_note_evaluation_points.side_effect = _get_note_evaluation_points
+
     def _get_graph_updated_at(table: str) -> str:
         # Return a fixed date for testing
         return "2025-01-15"
