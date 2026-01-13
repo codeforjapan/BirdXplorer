@@ -9,18 +9,9 @@ from sqlalchemy.orm.query import RowReturningQuery
 from sqlalchemy.types import CHAR, DECIMAL, JSON, Integer, String, Text, Uuid
 
 from .logger import get_logger
-from .models import (
-    BinaryBool,
-    LanguageIdentifier,
-)
+from .models import BinaryBool, LanguageIdentifier
 from .models import Link as LinkModel
-from .models import (
-    LinkId,
-    Media,
-    MediaDetails,
-    MediaType,
-    NonNegativeInt,
-)
+from .models import LinkId, Media, MediaDetails, MediaType, NonNegativeInt
 from .models import Note as NoteModel
 from .models import (
     NoteId,
@@ -30,10 +21,7 @@ from .models import (
     ParticipantId,
 )
 from .models import Post as PostModel
-from .models import (
-    PostId,
-    SummaryString,
-)
+from .models import PostId, SummaryString
 from .models import Topic as TopicModel
 from .models import (
     TopicId,
@@ -539,6 +527,81 @@ class Storage:
             timestamp_seconds = float(result) / 1000
             dt = datetime.fromtimestamp(timestamp_seconds, tz=timezone.utc)
             return dt.strftime("%Y-%m-%d")
+
+    def get_daily_note_counts(
+        self,
+        start_date: str,
+        end_date: str,
+        status_filter: Optional[str] = None,
+    ) -> List[dict[str, Any]]:
+        """Get daily aggregated note creation counts by publication status.
+
+        Args:
+            start_date: Start date in YYYY-MM-DD format (inclusive)
+            end_date: End date in YYYY-MM-DD format (inclusive)
+            status_filter: Optional status filter ("all", "published", "evaluating", "unpublished", "temporarilyPublished")
+
+        Returns:
+            List of dictionaries with keys: date, published, evaluating, unpublished, temporarilyPublished
+
+        Examples:
+            >>> storage.get_daily_note_counts("2025-01-01", "2025-01-07", "all")
+            [
+                {"date": "2025-01-01", "published": 5, "evaluating": 10, "unpublished": 2, "temporarilyPublished": 1},
+                {"date": "2025-01-02", "published": 3, "evaluating": 12, "unpublished": 4, "temporarilyPublished": 0},
+                ...
+            ]
+        """
+        from datetime import datetime, timezone
+
+        # Convert date strings to TwitterTimestamp (milliseconds)
+        start_dt = datetime.fromisoformat(start_date).replace(tzinfo=timezone.utc)
+        end_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+        start_ts = int(start_dt.timestamp() * 1000)
+        end_ts = int(end_dt.timestamp() * 1000)
+
+        # Get publication status CASE expression
+        status_expr = self._get_publication_status_case()
+
+        # Build aggregation query
+        query = select(
+            func.date_trunc("day", func.to_timestamp(NoteRecord.created_at / 1000)).label("day"),
+            func.count().filter(status_expr == "published").label("published"),
+            func.count().filter(status_expr == "evaluating").label("evaluating"),
+            func.count().filter(status_expr == "unpublished").label("unpublished"),
+            func.count().filter(status_expr == "temporarilyPublished").label("temporarilyPublished"),
+        ).where(
+            NoteRecord.created_at >= start_ts,
+            NoteRecord.created_at <= end_ts,
+        )
+
+        # Add status filter if specified
+        if status_filter and status_filter != "all":
+            query = query.where(status_expr == status_filter)
+
+        query = query.group_by("day").order_by("day")
+
+        # Execute query
+        with Session(self._engine) as session:
+            result = session.execute(query)
+            rows = result.fetchall()
+
+            # Convert to list of dictionaries
+            data = []
+            for row in rows:
+                # Convert timestamp to date string
+                date_str = row.day.strftime("%Y-%m-%d")
+                data.append(
+                    {
+                        "date": date_str,
+                        "published": int(row.published),
+                        "evaluating": int(row.evaluating),
+                        "unpublished": int(row.unpublished),
+                        "temporarilyPublished": int(row.temporarilyPublished),
+                    }
+                )
+
+            return data
 
     @classmethod
     def _media_record_to_model(cls, media_record: MediaRecord) -> Media:

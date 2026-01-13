@@ -18,9 +18,7 @@ from typing import (
 from uuid import UUID
 
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import (
-    ConfigDict,
-)
+from pydantic import ConfigDict
 from pydantic import Field as PydanticField
 from pydantic import (
     GetCoreSchemaHandler,
@@ -929,4 +927,46 @@ class GraphListResponse(BaseModel):
         ...,
         description="Last update timestamp in YYYY-MM-DD format (UTC). Derived from MAX(created_at) of source table.",
         examples=["2025-01-15"],
+    )
+
+
+class DailyNotesCreationDataItem(BaseModel):
+    """Daily community note creation counts by publication status.
+
+    Represents a single day's aggregated note creation data.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel,
+    )
+
+    date: str = PydanticField(
+        ...,
+        description="Date in YYYY-MM-DD format (UTC timezone)",
+        examples=["2025-01-15"],
+    )
+
+    published: int = PydanticField(
+        ...,
+        ge=0,
+        description="Count of notes with published status on this date",
+    )
+
+    evaluating: int = PydanticField(
+        ...,
+        ge=0,
+        description="Count of notes with evaluating status on this date",
+    )
+
+    unpublished: int = PydanticField(
+        ...,
+        ge=0,
+        description="Count of notes with unpublished status on this date",
+    )
+
+    temporarily_published: int = PydanticField(
+        ...,
+        ge=0,
+        description="Count of notes with temporarily published status on this date",
     )

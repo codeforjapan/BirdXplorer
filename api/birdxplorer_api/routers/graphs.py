@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Literal
 from fastapi import APIRouter, HTTPException, Query
 from typing_extensions import Annotated
 
+from birdxplorer_common.models import DailyNotesCreationDataItem, GraphListResponse
 from birdxplorer_common.storage import Storage
 
 # Type definitions for query parameters
@@ -94,8 +95,75 @@ def gen_router(storage: Storage) -> APIRouter:
     """
     router = APIRouter()
 
-    # TODO: Add endpoint implementations here
-    # T022: GET /api/v1/graphs/daily-notes
+    @router.get("/daily-notes", response_model=GraphListResponse[DailyNotesCreationDataItem])
+    def get_daily_notes(
+        period: PeriodType = Query(..., description="Time period for data aggregation"),
+        status: StatusType = Query("all", description="Filter by note publication status"),
+    ) -> GraphListResponse[DailyNotesCreationDataItem]:
+        """Get daily community note creation trends.
+
+        Returns aggregated daily counts of community notes grouped by publication status
+        for the specified time period.
+
+        **Publication Status Categories:**
+        - `published`: Notes with status CURRENTLY_RATED_HELPFUL
+        - `temporarilyPublished`: Notes that were previously helpful but now need more ratings or are not helpful
+        - `evaluating`: Notes currently being evaluated (NEEDS_MORE_RATINGS, never been helpful)
+        - `unpublished`: All other notes
+
+        **Time Periods:**
+        - `1week`: Last 7 days
+        - `1month`: Last 30 days
+        - `3months`: Last 90 days
+        - `6months`: Last 180 days
+        - `1year`: Last 365 days
+
+        Args:
+            period: Time period for aggregation (required)
+            status: Filter by specific status or "all" for all statuses (default: "all")
+
+        Returns:
+            GraphListResponse containing:
+            - data: List of daily aggregated note counts
+            - updatedAt: Last data update timestamp (YYYY-MM-DD format)
+
+        Raises:
+            HTTPException: 400 if parameters are invalid
+        """
+        try:
+            # Calculate date range from period
+            end_date = date.today()
+            days = _period_to_days(period)
+            start_date = end_date - timedelta(days=days - 1)  # -1 to include today
+
+            # Fetch data from storage
+            raw_data = storage.get_daily_note_counts(
+                start_date=start_date.isoformat(),
+                end_date=end_date.isoformat(),
+                status_filter=status,
+            )
+
+            # Fill gaps for continuous time series
+            filled_data = storage._fill_daily_gaps(
+                data=raw_data,
+                start_date=start_date.isoformat(),
+                end_date=end_date.isoformat(),
+            )
+
+            # Convert to Pydantic models
+            items = [DailyNotesCreationDataItem(**item) for item in filled_data]
+
+            # Get metadata timestamp
+            updated_at = storage.get_graph_updated_at("notes")
+
+            return GraphListResponse(data=items, updated_at=updated_at)
+
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+    # TODO: Add remaining endpoint implementations
     # T034: GET /api/v1/graphs/daily-posts
     # T047: GET /api/v1/graphs/notes-annual
     # T062: GET /api/v1/graphs/notes-evaluation
