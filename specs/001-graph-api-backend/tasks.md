@@ -75,11 +75,11 @@ BirdXplorer uses multi-module architecture:
 
 ### Implementation for User Story 1
 
-- [ ] T020 [P] [US1] Add DailyNotesCreationDataItem model to /home/yu23ki14/cfj/BirdXplorer/common/birdxplorer_common/models.py
-- [ ] T021 [US1] Implement get_daily_note_counts() method in /home/yu23ki14/cfj/BirdXplorer/common/birdxplorer_common/storage.py using date_trunc and CASE aggregation
-- [ ] T022 [US1] Implement GET /api/v1/graphs/daily-notes endpoint in /home/yu23ki14/cfj/BirdXplorer/api/birdxplorer_api/routers/graphs.py
-- [ ] T023 [US1] Add validation for period parameter (1week, 1month, 3months, 6months, 1year) in daily-notes endpoint
-- [ ] T024 [US1] Add error handling with HTTPException for invalid parameters in daily-notes endpoint
+- [X] T020 [P] [US1] Add DailyNotesCreationDataItem model to /home/yu23ki14/cfj/BirdXplorer/common/birdxplorer_common/models.py
+- [X] T021 [US1] Implement get_daily_note_counts() method in /home/yu23ki14/cfj/BirdXplorer/common/birdxplorer_common/storage.py using date_trunc and CASE aggregation
+- [X] T022 [US1] Implement GET /api/v1/graphs/daily-notes endpoint in /home/yu23ki14/cfj/BirdXplorer/api/birdxplorer_api/routers/graphs.py
+- [X] T023 [US1] Add validation for period parameter (1week, 1month, 3months, 6months, 1year) in daily-notes endpoint
+- [X] T024 [US1] Add error handling with HTTPException for invalid parameters in daily-notes endpoint
 - [ ] T025 [US1] Add endpoint description to /home/yu23ki14/cfj/BirdXplorer/api/birdxplorer_api/openapi_doc.py
 - [ ] T026 [US1] Run tox in common module to verify code quality gates
 - [ ] T027 [US1] Run tox in api module to verify code quality gates
