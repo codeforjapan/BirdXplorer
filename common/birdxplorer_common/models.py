@@ -595,6 +595,22 @@ class NotesValidationDifficulty(str, Enum):
     empty = ""
 
 
+class PublicationStatus(str, Enum):
+    """Derived publication status for community notes.
+
+    Calculated from NoteRecord.current_status and NoteRecord.has_been_helpfuled:
+    - published: current_status = CURRENTLY_RATED_HELPFUL
+    - temporarilyPublished: has_been_helpfuled = True AND current_status IN (NEEDS_MORE_RATINGS, CURRENTLY_RATED_NOT_HELPFUL)
+    - evaluating: current_status = NEEDS_MORE_RATINGS AND has_been_helpfuled = False
+    - unpublished: all other cases
+    """
+
+    PUBLISHED = "published"
+    TEMPORARILY_PUBLISHED = "temporarilyPublished"
+    EVALUATING = "evaluating"
+    UNPUBLISHED = "unpublished"
+
+
 class PostId(UpToNineteenDigitsDecimalString): ...
 
 
@@ -887,3 +903,30 @@ class PaginationMeta(BaseModel):
             description="前のページのリクエスト用 URL",
         ),
     ] = None
+
+
+T = TypeVar("T")
+
+
+class GraphListResponse(BaseModel):
+    """Generic response wrapper for graph API endpoints.
+
+    Provides consistent response structure with data array and metadata.
+    All graph endpoints return this wrapper with specific data item type.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel,
+    )
+
+    data: List[T] = PydanticField(
+        ...,
+        description="Array of data items (type varies by endpoint)",
+    )
+
+    updated_at: str = PydanticField(
+        ...,
+        description="Last update timestamp in YYYY-MM-DD format (UTC). Derived from MAX(created_at) of source table.",
+        examples=["2025-01-15"],
+    )

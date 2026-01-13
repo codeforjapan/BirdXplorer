@@ -2,7 +2,7 @@ from typing import Any, Generator, List, Optional, Tuple, Union
 
 from psycopg2.extensions import AsIs, register_adapter
 from pydantic import AnyUrl, HttpUrl
-from sqlalchemy import ForeignKey, create_engine, func, select
+from sqlalchemy import ForeignKey, and_, case, create_engine, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 from sqlalchemy.orm.query import RowReturningQuery
@@ -352,6 +352,193 @@ class Storage:
             ]
         except (json.JSONDecodeError, KeyError, ValueError, TypeError):
             return []
+
+    @classmethod
+    def _get_publication_status_case(cls) -> case:
+        """Reusable CASE expression for publication status derivation.
+
+        Calculates publication status from NoteRecord.current_status and NoteRecord.has_been_helpfuled:
+        - published: current_status = CURRENTLY_RATED_HELPFUL
+        - temporarilyPublished: has_been_helpfuled = True AND current_status IN (NEEDS_MORE_RATINGS, CURRENTLY_RATED_NOT_HELPFUL)
+        - evaluating: current_status = NEEDS_MORE_RATINGS AND has_been_helpfuled = False
+        - unpublished: all other cases
+
+        Returns:
+            SQLAlchemy CASE expression that can be used in queries for aggregation or filtering
+        """
+        return case(
+            (NoteRecord.current_status == "CURRENTLY_RATED_HELPFUL", "published"),
+            (
+                and_(
+                    NoteRecord.has_been_helpfuled == True,  # noqa: E712
+                    NoteRecord.current_status.in_(["NEEDS_MORE_RATINGS", "CURRENTLY_RATED_NOT_HELPFUL"]),
+                ),
+                "temporarilyPublished",
+            ),
+            (
+                and_(
+                    NoteRecord.current_status == "NEEDS_MORE_RATINGS",
+                    NoteRecord.has_been_helpfuled == False,  # noqa: E712
+                ),
+                "evaluating",
+            ),
+            else_="unpublished",
+        )
+
+    @classmethod
+    def _fill_daily_gaps(
+        cls,
+        data: List[dict[str, Any]],
+        start_date: str,
+        end_date: str,
+    ) -> List[dict[str, Any]]:
+        """Fill missing dates with zero counts for continuous daily time series.
+
+        Args:
+            data: List of dictionaries with 'date' key (YYYY-MM-DD format) and count fields
+            start_date: Start date string in YYYY-MM-DD format
+            end_date: End date string in YYYY-MM-DD format
+
+        Returns:
+            List of dictionaries with all dates filled, gaps set to zero counts
+
+        Examples:
+            >>> data = [{"date": "2025-01-01", "published": 5}]
+            >>> Storage._fill_daily_gaps(data, "2025-01-01", "2025-01-03")
+            [
+                {"date": "2025-01-01", "published": 5},
+                {"date": "2025-01-02", "published": 0},
+                {"date": "2025-01-03", "published": 0}
+            ]
+        """
+        from datetime import date as date_type
+        from datetime import timedelta
+
+        # Convert string dates to date objects
+        start = date_type.fromisoformat(start_date)
+        end = date_type.fromisoformat(end_date)
+
+        # Create map of existing dates
+        by_date = {item["date"]: item for item in data}
+
+        # Generate complete range with zero-filled gaps
+        result = []
+        current = start
+        while current <= end:
+            date_str = current.isoformat()
+            if date_str in by_date:
+                result.append(by_date[date_str])
+            else:
+                # Fill with zeros for missing date
+                result.append(
+                    {
+                        "date": date_str,
+                        "published": 0,
+                        "evaluating": 0,
+                        "unpublished": 0,
+                        "temporarilyPublished": 0,
+                    }
+                )
+            current += timedelta(days=1)
+
+        return result
+
+    @classmethod
+    def _fill_monthly_gaps(
+        cls,
+        data: List[dict[str, Any]],
+        start_month: str,
+        end_month: str,
+    ) -> List[dict[str, Any]]:
+        """Fill missing months with zero counts for continuous monthly time series.
+
+        Args:
+            data: List of dictionaries with 'month' key (YYYY-MM format) and count fields
+            start_month: Start month string in YYYY-MM format
+            end_month: End month string in YYYY-MM format
+
+        Returns:
+            List of dictionaries with all months filled, gaps set to zero counts
+
+        Examples:
+            >>> data = [{"month": "2025-01", "published": 10, "publication_rate": 0.5}]
+            >>> Storage._fill_monthly_gaps(data, "2025-01", "2025-03")
+            [
+                {"month": "2025-01", "published": 10, "publication_rate": 0.5},
+                {"month": "2025-02", "published": 0, "publication_rate": 0.0},
+                {"month": "2025-03", "published": 0, "publication_rate": 0.0}
+            ]
+        """
+        from datetime import date as date_type
+        from datetime import timedelta
+
+        # Parse month strings (YYYY-MM) to first day of month
+        start = date_type.fromisoformat(f"{start_month}-01")
+        end = date_type.fromisoformat(f"{end_month}-01")
+
+        # Create map of existing months
+        by_month = {item["month"]: item for item in data}
+
+        # Generate complete range with zero-filled gaps
+        result = []
+        current = start
+        while current <= end:
+            month_str = current.strftime("%Y-%m")
+            if month_str in by_month:
+                result.append(by_month[month_str])
+            else:
+                # Fill with zeros for missing month
+                result.append(
+                    {
+                        "month": month_str,
+                        "published": 0,
+                        "evaluating": 0,
+                        "unpublished": 0,
+                        "temporarilyPublished": 0,
+                        "publication_rate": 0.0,
+                    }
+                )
+            # Move to next month
+            if current.month == 12:
+                current = date_type(current.year + 1, 1, 1)
+            else:
+                current = date_type(current.year, current.month + 1, 1)
+
+        return result
+
+    def get_graph_updated_at(self, table: str) -> str:
+        """Get last update timestamp for graph data.
+
+        Args:
+            table: Table name ("notes" or "posts")
+
+        Returns:
+            Last update timestamp in YYYY-MM-DD format (UTC), derived from MAX(created_at)
+
+        Raises:
+            ValueError: If table name is invalid
+        """
+        if table not in ["notes", "posts"]:
+            raise ValueError(f"Invalid table name: {table}. Must be 'notes' or 'posts'")
+
+        table_class = NoteRecord if table == "notes" else PostRecord
+
+        with Session(self._engine) as session:
+            # Get MAX(created_at) from the table
+            result = session.execute(select(func.max(table_class.created_at))).scalar_one_or_none()
+
+            if result is None:
+                # No data in table, return current date
+                from datetime import datetime, timezone
+
+                return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+            # Convert TwitterTimestamp (milliseconds) to date
+            from datetime import datetime, timezone
+
+            timestamp_seconds = float(result) / 1000
+            dt = datetime.fromtimestamp(timestamp_seconds, tz=timezone.utc)
+            return dt.strftime("%Y-%m-%d")
 
     @classmethod
     def _media_record_to_model(cls, media_record: MediaRecord) -> Media:
