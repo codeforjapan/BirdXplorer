@@ -326,3 +326,43 @@ def test_notes_evaluation_period_filtering(client: TestClient, note_samples: Lis
 
         res_json = response.json()
         assert "data" in res_json
+
+
+# User Story 5: Notes Evaluation Status Tests (T069-T070)
+def test_notes_evaluation_status_get_success(client: TestClient, note_samples: List[Note]) -> None:
+    """Test GET /api/v1/graphs/notes-evaluation-status returns valid response."""
+    response = client.get("/api/v1/graphs/notes-evaluation-status?period=1month")
+
+    if response.status_code != 200:
+        print(f"\nError response: {response.json()}")
+
+    assert response.status_code == 200
+
+    res_json = response.json()
+    assert "data" in res_json
+    assert "updatedAt" in res_json
+    assert isinstance(res_json["data"], list)
+
+    # Verify data item structure (same as notes-evaluation)
+    if res_json["data"]:
+        item = res_json["data"][0]
+        assert "noteId" in item
+        assert "name" in item
+        assert "helpfulCount" in item
+        assert "notHelpfulCount" in item
+        assert "impressionCount" in item
+        assert "status" in item
+
+
+def test_notes_evaluation_status_descending_helpful_order(client: TestClient, note_samples: List[Note]) -> None:
+    """Test descending helpful_count ordering (different from impression order)."""
+    response = client.get("/api/v1/graphs/notes-evaluation-status?period=1month")
+    assert response.status_code == 200
+
+    res_json = response.json()
+    if len(res_json["data"]) >= 2:
+        # Verify descending order by helpful count
+        prev_count = float("inf")
+        for item in res_json["data"]:
+            assert item["helpfulCount"] <= prev_count
+            prev_count = item["helpfulCount"]

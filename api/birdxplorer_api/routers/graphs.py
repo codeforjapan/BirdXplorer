@@ -399,8 +399,78 @@ def gen_router(storage: Storage) -> APIRouter:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
+    @router.get("/notes-evaluation-status", response_model=GraphListResponse[NoteEvaluationDataItem])
+    def get_notes_evaluation_status(
+        period: PeriodType = Query(..., description="Time period for data aggregation"),
+        status: StatusType = Query("all", description="Filter by note publication status"),
+        limit: int = Query(200, ge=1, le=200, description="Maximum number of results (max 200)"),
+    ) -> GraphListResponse[NoteEvaluationDataItem]:
+        """Get individual note evaluation metrics ordered by helpful count.
+
+        Alternative sorting to notes-evaluation endpoint - orders by helpfulCount instead
+        of impressionCount for moderation review workflows.
+
+        **Metrics:**
+        - helpfulCount: Number of helpful ratings
+        - notHelpfulCount: Number of not-helpful ratings
+        - impressionCount: Number of times note was displayed
+
+        **Ordering**: Results ordered by helpfulCount DESC (different from /notes-evaluation)
+
+        **Status Filter:**
+        - `all`: All notes regardless of status (default)
+        - `published`: Only published notes
+        - `temporarilyPublished`: Only temporarily published notes
+        - `evaluating`: Only notes being evaluated
+        - `unpublished`: Only unpublished notes
+
+        **Time Periods:**
+        - `1week`: Last 7 days
+        - `1month`: Last 30 days
+        - `3months`: Last 90 days
+        - `6months`: Last 180 days
+        - `1year`: Last 365 days
+
+        Args:
+            period: Time period for filtering (required)
+            status: Filter by specific status or "all" (default: "all")
+            limit: Maximum number of results (default: 200, max: 200)
+
+        Returns:
+            GraphListResponse containing:
+            - data: List of individual note evaluation metrics
+            - updatedAt: Last data update timestamp (YYYY-MM-DD format)
+
+        Raises:
+            HTTPException: 400 if parameters are invalid
+        """
+        try:
+            # Validate limit
+            if limit > 200:
+                raise ValueError("Limit cannot exceed 200")
+
+            # Fetch data from storage with helpful_count ordering
+            raw_data = storage.get_note_evaluation_points(
+                period=period,
+                status_filter=status,
+                limit=limit,
+                order_by="helpful_count",
+            )
+
+            # Convert to Pydantic models
+            items = [NoteEvaluationDataItem(**item) for item in raw_data]
+
+            # Get metadata timestamp
+            updated_at = storage.get_graph_updated_at("notes")
+
+            return GraphListResponse(data=items, updated_at=updated_at)
+
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
     # TODO: Add remaining endpoint implementations
-    # T071: GET /api/v1/graphs/notes-evaluation-status
     # T084: GET /api/v1/graphs/post-influence
 
     return router

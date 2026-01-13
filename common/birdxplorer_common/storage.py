@@ -852,18 +852,20 @@ class Storage:
         period: Optional[str] = None,
         status_filter: Optional[str] = None,
         limit: int = 200,
+        order_by: str = "impression_count",
     ) -> List[dict[str, Any]]:
-        """Get individual note evaluation metrics ordered by impression count.
+        """Get individual note evaluation metrics with configurable ordering.
 
         Args:
             period: Optional time period filter ("1week", "1month", "3months", "6months", "1year")
             status_filter: Optional status filter
                 ("all", "published", "evaluating", "unpublished", "temporarilyPublished")
             limit: Maximum number of results to return (default: 200, max: 200)
+            order_by: Field to order by - "impression_count" (default) or "helpful_count"
 
         Returns:
             List of dictionaries with keys: note_id, name, helpful_count, not_helpful_count,
-            impression_count, status. Ordered by impression_count DESC.
+            impression_count, status. Ordered by specified field DESC.
 
         Example response format:
             [
@@ -931,8 +933,11 @@ class Storage:
         if status_filter and status_filter != "all":
             query = query.where(status_expr == status_filter)
 
-        # Order by impression count descending and apply limit
-        query = query.order_by(PostRecord.impression_count.desc()).limit(limit)
+        # Order by specified field descending and apply limit
+        if order_by == "helpful_count":
+            query = query.order_by(NoteRecord.helpful_count.desc()).limit(limit)
+        else:  # Default to impression_count
+            query = query.order_by(PostRecord.impression_count.desc()).limit(limit)
 
         # Execute query
         with Session(self._engine) as session:
