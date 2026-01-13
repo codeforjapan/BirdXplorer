@@ -745,6 +745,108 @@ class Storage:
 
             return data
 
+    def get_monthly_note_counts(
+        self,
+        start_month: str,
+        end_month: str,
+        status_filter: Optional[str] = None,
+    ) -> List[dict[str, Any]]:
+        """Get monthly aggregated note creation counts with publication rate.
+
+        Args:
+            start_month: Start month in YYYY-MM format (inclusive)
+            end_month: End month in YYYY-MM format (inclusive)
+            status_filter: Optional status filter
+                ("all", "published", "evaluating", "unpublished", "temporarilyPublished")
+
+        Returns:
+            List of dictionaries with keys: month, published, evaluating, unpublished,
+            temporarilyPublished, publication_rate
+
+        Example response format:
+            [
+                {
+                    "month": "2025-01",
+                    "published": 342,
+                    "evaluating": 687,
+                    "unpublished": 125,
+                    "temporarilyPublished": 98,
+                    "publication_rate": 0.273
+                },
+                ...
+            ]
+        """
+        from datetime import datetime, timezone
+
+        # Convert month strings to dates (first day of each month)
+        start_date = datetime.strptime(start_month, "%Y-%m").replace(day=1, tzinfo=timezone.utc)
+        # Get last day of end month
+        from calendar import monthrange
+
+        end_year, end_month_num = map(int, end_month.split("-"))
+        last_day = monthrange(end_year, end_month_num)[1]
+        end_date = datetime.strptime(end_month, "%Y-%m").replace(
+            day=last_day, hour=23, minute=59, second=59, tzinfo=timezone.utc
+        )
+
+        # Convert to TwitterTimestamp (milliseconds)
+        start_ts = int(start_date.timestamp() * 1000)
+        end_ts = int(end_date.timestamp() * 1000)
+
+        # Get publication status CASE expression
+        status_expr = self._get_publication_status_case()
+
+        # Build aggregation query
+        query = select(
+            func.date_trunc("month", func.to_timestamp(NoteRecord.created_at / 1000)).label("month"),
+            func.count().filter(status_expr == "published").label("published"),
+            func.count().filter(status_expr == "evaluating").label("evaluating"),
+            func.count().filter(status_expr == "unpublished").label("unpublished"),
+            func.count().filter(status_expr == "temporarilyPublished").label("temporarilyPublished"),
+        ).where(
+            NoteRecord.created_at >= start_ts,
+            NoteRecord.created_at <= end_ts,
+        )
+
+        # Add status filter if specified
+        if status_filter and status_filter != "all":
+            query = query.where(status_expr == status_filter)
+
+        query = query.group_by("month").order_by("month")
+
+        # Execute query
+        with Session(self._engine) as session:
+            result = session.execute(query)
+            rows = result.fetchall()
+
+            # Convert to list of dictionaries with publication rate
+            data = []
+            for row in rows:
+                # Convert timestamp to month string
+                month_str = row.month.strftime("%Y-%m")
+
+                published = int(row.published)
+                evaluating = int(row.evaluating)
+                unpublished = int(row.unpublished)
+                temporarily_published = int(row.temporarilyPublished)
+
+                # Calculate publication rate (avoid division by zero)
+                total = published + evaluating + unpublished + temporarily_published
+                publication_rate = published / total if total > 0 else 0.0
+
+                data.append(
+                    {
+                        "month": month_str,
+                        "published": published,
+                        "evaluating": evaluating,
+                        "unpublished": unpublished,
+                        "temporarilyPublished": temporarily_published,
+                        "publication_rate": publication_rate,
+                    }
+                )
+
+            return data
+
     @classmethod
     def _media_record_to_model(cls, media_record: MediaRecord) -> Media:
         return Media(
