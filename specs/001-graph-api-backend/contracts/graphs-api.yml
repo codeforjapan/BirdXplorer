@@ -1,0 +1,620 @@
+openapi: 3.0.3
+info:
+  title: BirdXplorer Graph API
+  description: Analytics endpoints for community notes and posts time-series data
+  version: 1.0.0
+
+servers:
+  - url: /api/v1
+
+paths:
+  /graphs/daily-notes:
+    get:
+      summary: Get daily community notes creation trends
+      description: |
+        Returns daily aggregation of community note creation counts by publication status.
+        Supports relative time periods (1week to 1year) and optional status filtering.
+        Missing dates are filled with zero counts for continuous visualization.
+      operationId: getDailyNotes
+      tags:
+        - graphs
+      parameters:
+        - name: period
+          in: query
+          required: true
+          description: Relative time period for data retrieval
+          schema:
+            type: string
+            enum: ["1week", "1month", "3months", "6months", "1year"]
+        - name: status
+          in: query
+          required: false
+          description: Filter by publication status (default: all)
+          schema:
+            type: string
+            enum: ["all", "published", "evaluating", "unpublished", "temporarilyPublished"]
+            default: "all"
+      responses:
+        "200":
+          description: Successful response with daily note counts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DailyNotesResponse"
+              example:
+                data:
+                  - date: "2025-01-15"
+                    published: 42
+                    evaluating: 87
+                    unpublished: 15
+                    temporarilyPublished: 8
+                  - date: "2025-01-16"
+                    published: 38
+                    evaluating: 92
+                    unpublished: 12
+                    temporarilyPublished: 6
+                updatedAt: "2025-01-16"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /graphs/daily-posts:
+    get:
+      summary: Get daily post volume trends by month range
+      description: |
+        Returns daily post counts within a specified month range.
+        Posts can be filtered by associated community note status.
+        Missing dates are filled with zero counts.
+      operationId: getDailyPosts
+      tags:
+        - graphs
+      parameters:
+        - name: range
+          in: query
+          required: true
+          description: Month range in format YYYY-MM_YYYY-MM (inclusive)
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}_\d{4}-\d{2}$'
+          example: "2025-01_2025-03"
+        - name: status
+          in: query
+          required: false
+          description: Filter by publication status (default: all)
+          schema:
+            type: string
+            enum: ["all", "published", "evaluating", "unpublished", "temporarilyPublished"]
+            default: "all"
+      responses:
+        "200":
+          description: Successful response with daily post counts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DailyPostsResponse"
+              example:
+                data:
+                  - date: "2025-01-01"
+                    postCount: 1523
+                    status: null
+                  - date: "2025-01-02"
+                    postCount: 1687
+                    status: null
+                updatedAt: "2025-01-16"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /graphs/notes-annual:
+    get:
+      summary: Get monthly note publication rates
+      description: |
+        Returns monthly aggregation of note counts with calculated publication rate.
+        Supports up to 24 months of data. Publication rate = published / total notes.
+      operationId: getNotesAnnual
+      tags:
+        - graphs
+      parameters:
+        - name: range
+          in: query
+          required: true
+          description: Month range in format YYYY-MM_YYYY-MM (max 24 months)
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}_\d{4}-\d{2}$'
+          example: "2024-01_2024-12"
+        - name: status
+          in: query
+          required: false
+          description: Filter by publication status (default: all)
+          schema:
+            type: string
+            enum: ["all", "published", "evaluating", "unpublished", "temporarilyPublished"]
+            default: "all"
+      responses:
+        "200":
+          description: Successful response with monthly note data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotesAnnualResponse"
+              example:
+                data:
+                  - month: "2024-01"
+                    published: 342
+                    evaluating: 687
+                    unpublished: 125
+                    temporarilyPublished: 98
+                    publicationRate: 0.273
+                  - month: "2024-02"
+                    published: 389
+                    evaluating: 712
+                    unpublished: 143
+                    temporarilyPublished: 102
+                    publicationRate: 0.281
+                updatedAt: "2025-01-16"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /graphs/notes-evaluation:
+    get:
+      summary: Get individual note performance metrics
+      description: |
+        Returns individual community notes with evaluation metrics (helpful/not helpful ratings, impressions).
+        Results sorted by impression count DESC, then helpful count DESC.
+        Default limit 200, maximum 1000.
+      operationId: getNotesEvaluation
+      tags:
+        - graphs
+      parameters:
+        - name: period
+          in: query
+          required: true
+          description: Relative time period for data retrieval
+          schema:
+            type: string
+            enum: ["1week", "1month", "3months", "6months", "1year"]
+        - name: status
+          in: query
+          required: false
+          description: Filter by publication status (default: all)
+          schema:
+            type: string
+            enum: ["all", "published", "evaluating", "unpublished", "temporarilyPublished"]
+            default: "all"
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of results (default: 200, max: 1000)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 200
+      responses:
+        "200":
+          description: Successful response with note evaluation data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotesEvaluationResponse"
+              example:
+                data:
+                  - note_id: "1234567890123456789"
+                    name: "Community note about election misinformation"
+                    helpfulCount: 127
+                    notHelpfulCount: 8
+                    impressionCount: 45623
+                    status: "published"
+                  - note_id: "9876543210987654321"
+                    name: "Fact-check on health claim"
+                    helpfulCount: 89
+                    notHelpfulCount: 12
+                    impressionCount: 32145
+                    status: "published"
+                updatedAt: "2025-01-16"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /graphs/notes-evaluation-status:
+    get:
+      summary: Compare note evaluation across statuses
+      description: |
+        Returns individual community notes sorted by helpful count DESC, not helpful count ASC.
+        Designed for moderation dashboard view.
+        Default limit 100.
+      operationId: getNotesEvaluationStatus
+      tags:
+        - graphs
+      parameters:
+        - name: period
+          in: query
+          required: true
+          description: Relative time period for data retrieval
+          schema:
+            type: string
+            enum: ["1week", "1month", "3months", "6months", "1year"]
+        - name: status
+          in: query
+          required: false
+          description: Filter by publication status (default: all)
+          schema:
+            type: string
+            enum: ["all", "published", "evaluating", "unpublished", "temporarilyPublished"]
+            default: "all"
+      responses:
+        "200":
+          description: Successful response with note evaluation data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotesEvaluationStatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /graphs/post-influence:
+    get:
+      summary: Get post engagement and influence metrics
+      description: |
+        Returns posts with engagement metrics (reposts, likes, impressions) and associated note status.
+        Results sorted by impression count DESC.
+        Default limit 200, maximum 1000.
+      operationId: getPostInfluence
+      tags:
+        - graphs
+      parameters:
+        - name: period
+          in: query
+          required: true
+          description: Relative time period for data retrieval
+          schema:
+            type: string
+            enum: ["1week", "1month", "3months", "6months", "1year"]
+        - name: status
+          in: query
+          required: false
+          description: Filter by publication status (default: all)
+          schema:
+            type: string
+            enum: ["all", "published", "evaluating", "unpublished", "temporarilyPublished"]
+            default: "all"
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of results (default: 200, max: 1000)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 200
+      responses:
+        "200":
+          description: Successful response with post influence data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostInfluenceResponse"
+              example:
+                data:
+                  - post_id: "1234567890123456789"
+                    name: "Breaking news about technology..."
+                    repostCount: 3421
+                    likeCount: 8765
+                    impressionCount: 234567
+                    status: "published"
+                  - post_id: "9876543210987654321"
+                    name: "Analysis of economic trends..."
+                    repostCount: 2156
+                    likeCount: 6234
+                    impressionCount: 187432
+                    status: "evaluating"
+                updatedAt: "2025-01-16"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+components:
+  schemas:
+    PublicationStatus:
+      type: string
+      enum:
+        - published
+        - temporarilyPublished
+        - evaluating
+        - unpublished
+      description: |
+        Derived publication status for community notes:
+        - published: currently rated helpful
+        - temporarilyPublished: was helpful but now needs more ratings or not helpful
+        - evaluating: needs more ratings and never been helpful
+        - unpublished: currently rated not helpful and never been helpful
+
+    DailyNotesDataItem:
+      type: object
+      required:
+        - date
+        - published
+        - evaluating
+        - unpublished
+        - temporarilyPublished
+      properties:
+        date:
+          type: string
+          format: date
+          description: Date in YYYY-MM-DD format (UTC)
+          example: "2025-01-15"
+        published:
+          type: integer
+          minimum: 0
+          description: Count of published notes
+        evaluating:
+          type: integer
+          minimum: 0
+          description: Count of evaluating notes
+        unpublished:
+          type: integer
+          minimum: 0
+          description: Count of unpublished notes
+        temporarilyPublished:
+          type: integer
+          minimum: 0
+          description: Count of temporarily published notes
+
+    DailyPostsDataItem:
+      type: object
+      required:
+        - date
+        - postCount
+      properties:
+        date:
+          type: string
+          format: date
+          description: Date in YYYY-MM-DD format (UTC)
+        postCount:
+          type: integer
+          minimum: 0
+          description: Number of posts created on this date
+        status:
+          $ref: "#/components/schemas/PublicationStatus"
+          nullable: true
+          description: Status filter applied (null when status=all)
+
+    MonthlyNoteDataItem:
+      type: object
+      required:
+        - month
+        - published
+        - evaluating
+        - unpublished
+        - temporarilyPublished
+        - publicationRate
+      properties:
+        month:
+          type: string
+          pattern: '^\d{4}-\d{2}$'
+          description: Month in YYYY-MM format
+          example: "2025-01"
+        published:
+          type: integer
+          minimum: 0
+        evaluating:
+          type: integer
+          minimum: 0
+        unpublished:
+          type: integer
+          minimum: 0
+        temporarilyPublished:
+          type: integer
+          minimum: 0
+        publicationRate:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          description: Ratio of published to total notes (0.0 if no notes)
+
+    NoteEvaluationDataItem:
+      type: object
+      required:
+        - note_id
+        - name
+        - helpfulCount
+        - notHelpfulCount
+        - impressionCount
+        - status
+      properties:
+        note_id:
+          type: string
+          description: Unique note identifier
+        name:
+          type: string
+          maxLength: 200
+          description: Note display name
+        helpfulCount:
+          type: integer
+          minimum: 0
+        notHelpfulCount:
+          type: integer
+          minimum: 0
+        impressionCount:
+          type: integer
+          minimum: 0
+          description: Impressions from associated post (0 if no post)
+        status:
+          $ref: "#/components/schemas/PublicationStatus"
+
+    PostInfluenceDataItem:
+      type: object
+      required:
+        - post_id
+        - name
+        - repostCount
+        - likeCount
+        - impressionCount
+        - status
+      properties:
+        post_id:
+          type: string
+          description: Unique post identifier
+        name:
+          type: string
+          maxLength: 200
+          description: Post display name
+        repostCount:
+          type: integer
+          minimum: 0
+        likeCount:
+          type: integer
+          minimum: 0
+        impressionCount:
+          type: integer
+          minimum: 0
+        status:
+          $ref: "#/components/schemas/PublicationStatus"
+          description: Status of associated note (unpublished if no note)
+
+    DailyNotesResponse:
+      type: object
+      required:
+        - data
+        - updatedAt
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailyNotesDataItem"
+        updatedAt:
+          type: string
+          format: date
+          description: Last data update timestamp (UTC)
+
+    DailyPostsResponse:
+      type: object
+      required:
+        - data
+        - updatedAt
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailyPostsDataItem"
+        updatedAt:
+          type: string
+          format: date
+
+    NotesAnnualResponse:
+      type: object
+      required:
+        - data
+        - updatedAt
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonthlyNoteDataItem"
+        updatedAt:
+          type: string
+          format: date
+
+    NotesEvaluationResponse:
+      type: object
+      required:
+        - data
+        - updatedAt
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/NoteEvaluationDataItem"
+        updatedAt:
+          type: string
+          format: date
+
+    NotesEvaluationStatusResponse:
+      type: object
+      required:
+        - data
+        - updatedAt
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/NoteEvaluationDataItem"
+        updatedAt:
+          type: string
+          format: date
+
+    PostInfluenceResponse:
+      type: object
+      required:
+        - data
+        - updatedAt
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/PostInfluenceDataItem"
+        updatedAt:
+          type: string
+          format: date
+
+    ErrorResponse:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          oneOf:
+            - type: string
+              description: Simple error message
+            - type: array
+              description: Pydantic validation errors
+              items:
+                type: object
+                properties:
+                  type:
+                    type: string
+                  loc:
+                    type: array
+                    items:
+                      type: string
+                  msg:
+                    type: string
+                  input:
+                    type: string
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters (range exceeds max, invalid filter)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            detail: "Start date must be before or equal to end date"
+
+    ValidationError:
+      description: Malformed input (unparseable dates, invalid format)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            detail: "Invalid date range format. Expected YYYY-MM_YYYY-MM, got: 2025-01-2025-02"
+
+  securitySchemes: {}
+
+security: []
+
+tags:
+  - name: graphs
+    description: Graph analytics endpoints for community notes and posts

@@ -2,7 +2,16 @@ from typing import Any, Generator, List, Optional, Tuple, Union
 
 from psycopg2.extensions import AsIs, register_adapter
 from pydantic import AnyUrl, HttpUrl
-from sqlalchemy import ForeignKey, create_engine, func, select
+from sqlalchemy import (
+    ForeignKey,
+    and_,
+    case,
+    create_engine,
+    distinct,
+    func,
+    or_,
+    select,
+)
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 from sqlalchemy.orm.query import RowReturningQuery
@@ -352,6 +361,730 @@ class Storage:
             ]
         except (json.JSONDecodeError, KeyError, ValueError, TypeError):
             return []
+
+    @classmethod
+    def _get_publication_status_case(cls) -> Any:
+        """Reusable CASE expression for publication status derivation.
+
+        Calculates publication status from NoteRecord.current_status and NoteRecord.has_been_helpfuled:
+        - published: current_status = CURRENTLY_RATED_HELPFUL
+        - temporarilyPublished: has_been_helpfuled = True AND current_status IN
+          (NEEDS_MORE_RATINGS, CURRENTLY_RATED_NOT_HELPFUL)
+        - evaluating: current_status = NEEDS_MORE_RATINGS AND has_been_helpfuled = False
+        - unpublished: all other cases
+
+        Returns:
+            SQLAlchemy CASE expression that can be used in queries for aggregation or filtering
+        """
+        return case(
+            (NoteRecord.current_status == "CURRENTLY_RATED_HELPFUL", "published"),
+            (
+                and_(
+                    NoteRecord.has_been_helpfuled == True,  # noqa: E712
+                    NoteRecord.current_status.in_(["NEEDS_MORE_RATINGS", "CURRENTLY_RATED_NOT_HELPFUL"]),
+                ),
+                "temporarilyPublished",
+            ),
+            (
+                and_(
+                    NoteRecord.current_status == "NEEDS_MORE_RATINGS",
+                    NoteRecord.has_been_helpfuled == False,  # noqa: E712
+                ),
+                "evaluating",
+            ),
+            else_="unpublished",
+        )
+
+    @classmethod
+    def _fill_daily_gaps(
+        cls,
+        data: List[dict[str, Any]],
+        start_date: str,
+        end_date: str,
+    ) -> List[dict[str, Any]]:
+        """Fill missing dates with zero counts for continuous daily time series.
+
+        Args:
+            data: List of dictionaries with 'date' key (YYYY-MM-DD format) and count fields
+            start_date: Start date string in YYYY-MM-DD format
+            end_date: End date string in YYYY-MM-DD format
+
+        Returns:
+            List of dictionaries with all dates filled, gaps set to zero counts
+
+        Examples:
+            >>> data = [
+            ...     {"date": "2025-01-01", "published": 5, "evaluating": 10,
+            ...      "unpublished": 2, "temporarilyPublished": 1}
+            ... ]
+            >>> result = Storage._fill_daily_gaps(data, "2025-01-01", "2025-01-03")
+            >>> len(result)
+            3
+            >>> result[0]["date"]
+            '2025-01-01'
+            >>> result[1]["published"]
+            0
+        """
+        from datetime import date as date_type
+        from datetime import timedelta
+
+        # Convert string dates to date objects
+        start = date_type.fromisoformat(start_date)
+        end = date_type.fromisoformat(end_date)
+
+        # Create map of existing dates
+        by_date = {item["date"]: item for item in data}
+
+        # Generate complete range with zero-filled gaps
+        result = []
+        current = start
+        while current <= end:
+            date_str = current.isoformat()
+            if date_str in by_date:
+                result.append(by_date[date_str])
+            else:
+                # Fill with zeros for missing date
+                # Detect data structure from first item if available
+                if data and len(data) > 0:
+                    first_item = data[0]
+                    zero_item: dict[str, Any] = {"date": date_str}
+                    # Copy structure from first item, setting numeric values to 0
+                    for key, value in first_item.items():
+                        if key != "date":
+                            if isinstance(value, int):
+                                zero_item[key] = 0
+                            elif isinstance(value, float):
+                                zero_item[key] = 0.0
+                            else:
+                                zero_item[key] = value  # Preserve non-numeric values
+                    result.append(zero_item)
+                else:
+                    # Default structure for notes data
+                    result.append(
+                        {
+                            "date": date_str,
+                            "published": 0,
+                            "evaluating": 0,
+                            "unpublished": 0,
+                            "temporarilyPublished": 0,
+                        }
+                    )
+            current += timedelta(days=1)
+
+        return result
+
+    @classmethod
+    def _fill_monthly_gaps(
+        cls,
+        data: List[dict[str, Any]],
+        start_month: str,
+        end_month: str,
+    ) -> List[dict[str, Any]]:
+        """Fill missing months with zero counts for continuous monthly time series.
+
+        Args:
+            data: List of dictionaries with 'month' key (YYYY-MM format) and count fields
+            start_month: Start month string in YYYY-MM format
+            end_month: End month string in YYYY-MM format
+
+        Returns:
+            List of dictionaries with all months filled, gaps set to zero counts
+
+        Examples:
+            >>> data = [
+            ...     {"month": "2025-01", "published": 10, "evaluating": 20, "unpublished": 5,
+            ...      "temporarilyPublished": 2, "publication_rate": 0.27}
+            ... ]
+            >>> result = Storage._fill_monthly_gaps(data, "2025-01", "2025-03")
+            >>> len(result)
+            3
+            >>> result[0]["month"]
+            '2025-01'
+            >>> result[1]["published"]
+            0
+        """
+        from datetime import date as date_type
+
+        # Parse month strings (YYYY-MM) to first day of month
+        start = date_type.fromisoformat(f"{start_month}-01")
+        end = date_type.fromisoformat(f"{end_month}-01")
+
+        # Create map of existing months
+        by_month = {item["month"]: item for item in data}
+
+        # Generate complete range with zero-filled gaps
+        result = []
+        current = start
+        while current <= end:
+            month_str = current.strftime("%Y-%m")
+            if month_str in by_month:
+                result.append(by_month[month_str])
+            else:
+                # Fill with zeros for missing month
+                result.append(
+                    {
+                        "month": month_str,
+                        "published": 0,
+                        "evaluating": 0,
+                        "unpublished": 0,
+                        "temporarilyPublished": 0,
+                        "publication_rate": 0.0,
+                    }
+                )
+            # Move to next month
+            if current.month == 12:
+                current = date_type(current.year + 1, 1, 1)
+            else:
+                current = date_type(current.year, current.month + 1, 1)
+
+        return result
+
+    def get_graph_updated_at(self, table: str) -> str:
+        """Get last update timestamp for graph data.
+
+        Args:
+            table: Table name ("notes" or "posts")
+
+        Returns:
+            Last update timestamp in YYYY-MM-DD format (UTC), derived from MAX(created_at)
+
+        Raises:
+            ValueError: If table name is invalid
+        """
+        if table not in ["notes", "posts"]:
+            raise ValueError(f"Invalid table name: {table}. Must be 'notes' or 'posts'")
+
+        table_class = NoteRecord if table == "notes" else PostRecord
+
+        with Session(self._engine) as session:
+            # Get MAX(created_at) from the table
+            result = session.execute(select(func.max(table_class.created_at))).scalar_one_or_none()
+
+            if result is None:
+                # No data in table, return current date
+                from datetime import datetime, timezone
+
+                return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+            # Convert TwitterTimestamp (milliseconds) to date
+            from datetime import datetime, timezone
+
+            timestamp_seconds = float(result) / 1000
+            dt = datetime.fromtimestamp(timestamp_seconds, tz=timezone.utc)
+            return dt.strftime("%Y-%m-%d")
+
+    def get_daily_note_counts(
+        self,
+        start_date: str,
+        end_date: str,
+        status_filter: Optional[str] = None,
+    ) -> List[dict[str, Any]]:
+        """Get daily aggregated note creation counts by publication status.
+
+        Args:
+            start_date: Start date in YYYY-MM-DD format (inclusive)
+            end_date: End date in YYYY-MM-DD format (inclusive)
+            status_filter: Optional status filter
+                ("all", "published", "evaluating", "unpublished", "temporarilyPublished")
+
+        Returns:
+            List of dictionaries with keys: date, published, evaluating, unpublished, temporarilyPublished
+
+        Example response format:
+            [
+                {"date": "2025-01-01", "published": 5, "evaluating": 10, "unpublished": 2, "temporarilyPublished": 1},
+                {"date": "2025-01-02", "published": 3, "evaluating": 12, "unpublished": 4, "temporarilyPublished": 0},
+                ...
+            ]
+        """
+        from datetime import datetime, timezone
+
+        # Convert date strings to TwitterTimestamp (milliseconds)
+        start_dt = datetime.fromisoformat(start_date).replace(tzinfo=timezone.utc)
+        end_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+        start_ts = int(start_dt.timestamp() * 1000)
+        end_ts = int(end_dt.timestamp() * 1000)
+
+        # Get publication status CASE expression
+        status_expr = self._get_publication_status_case()
+
+        # Build aggregation query
+        query = select(
+            func.date_trunc("day", func.to_timestamp(NoteRecord.created_at / 1000)).label("day"),
+            func.count().filter(status_expr == "published").label("published"),
+            func.count().filter(status_expr == "evaluating").label("evaluating"),
+            func.count().filter(status_expr == "unpublished").label("unpublished"),
+            func.count().filter(status_expr == "temporarilyPublished").label("temporarilyPublished"),
+        ).where(
+            NoteRecord.created_at >= start_ts,
+            NoteRecord.created_at <= end_ts,
+        )
+
+        # Add status filter if specified
+        if status_filter and status_filter != "all":
+            query = query.where(status_expr == status_filter)
+
+        query = query.group_by("day").order_by("day")
+
+        # Execute query
+        with Session(self._engine) as session:
+            result = session.execute(query)
+            rows = result.fetchall()
+
+            # Convert to list of dictionaries
+            data = []
+            for row in rows:
+                # Convert timestamp to date string
+                date_str = row.day.strftime("%Y-%m-%d")
+                data.append(
+                    {
+                        "date": date_str,
+                        "published": int(row.published),
+                        "evaluating": int(row.evaluating),
+                        "unpublished": int(row.unpublished),
+                        "temporarilyPublished": int(row.temporarilyPublished),
+                    }
+                )
+
+            return data
+
+    def get_daily_post_counts(
+        self,
+        start_date: str,
+        end_date: str,
+        status_filter: Optional[str] = None,
+    ) -> List[dict[str, Any]]:
+        """Get daily aggregated post counts with optional note status filter.
+
+        Args:
+            start_date: Start date in YYYY-MM-DD format (inclusive)
+            end_date: End date in YYYY-MM-DD format (inclusive)
+            status_filter: Optional status filter for associated notes
+                ("all", "published", "evaluating", "unpublished", "temporarilyPublished")
+
+        Returns:
+            List of dictionaries with keys: date, post_count, status (optional)
+
+        Example response format:
+            [
+                {"date": "2025-01-01", "post_count": 150, "status": "published"},
+                {"date": "2025-01-02", "post_count": 142, "status": "published"},
+                ...
+            ]
+        """
+        from datetime import datetime, timezone
+
+        # Convert date strings to TwitterTimestamp (milliseconds)
+        start_dt = datetime.fromisoformat(start_date).replace(tzinfo=timezone.utc)
+        end_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+        start_ts = int(start_dt.timestamp() * 1000)
+        end_ts = int(end_dt.timestamp() * 1000)
+
+        # Get publication status CASE expression
+        status_expr = self._get_publication_status_case()
+
+        # Build query - posts LEFT JOIN notes to include posts without notes
+        if status_filter == "all" or status_filter is None:
+            # When no filter, just count all posts
+            query = (
+                select(
+                    func.date_trunc("day", func.to_timestamp(PostRecord.created_at / 1000)).label("day"),
+                    func.count(PostRecord.post_id).label("post_count"),
+                )
+                .where(
+                    PostRecord.created_at >= start_ts,
+                    PostRecord.created_at <= end_ts,
+                )
+                .group_by("day")
+                .order_by("day")
+            )
+        else:
+            # When filtering by status, join with notes and filter
+            query = (
+                select(
+                    func.date_trunc("day", func.to_timestamp(PostRecord.created_at / 1000)).label("day"),
+                    func.count(distinct(PostRecord.post_id)).label("post_count"),
+                )
+                .select_from(PostRecord)
+                .outerjoin(NoteRecord, PostRecord.post_id == NoteRecord.post_id)
+                .where(
+                    PostRecord.created_at >= start_ts,
+                    PostRecord.created_at <= end_ts,
+                )
+            )
+
+            # Apply status filter
+            # Posts without notes are considered "unpublished"
+            if status_filter == "unpublished":
+                query = query.where(or_(NoteRecord.note_id.is_(None), status_expr == "unpublished"))
+            else:
+                query = query.where(status_expr == status_filter)
+
+            query = query.group_by("day").order_by("day")
+
+        # Execute query
+        with Session(self._engine) as session:
+            result = session.execute(query)
+            rows = result.fetchall()
+
+            # Convert to list of dictionaries
+            data = []
+            for row in rows:
+                # Convert timestamp to date string
+                date_str = row.day.strftime("%Y-%m-%d")
+                item: dict[str, Any] = {
+                    "date": date_str,
+                    "post_count": int(row.post_count),
+                }
+
+                # Add status only if filtering by specific status
+                if status_filter and status_filter != "all":
+                    item["status"] = status_filter
+
+                data.append(item)
+
+            return data
+
+    def get_monthly_note_counts(
+        self,
+        start_month: str,
+        end_month: str,
+        status_filter: Optional[str] = None,
+    ) -> List[dict[str, Any]]:
+        """Get monthly aggregated note creation counts with publication rate.
+
+        Args:
+            start_month: Start month in YYYY-MM format (inclusive)
+            end_month: End month in YYYY-MM format (inclusive)
+            status_filter: Optional status filter
+                ("all", "published", "evaluating", "unpublished", "temporarilyPublished")
+
+        Returns:
+            List of dictionaries with keys: month, published, evaluating, unpublished,
+            temporarilyPublished, publication_rate
+
+        Example response format:
+            [
+                {
+                    "month": "2025-01",
+                    "published": 342,
+                    "evaluating": 687,
+                    "unpublished": 125,
+                    "temporarilyPublished": 98,
+                    "publication_rate": 0.273
+                },
+                ...
+            ]
+        """
+        from datetime import datetime, timezone
+
+        # Convert month strings to dates (first day of each month)
+        start_date = datetime.strptime(start_month, "%Y-%m").replace(day=1, tzinfo=timezone.utc)
+        # Get last day of end month
+        from calendar import monthrange
+
+        end_year, end_month_num = map(int, end_month.split("-"))
+        last_day = monthrange(end_year, end_month_num)[1]
+        end_date = datetime.strptime(end_month, "%Y-%m").replace(
+            day=last_day, hour=23, minute=59, second=59, tzinfo=timezone.utc
+        )
+
+        # Convert to TwitterTimestamp (milliseconds)
+        start_ts = int(start_date.timestamp() * 1000)
+        end_ts = int(end_date.timestamp() * 1000)
+
+        # Get publication status CASE expression
+        status_expr = self._get_publication_status_case()
+
+        # Build aggregation query
+        query = select(
+            func.date_trunc("month", func.to_timestamp(NoteRecord.created_at / 1000)).label("month"),
+            func.count().filter(status_expr == "published").label("published"),
+            func.count().filter(status_expr == "evaluating").label("evaluating"),
+            func.count().filter(status_expr == "unpublished").label("unpublished"),
+            func.count().filter(status_expr == "temporarilyPublished").label("temporarilyPublished"),
+        ).where(
+            NoteRecord.created_at >= start_ts,
+            NoteRecord.created_at <= end_ts,
+        )
+
+        # Add status filter if specified
+        if status_filter and status_filter != "all":
+            query = query.where(status_expr == status_filter)
+
+        query = query.group_by("month").order_by("month")
+
+        # Execute query
+        with Session(self._engine) as session:
+            result = session.execute(query)
+            rows = result.fetchall()
+
+            # Convert to list of dictionaries with publication rate
+            data = []
+            for row in rows:
+                # Convert timestamp to month string
+                month_str = row.month.strftime("%Y-%m")
+
+                published = int(row.published)
+                evaluating = int(row.evaluating)
+                unpublished = int(row.unpublished)
+                temporarily_published = int(row.temporarilyPublished)
+
+                # Calculate publication rate (avoid division by zero)
+                total = published + evaluating + unpublished + temporarily_published
+                publication_rate = published / total if total > 0 else 0.0
+
+                data.append(
+                    {
+                        "month": month_str,
+                        "published": published,
+                        "evaluating": evaluating,
+                        "unpublished": unpublished,
+                        "temporarilyPublished": temporarily_published,
+                        "publication_rate": publication_rate,
+                    }
+                )
+
+            return data
+
+    def get_note_evaluation_points(
+        self,
+        period: Optional[str] = None,
+        status_filter: Optional[str] = None,
+        limit: int = 200,
+        order_by: str = "impression_count",
+    ) -> List[dict[str, Any]]:
+        """Get individual note evaluation metrics with configurable ordering.
+
+        Args:
+            period: Optional time period filter ("1week", "1month", "3months", "6months", "1year")
+            status_filter: Optional status filter
+                ("all", "published", "evaluating", "unpublished", "temporarilyPublished")
+            limit: Maximum number of results to return (default: 200, max: 200)
+            order_by: Field to order by - "impression_count" (default) or "helpful_count"
+
+        Returns:
+            List of dictionaries with keys: note_id, name, helpful_count, not_helpful_count,
+            impression_count, status. Ordered by specified field DESC.
+
+        Example response format:
+            [
+                {
+                    "note_id": "1234567890123456789",
+                    "name": "Note about...",
+                    "helpful_count": 127,
+                    "not_helpful_count": 8,
+                    "impression_count": 45623,
+                    "status": "published"
+                },
+                ...
+            ]
+        """
+        from datetime import date as date_type
+        from datetime import datetime, timedelta, timezone
+
+        # Validate and cap limit
+        if limit > 200:
+            limit = 200
+
+        # Get publication status CASE expression
+        status_expr = self._get_publication_status_case()
+
+        # Build query with notes-posts JOIN
+        query = (
+            select(
+                NoteRecord.note_id,
+                NoteRecord.summary.label("name"),
+                NoteRecord.helpful_count.label("helpful_count"),
+                NoteRecord.not_helpful_count.label("not_helpful_count"),
+                PostRecord.impression_count.label("impression_count"),
+                status_expr.label("status"),
+            )
+            .select_from(NoteRecord)
+            .join(PostRecord, NoteRecord.post_id == PostRecord.post_id)
+        )
+
+        # Add period filter if specified
+        if period:
+            # Calculate date range
+            end_date = date_type.today()
+            days_map = {
+                "1week": 7,
+                "1month": 30,
+                "3months": 90,
+                "6months": 180,
+                "1year": 365,
+            }
+            days = days_map.get(period, 30)
+            start_date = end_date - timedelta(days=days - 1)
+
+            # Convert to TwitterTimestamp
+            start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+            end_dt = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
+            start_ts = int(start_dt.timestamp() * 1000)
+            end_ts = int(end_dt.timestamp() * 1000)
+
+            query = query.where(
+                NoteRecord.created_at >= start_ts,
+                NoteRecord.created_at <= end_ts,
+            )
+
+        # Add status filter if specified
+        if status_filter and status_filter != "all":
+            query = query.where(status_expr == status_filter)
+
+        # Order by specified field descending and apply limit
+        if order_by == "helpful_count":
+            query = query.order_by(NoteRecord.helpful_count.desc()).limit(limit)
+        else:  # Default to impression_count
+            query = query.order_by(PostRecord.impression_count.desc()).limit(limit)
+
+        # Execute query
+        with Session(self._engine) as session:
+            result = session.execute(query)
+            rows = result.fetchall()
+
+            # Convert to list of dictionaries
+            data = []
+            for row in rows:
+                data.append(
+                    {
+                        "note_id": str(row.note_id),
+                        "name": row.name[:100] if row.name else "",  # Truncate to 100 chars
+                        "helpful_count": int(row.helpful_count) if row.helpful_count else 0,
+                        "not_helpful_count": int(row.not_helpful_count) if row.not_helpful_count else 0,
+                        "impression_count": int(row.impression_count) if row.impression_count else 0,
+                        "status": row.status,
+                    }
+                )
+
+            return data
+
+    def get_post_influence_points(
+        self,
+        period: Optional[str] = None,
+        status_filter: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[dict[str, Any]]:
+        """Get individual post influence metrics ordered by impression count.
+
+        Args:
+            period: Optional time period filter ("1week", "1month", "3months", "6months", "1year")
+            status_filter: Optional status filter for associated notes
+                ("all", "published", "evaluating", "unpublished", "temporarilyPublished")
+            limit: Maximum number of results to return (default: 200, max: 200)
+
+        Returns:
+            List of dictionaries with keys: post_id, name, repost_count, like_count,
+            impression_count, status (optional). Ordered by impression_count DESC.
+
+        Example response format:
+            [
+                {
+                    "post_id": "1234567890123456789",
+                    "name": "Post about...",
+                    "repost_count": 3421,
+                    "like_count": 8765,
+                    "impression_count": 234567,
+                    "status": "published"
+                },
+                ...
+            ]
+        """
+        from datetime import date as date_type
+        from datetime import datetime, timedelta, timezone
+
+        # Validate and cap limit
+        if limit > 200:
+            limit = 200
+
+        # Get publication status CASE expression
+        status_expr = self._get_publication_status_case()
+
+        # Build query - posts LEFT JOIN notes for status filtering
+        if status_filter == "all" or status_filter is None:
+            # No status filter - just get posts
+            query = select(
+                PostRecord.post_id,
+                PostRecord.text.label("name"),
+                PostRecord.repost_count,
+                PostRecord.like_count,
+                PostRecord.impression_count,
+            ).select_from(PostRecord)
+        else:
+            # With status filter - LEFT JOIN notes
+            query = (
+                select(
+                    PostRecord.post_id,
+                    PostRecord.text.label("name"),
+                    PostRecord.repost_count,
+                    PostRecord.like_count,
+                    PostRecord.impression_count,
+                    status_expr.label("status"),
+                )
+                .select_from(PostRecord)
+                .outerjoin(NoteRecord, PostRecord.post_id == NoteRecord.post_id)
+            )
+
+        # Add period filter if specified
+        if period:
+            # Calculate date range
+            end_date = date_type.today()
+            days_map = {
+                "1week": 7,
+                "1month": 30,
+                "3months": 90,
+                "6months": 180,
+                "1year": 365,
+            }
+            days = days_map.get(period, 30)
+            start_date = end_date - timedelta(days=days - 1)
+
+            # Convert to TwitterTimestamp
+            start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+            end_dt = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
+            start_ts = int(start_dt.timestamp() * 1000)
+            end_ts = int(end_dt.timestamp() * 1000)
+
+            query = query.where(
+                PostRecord.created_at >= start_ts,
+                PostRecord.created_at <= end_ts,
+            )
+
+        # Add status filter if specified
+        if status_filter and status_filter != "all":
+            if status_filter == "unpublished":
+                # Posts without notes or with unpublished notes
+                query = query.where(or_(NoteRecord.note_id.is_(None), status_expr == "unpublished"))
+            else:
+                query = query.where(status_expr == status_filter)
+
+        # Order by impression count descending and apply limit
+        query = query.order_by(PostRecord.impression_count.desc()).limit(limit)
+
+        # Execute query
+        with Session(self._engine) as session:
+            result = session.execute(query)
+            rows = result.fetchall()
+
+            # Convert to list of dictionaries
+            data = []
+            for row in rows:
+                item: dict[str, Any] = {
+                    "post_id": str(row.post_id),
+                    "name": row.name[:100] if row.name else "",  # Truncate to 100 chars
+                    "repost_count": int(row.repost_count) if row.repost_count else 0,
+                    "like_count": int(row.like_count) if row.like_count else 0,
+                    "impression_count": int(row.impression_count) if row.impression_count else 0,
+                }
+
+                # Add status only if filtering by specific status
+                if status_filter and status_filter != "all":
+                    item["status"] = getattr(row, "status", None)
+
+                data.append(item)
+
+            return data
 
     @classmethod
     def _media_record_to_model(cls, media_record: MediaRecord) -> Media:

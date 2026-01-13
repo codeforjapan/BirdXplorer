@@ -486,6 +486,84 @@ def mock_storage(
 
     mock.get_number_of_posts.side_effect = _get_number_of_posts
 
+    # Graph API methods
+    def _get_daily_note_counts(
+        start_date: str,
+        end_date: str,
+        status_filter: Union[str, None] = None,
+    ) -> List[dict[str, Union[str, int]]]:
+        # Return empty list for mock - tests can override if needed
+        return []
+
+    mock.get_daily_note_counts.side_effect = _get_daily_note_counts
+
+    def _get_daily_post_counts(
+        start_date: str,
+        end_date: str,
+        status_filter: Union[str, None] = None,
+    ) -> List[dict[str, Union[str, int]]]:
+        # Return empty list for mock - tests can override if needed
+        return []
+
+    mock.get_daily_post_counts.side_effect = _get_daily_post_counts
+
+    def _get_monthly_note_counts(
+        start_month: str,
+        end_month: str,
+        status_filter: Union[str, None] = None,
+    ) -> List[dict[str, Union[str, int, float]]]:
+        # Return empty list for mock - tests can override if needed
+        return []
+
+    mock.get_monthly_note_counts.side_effect = _get_monthly_note_counts
+
+    def _fill_daily_gaps(
+        data: List[dict[str, Union[str, int]]], start_date: str, end_date: str
+    ) -> List[dict[str, Union[str, int]]]:
+        # Pass through for mock - already tested in common module
+        from birdxplorer_common.storage import Storage
+
+        return Storage._fill_daily_gaps(data, start_date, end_date)
+
+    mock._fill_daily_gaps.side_effect = _fill_daily_gaps
+
+    def _fill_monthly_gaps(
+        data: List[dict[str, Union[str, int, float]]], start_month: str, end_month: str
+    ) -> List[dict[str, Union[str, int, float]]]:
+        # Pass through for mock - already tested in common module
+        from birdxplorer_common.storage import Storage
+
+        return Storage._fill_monthly_gaps(data, start_month, end_month)
+
+    mock._fill_monthly_gaps.side_effect = _fill_monthly_gaps
+
+    def _get_note_evaluation_points(
+        period: Union[str, None] = None,
+        status_filter: Union[str, None] = None,
+        limit: int = 200,
+        order_by: str = "impression_count",
+    ) -> List[dict[str, Union[str, int]]]:
+        # Return empty list for mock - tests can override if needed
+        return []
+
+    mock.get_note_evaluation_points.side_effect = _get_note_evaluation_points
+
+    def _get_post_influence_points(
+        period: Union[str, None] = None,
+        status_filter: Union[str, None] = None,
+        limit: int = 200,
+    ) -> List[dict[str, Union[str, int]]]:
+        # Return empty list for mock - tests can override if needed
+        return []
+
+    mock.get_post_influence_points.side_effect = _get_post_influence_points
+
+    def _get_graph_updated_at(table: str) -> str:
+        # Return a fixed date for testing
+        return "2025-01-15"
+
+    mock.get_graph_updated_at.side_effect = _get_graph_updated_at
+
     yield mock
 
 

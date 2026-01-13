@@ -7,6 +7,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    Generic,
     List,
     Literal,
     Optional,
@@ -595,6 +596,23 @@ class NotesValidationDifficulty(str, Enum):
     empty = ""
 
 
+class PublicationStatus(str, Enum):
+    """Derived publication status for community notes.
+
+    Calculated from NoteRecord.current_status and NoteRecord.has_been_helpfuled:
+    - published: current_status = CURRENTLY_RATED_HELPFUL
+    - temporarilyPublished: has_been_helpfuled = True AND current_status IN
+      (NEEDS_MORE_RATINGS, CURRENTLY_RATED_NOT_HELPFUL)
+    - evaluating: current_status = NEEDS_MORE_RATINGS AND has_been_helpfuled = False
+    - unpublished: all other cases
+    """
+
+    PUBLISHED = "published"
+    TEMPORARILY_PUBLISHED = "temporarilyPublished"
+    EVALUATING = "evaluating"
+    UNPUBLISHED = "unpublished"
+
+
 class PostId(UpToNineteenDigitsDecimalString): ...
 
 
@@ -887,3 +905,246 @@ class PaginationMeta(BaseModel):
             description="前のページのリクエスト用 URL",
         ),
     ] = None
+
+
+T = TypeVar("T")
+
+
+class GraphListResponse(BaseModel, Generic[T]):
+    """Generic response wrapper for graph API endpoints.
+
+    Provides consistent response structure with data array and metadata.
+    All graph endpoints return this wrapper with specific data item type.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel,
+    )
+
+    data: List[T] = PydanticField(
+        ...,
+        description="Array of data items (type varies by endpoint)",
+    )
+
+    updated_at: str = PydanticField(
+        ...,
+        description="Last update timestamp in YYYY-MM-DD format (UTC). Derived from MAX(created_at) of source table.",
+        examples=["2025-01-15"],
+    )
+
+
+class DailyNotesCreationDataItem(BaseModel):
+    """Daily community note creation counts by publication status.
+
+    Represents a single day's aggregated note creation data.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel,
+    )
+
+    date: str = PydanticField(
+        ...,
+        description="Date in YYYY-MM-DD format (UTC timezone)",
+        examples=["2025-01-15"],
+    )
+
+    published: int = PydanticField(
+        ...,
+        ge=0,
+        description="Count of notes with published status on this date",
+    )
+
+    evaluating: int = PydanticField(
+        ...,
+        ge=0,
+        description="Count of notes with evaluating status on this date",
+    )
+
+    unpublished: int = PydanticField(
+        ...,
+        ge=0,
+        description="Count of notes with unpublished status on this date",
+    )
+
+    temporarily_published: int = PydanticField(
+        ...,
+        ge=0,
+        description="Count of notes with temporarily published status on this date",
+    )
+
+
+class DailyPostCountDataItem(BaseModel):
+    """Daily post counts within a specified month range.
+
+    Represents post volume for a single day, optionally filtered by
+    associated community note status.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel,
+    )
+
+    date: str = PydanticField(
+        ...,
+        description="Date in YYYY-MM-DD format (UTC timezone)",
+        examples=["2025-01-15"],
+    )
+
+    post_count: int = PydanticField(
+        ...,
+        ge=0,
+        description="Total number of posts created on this date",
+    )
+
+    status: Optional[str] = PydanticField(
+        None,
+        description="Publication status of associated notes (if status filter applied)",
+    )
+
+
+class MonthlyNoteDataItem(BaseModel):
+    """Monthly community note counts with publication rate.
+
+    Aggregates note creation data by month and calculates the percentage
+    of notes that achieved published status.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel,
+    )
+
+    month: str = PydanticField(
+        ...,
+        description="Month in YYYY-MM format",
+        examples=["2025-01"],
+    )
+
+    published: int = PydanticField(
+        ...,
+        ge=0,
+        description="Count of notes with published status in this month",
+    )
+
+    evaluating: int = PydanticField(
+        ...,
+        ge=0,
+        description="Count of notes with evaluating status in this month",
+    )
+
+    unpublished: int = PydanticField(
+        ...,
+        ge=0,
+        description="Count of notes with unpublished status in this month",
+    )
+
+    temporarily_published: int = PydanticField(
+        ...,
+        ge=0,
+        description="Count of notes with temporarily published status in this month",
+    )
+
+    publication_rate: float = PydanticField(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Ratio of published notes to total notes (0.0 to 1.0). Returns 0.0 if no notes.",
+    )
+
+
+class NoteEvaluationDataItem(BaseModel):
+    """Individual note evaluation metrics for moderation review.
+
+    Provides helpfulness ratings and impression counts for individual notes,
+    ordered by impression count descending.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel,
+    )
+
+    note_id: str = PydanticField(
+        ...,
+        description="Unique identifier for the note",
+        examples=["1234567890123456789"],
+    )
+
+    name: str = PydanticField(
+        ...,
+        description="Note summary text or first 100 characters",
+    )
+
+    helpful_count: int = PydanticField(
+        ...,
+        ge=0,
+        description="Number of helpful ratings received",
+    )
+
+    not_helpful_count: int = PydanticField(
+        ...,
+        ge=0,
+        description="Number of not-helpful ratings received",
+    )
+
+    impression_count: int = PydanticField(
+        ...,
+        ge=0,
+        description="Number of times the note was displayed",
+    )
+
+    status: str = PydanticField(
+        ...,
+        description="Publication status of the note",
+    )
+
+
+class PostInfluenceDataItem(BaseModel):
+    """Individual post engagement metrics for influence analysis.
+
+    Provides engagement counts (reposts, likes, impressions) for individual posts,
+    ordered by impression count descending.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel,
+    )
+
+    post_id: str = PydanticField(
+        ...,
+        description="Unique identifier for the post",
+        examples=["1234567890123456789"],
+    )
+
+    name: str = PydanticField(
+        ...,
+        description="Post text or first 100 characters",
+    )
+
+    repost_count: int = PydanticField(
+        ...,
+        ge=0,
+        description="Number of reposts/retweets received",
+    )
+
+    like_count: int = PydanticField(
+        ...,
+        ge=0,
+        description="Number of likes received",
+    )
+
+    impression_count: int = PydanticField(
+        ...,
+        ge=0,
+        description="Number of times the post was displayed",
+    )
+
+    status: Optional[str] = PydanticField(
+        None,
+        description="Publication status of associated note (if status filter applied)",
+    )
