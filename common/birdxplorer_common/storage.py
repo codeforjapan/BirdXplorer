@@ -960,6 +960,132 @@ class Storage:
 
             return data
 
+    def get_post_influence_points(
+        self,
+        period: Optional[str] = None,
+        status_filter: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[dict[str, Any]]:
+        """Get individual post influence metrics ordered by impression count.
+
+        Args:
+            period: Optional time period filter ("1week", "1month", "3months", "6months", "1year")
+            status_filter: Optional status filter for associated notes
+                ("all", "published", "evaluating", "unpublished", "temporarilyPublished")
+            limit: Maximum number of results to return (default: 200, max: 200)
+
+        Returns:
+            List of dictionaries with keys: post_id, name, repost_count, like_count,
+            impression_count, status (optional). Ordered by impression_count DESC.
+
+        Example response format:
+            [
+                {
+                    "post_id": "1234567890123456789",
+                    "name": "Post about...",
+                    "repost_count": 3421,
+                    "like_count": 8765,
+                    "impression_count": 234567,
+                    "status": "published"
+                },
+                ...
+            ]
+        """
+        from datetime import date as date_type
+        from datetime import datetime, timedelta, timezone
+
+        # Validate and cap limit
+        if limit > 200:
+            limit = 200
+
+        # Get publication status CASE expression
+        status_expr = self._get_publication_status_case()
+
+        # Build query - posts LEFT JOIN notes for status filtering
+        if status_filter == "all" or status_filter is None:
+            # No status filter - just get posts
+            query = select(
+                PostRecord.post_id,
+                PostRecord.text.label("name"),
+                PostRecord.repost_count,
+                PostRecord.like_count,
+                PostRecord.impression_count,
+            ).select_from(PostRecord)
+        else:
+            # With status filter - LEFT JOIN notes
+            query = (
+                select(
+                    PostRecord.post_id,
+                    PostRecord.text.label("name"),
+                    PostRecord.repost_count,
+                    PostRecord.like_count,
+                    PostRecord.impression_count,
+                    status_expr.label("status"),
+                )
+                .select_from(PostRecord)
+                .outerjoin(NoteRecord, PostRecord.post_id == NoteRecord.post_id)
+            )
+
+        # Add period filter if specified
+        if period:
+            # Calculate date range
+            end_date = date_type.today()
+            days_map = {
+                "1week": 7,
+                "1month": 30,
+                "3months": 90,
+                "6months": 180,
+                "1year": 365,
+            }
+            days = days_map.get(period, 30)
+            start_date = end_date - timedelta(days=days - 1)
+
+            # Convert to TwitterTimestamp
+            start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+            end_dt = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
+            start_ts = int(start_dt.timestamp() * 1000)
+            end_ts = int(end_dt.timestamp() * 1000)
+
+            query = query.where(
+                PostRecord.created_at >= start_ts,
+                PostRecord.created_at <= end_ts,
+            )
+
+        # Add status filter if specified
+        if status_filter and status_filter != "all":
+            if status_filter == "unpublished":
+                # Posts without notes or with unpublished notes
+                query = query.where(or_(NoteRecord.note_id.is_(None), status_expr == "unpublished"))
+            else:
+                query = query.where(status_expr == status_filter)
+
+        # Order by impression count descending and apply limit
+        query = query.order_by(PostRecord.impression_count.desc()).limit(limit)
+
+        # Execute query
+        with Session(self._engine) as session:
+            result = session.execute(query)
+            rows = result.fetchall()
+
+            # Convert to list of dictionaries
+            data = []
+            for row in rows:
+                item: dict[str, Any] = {
+                    "post_id": str(row.post_id),
+                    "name": row.name[:100] if row.name else "",  # Truncate to 100 chars
+                    "repost_count": int(row.repost_count) if row.repost_count else 0,
+                    "like_count": int(row.like_count) if row.like_count else 0,
+                    "impression_count": int(row.impression_count) if row.impression_count else 0,
+                }
+
+                # Add status only if filtering by specific status
+                if status_filter and status_filter != "all":
+                    item["status"] = getattr(row, "status", None)
+
+                data.append(item)
+
+            return data
+
     @classmethod
     def _media_record_to_model(cls, media_record: MediaRecord) -> Media:
         return Media(
