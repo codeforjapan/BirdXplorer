@@ -1,0 +1,9 @@
+{
+  "filter": {
+    "languages": ["ja", "en"],
+    "keywords": [],
+    "start_millis": 1736857200000,
+    "end_millis": null
+  },
+  "description": "Note filtering configuration. start_millis is required. end_millis is optional (null = no upper limit). Timestamps in milliseconds UTC."
+}

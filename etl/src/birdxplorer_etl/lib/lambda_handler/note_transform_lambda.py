@@ -1,7 +1,9 @@
 import json
 import logging
 import os
+from decimal import Decimal
 from pathlib import Path
+from typing import Any, Union
 
 from sqlalchemy import select
 
@@ -21,39 +23,69 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
-def load_keywords():
+def _get_settings_path() -> Path:
     """
-    キーワードJSONファイルを読み込む
+    settings.json ファイルのパスを取得する
 
     Lambda環境では LAMBDA_TASK_ROOT (/var/task) からの相対パスを使用
     開発環境では __file__ からの相対パスを使用
 
     Returns:
-        list: キーワードのリスト（空配列の場合もある）
+        Path: settings.json へのパス
     """
-    try:
-        # Lambda環境の場合
-        lambda_task_root = os.environ.get("LAMBDA_TASK_ROOT")
-        if lambda_task_root:
-            keywords_file_path = Path(lambda_task_root) / "seed" / "keywords.json"
-        else:
-            # 開発環境の場合
-            keywords_file_path = Path(__file__).parent.parent.parent.parent.parent / "seed" / "keywords.json"
+    lambda_task_root = os.environ.get("LAMBDA_TASK_ROOT")
+    if lambda_task_root:
+        return Path(lambda_task_root) / "seed" / "settings.json"
+    else:
+        return Path(__file__).parent.parent.parent.parent.parent / "seed" / "settings.json"
 
-        logger.info(f"Looking for keywords file at: {keywords_file_path}")
 
-        if keywords_file_path.exists():
-            with open(keywords_file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                keywords = data.get("keywords", [])
-                logger.info(f"Loaded {len(keywords)} keywords from {keywords_file_path}")
-                return keywords
-        else:
-            logger.warning(f"Keywords file not found: {keywords_file_path}")
-            return []
-    except Exception as e:
-        logger.error(f"Error loading keywords file: {e}")
-        return []
+def load_settings() -> dict[str, Any]:
+    settings_file_path = _get_settings_path()
+
+    logger.info(f"Looking for settings file at: {settings_file_path}")
+
+    if not settings_file_path.exists():
+        raise FileNotFoundError(f"Settings file not found: {settings_file_path}")
+
+    with open(settings_file_path, "r", encoding="utf-8") as f:
+        settings_data = json.load(f)
+
+    # 必須項目のバリデーション
+    filter_config = settings_data.get("filter", {})
+
+    if filter_config.get("start_millis") is None:
+        raise ValueError("filter.start_millis is required in settings.json")
+
+    logger.info(
+        f"Loaded settings: languages={filter_config.get('languages')}, "
+        f"keywords_count={len(filter_config.get('keywords', []))}, "
+        f"start_millis={filter_config.get('start_millis')}, "
+        f"end_millis={filter_config.get('end_millis')}"
+    )
+
+    return settings_data
+
+
+def check_date_filter(
+    created_at_millis: Union[int, Decimal], start_millis: int, end_millis: Union[int, None] = None
+) -> bool:
+    """
+    日付フィルタ: ノートの作成日時が指定範囲内かチェック
+
+    Args:
+        created_at_millis: ノートの作成日時（ミリ秒）
+        start_millis: 開始日時（ミリ秒、必須）
+        end_millis: 終了日時（ミリ秒、任意。Noneなら上限なし）
+
+    Returns:
+        bool: 範囲内ならTrue
+    """
+    created_at = int(created_at_millis)
+
+    if end_millis is None:
+        return start_millis <= created_at
+    return start_millis <= created_at <= end_millis
 
 
 def check_keyword_match(text, keywords):
@@ -233,6 +265,7 @@ def lambda_handler(event, context):
                         "detected_language": str(detected_language),
                         "summary": note_row.summary,  # summaryを保存
                         "post_id": note_row.tweet_id,  # post_idを保存
+                        "created_at_millis": int(note_row.created_at_millis),  # created_at_millisを保存
                         "message": "Note transformed successfully",
                     }
                 )
@@ -247,31 +280,47 @@ def lambda_handler(event, context):
         # 全ての処理が完了したらコミット
         try:
             postgresql.commit()
-            logger.info(f"Successfully committed note transformations")
+            logger.info("Successfully committed note transformations")
 
-            # キーワードを読み込む
-            keywords = load_keywords()
+            # 統合設定ファイルから設定を読み込む
+            settings_config = load_settings()
+            filter_config = settings_config.get("filter", {})
+            languages = filter_config.get("languages", ["ja", "en"])
+            keywords = filter_config.get("keywords", [])
+            start_millis = filter_config["start_millis"]  # Required field, validated in load_settings()
+            end_millis = filter_config.get("end_millis")  # Optional field, None means no upper limit
 
             # 成功したノートに対して条件判定を行い、topic-detect-queueに送信
             successful_results = [result for result in results if result["status"] == "success"]
             topic_detect_queued = 0
+            date_filtered_count = 0
 
             for result in successful_results:
                 note_id = result["note_id"]
                 detected_language = result.get("detected_language", "")
                 summary = result.get("summary", "")
                 post_id = result.get("post_id")
+                created_at_millis = result.get("created_at_millis")
 
-                # 条件1: 言語がjaまたはen
-                if detected_language not in ["ja", "en"]:
+                # 条件1: 言語フィルタ（settings.jsonから取得）
+                if detected_language not in languages:
                     logger.info(
-                        f"Note {note_id} language '{detected_language}' is not ja or en, skipping topic detection"
+                        f"Note {note_id} language '{detected_language}' not in {languages}, skipping topic detection"
                     )
                     continue
 
                 # 条件2: キーワードマッチ（キーワードが空の場合は常にTrue）
                 if not check_keyword_match(summary, keywords):
                     logger.info(f"Note {note_id} does not match any keywords, skipping topic detection")
+                    continue
+
+                # 条件3: 日付フィルタ（settings.jsonから取得）
+                if created_at_millis is not None and not check_date_filter(created_at_millis, start_millis, end_millis):
+                    logger.info(
+                        f"Note {note_id} created_at {created_at_millis} is outside range "
+                        f"[{start_millis}, {end_millis}], skipping topic detection"
+                    )
+                    date_filtered_count += 1
                     continue
 
                 # 条件を満たす場合、topic-detect-queueに送信（summary、post_id、topicsを含める）
@@ -289,7 +338,8 @@ def lambda_handler(event, context):
 
                 if message_id:
                     logger.info(
-                        f"Enqueued note {note_id} to topic-detect queue (language={detected_language}), messageId={message_id}"
+                        f"Enqueued note {note_id} to topic-detect queue "
+                        f"(language={detected_language}), messageId={message_id}"
                     )
                     topic_detect_queued += 1
                 else:
@@ -307,6 +357,7 @@ def lambda_handler(event, context):
                     "message": "Note transformation completed",
                     "results": results,
                     "topic_detect_queued": topic_detect_queued,
+                    "date_filtered_count": date_filtered_count,
                 }
             ),
         }
