@@ -126,6 +126,8 @@ api/
 ## Active Technologies
 - Python 3.10.12+ (existing project standard) + FastAPI, SQLAlchemy 2.x, Pydantic (existing stack) (001-graph-api-backend)
 - PostgreSQL 15.4+ with existing `notes` and `posts` tables (001-graph-api-backend)
+- Python 3.10+ + SQLAlchemy, birdxplorer_common, boto3 (SQS) (001-note-date-filter)
+- PostgreSQL 15.4+ (row_notes, notes tables) (001-note-date-filter)
 
 ## Recent Changes
 - 001-graph-api-backend: Added Python 3.10.12+ (existing project standard) + FastAPI, SQLAlchemy 2.x, Pydantic (existing stack)
