@@ -1,6 +1,6 @@
 {
   "filter": {
-    "languages": ["ja", "en"],
+    "languages": ["ja"],
     "keywords": [],
     "start_millis": 1736857200000,
     "end_millis": null
