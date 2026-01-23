@@ -4,6 +4,7 @@ import os
 
 from birdxplorer_etl import settings
 from birdxplorer_etl.lib.ai_model.ai_model_interface import get_ai_service
+from birdxplorer_etl.lib.lambda_handler.common.retry_handler import call_ai_api_with_retry
 from birdxplorer_etl.lib.lambda_handler.common.sqs_handler import SQSHandler
 
 # Lambda用のロガー設定
@@ -72,9 +73,14 @@ def lambda_handler(event, context):
 
             ai_service = get_ai_service()
 
-            # 言語判定を実行
+            # 言語判定を実行（リトライ付き）
             logger.info(f"[PROCESSING] Calling AI service for language detection...")
-            detected_language = ai_service.detect_language(summary)
+            detected_language = call_ai_api_with_retry(
+                ai_service.detect_language,
+                summary,
+                max_retries=3,
+                initial_delay=1.0,
+            )
 
             logger.info(f"[SUCCESS] Language detected for note {note_id}: {detected_language}")
 
