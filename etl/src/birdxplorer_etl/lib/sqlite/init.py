@@ -7,6 +7,7 @@ from pathlib import Path
 import boto3
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 
 from birdxplorer_common.storage import (
     RowNoteRatingRecord,
@@ -115,7 +116,10 @@ def init_postgresql():
     db_name = os.getenv("DB_NAME", "postgres")
 
     logging.info(f"Initializing database at {db_host}:{db_port}/{db_name}")
-    engine = create_engine(f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}")
+    engine = create_engine(
+        f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}",
+        poolclass=NullPool,  # Lambda向け: コネクションをプールせず毎回接続・切断
+    )
 
     if not inspect(engine).has_table("row_notes"):
         logging.info("Creating table notes")
