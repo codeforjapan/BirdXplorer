@@ -18,6 +18,7 @@ COPY etl/src/birdxplorer_etl/lib/lambda_handler/note_transform_lambda.py ./
 
 # キーワードファイルをコピー
 COPY etl/seed/keywords.json ./seed/keywords.json
+COPY etl/seed/settings.json ./seed/settings.json
 
 # Lambda handler を設定
 CMD ["note_transform_lambda.lambda_handler"]
