@@ -3,6 +3,7 @@ import logging
 import os
 
 from birdxplorer_etl.lib.ai_model.ai_model_interface import get_ai_service
+from birdxplorer_etl.lib.lambda_handler.common.retry_handler import call_ai_api_with_retry
 from birdxplorer_etl.lib.lambda_handler.common.sqs_handler import SQSHandler
 from birdxplorer_etl.settings import TWEET_LOOKUP_QUEUE_URL
 
@@ -73,9 +74,15 @@ def lambda_handler(event, context):
                 ai_service.topics = topics
                 logger.info(f"[TOPICS] Set {len(topics)} topics to AI service")
 
-            # トピック推定を実行
+            # トピック推定を実行（リトライ付き）
             logger.info(f"[PROCESSING] Calling AI service for topic detection...")
-            topics_info = ai_service.detect_topic(note_id, summary)
+            topics_info = call_ai_api_with_retry(
+                ai_service.detect_topic,
+                note_id,
+                summary,
+                max_retries=3,
+                initial_delay=1.0,
+            )
 
             logger.info(f"Topics detected for note {note_id}: {topics_info}")
 
