@@ -202,6 +202,8 @@ def lambda_handler(event, context):
                 logger.info(f"Processing note transformation for note: {note_id}")
 
                 # PostgreSQLからrow_notesデータを取得（言語情報を含む）
+                # LEFT OUTER JOINを使用: row_note_statusが存在しないノートも処理可能にする
+                # （新しいノートはステータスが未確定でnoteStatusHistoryに含まれないことがある）
                 note_query = postgresql.execute(
                     select(
                         RowNoteRecord.note_id,
@@ -212,7 +214,7 @@ def lambda_handler(event, context):
                         RowNoteRecord.created_at_millis,
                         RowNoteStatusRecord.current_status,
                     )
-                    .join(RowNoteStatusRecord, RowNoteRecord.note_id == RowNoteStatusRecord.note_id)
+                    .outerjoin(RowNoteStatusRecord, RowNoteRecord.note_id == RowNoteStatusRecord.note_id)
                     .filter(RowNoteRecord.note_id == note_id)
                 )
 

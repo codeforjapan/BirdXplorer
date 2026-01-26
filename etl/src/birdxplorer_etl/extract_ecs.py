@@ -59,10 +59,14 @@ def extract_data(postgresql: Session):
                         reader = csv.DictReader(tsv_data, delimiter="\t")
                         reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
 
-            rows_to_add = []
+            rows_to_add = {}  # note_idをキーにして重複を防ぐ
             rows_to_update = []
             for index, row in enumerate(reader):
-                existing_note = postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id == row["note_id"]).first()
+                note_id = row["note_id"]
+                # 既にrows_to_addに追加済みの場合はスキップ
+                if note_id in rows_to_add:
+                    continue
+                existing_note = postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id == note_id).first()
 
                 # BinaryBoolフィールドの値を正規化
                 binary_bool_fields = [
@@ -159,25 +163,25 @@ def extract_data(postgresql: Session):
                     rows_to_update.append(existing_note)
                 else:
                     note_record = RowNoteRecord(**row)
-                    rows_to_add.append(note_record)
+                    rows_to_add[note_id] = note_record
 
                 if index % 1000 == 0:
-                    postgresql.bulk_save_objects(rows_to_add)
+                    postgresql.bulk_save_objects(list(rows_to_add.values()))
                     postgresql.commit()
 
                     # バッチ処理後にSQSキューイング（新規追加のみ）
-                    for note in rows_to_add:
+                    for note in rows_to_add.values():
                         enqueue_notes(note.note_id, note.summary, note.tweet_id)
 
-                    rows_to_add = []
+                    rows_to_add = {}
                     rows_to_update = []
 
             # 最後のバッチを処理
-            postgresql.bulk_save_objects(rows_to_add)
+            postgresql.bulk_save_objects(list(rows_to_add.values()))
             postgresql.commit()
 
             # 最後のバッチのSQSキューイング（新規追加のみ）
-            for note in rows_to_add:
+            for note in rows_to_add.values():
                 enqueue_notes(note.note_id, note.summary, note.tweet_id)
 
             status_url = (
