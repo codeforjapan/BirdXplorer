@@ -1,6 +1,6 @@
 """add is_collaborative_note column to row_notes
 
-Revision ID: add_is_collaborative_note_to_row_notes
+Revision ID: add_collab_note_column
 Revises: add_graph_query_indexes
 Create Date: 2026-01-26
 
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = "add_is_collaborative_note_to_row_notes"
+revision: str = "add_collab_note_column"
 down_revision: Union[str, None] = "add_graph_query_indexes"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
