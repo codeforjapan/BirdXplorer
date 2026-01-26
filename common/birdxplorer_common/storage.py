@@ -205,6 +205,7 @@ class RowNoteRecord(Base):
     not_misleading_personal_opinion: Mapped[Optional[BinaryBool]] = mapped_column(nullable=True)
     trustworthy_sources: Mapped[Optional[BinaryBool]] = mapped_column(nullable=True)
     is_media_note: Mapped[Optional[BinaryBool]] = mapped_column(nullable=True)
+    is_collaborative_note: Mapped[Optional[BinaryBool]] = mapped_column(nullable=True)
     classification: Mapped[Optional[NotesClassification]] = mapped_column(nullable=True)
     harmful: Mapped[Optional[NotesHarmful]] = mapped_column(nullable=True)
     validation_difficulty: Mapped[Optional[SummaryString]] = mapped_column(nullable=True)

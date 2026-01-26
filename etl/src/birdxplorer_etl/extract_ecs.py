@@ -81,6 +81,7 @@ def extract_data(postgresql: Session):
                     "not_misleading_personal_opinion",
                     "trustworthy_sources",
                     "is_media_note",
+                    "is_collaborative_note",
                 ]
 
                 for field in binary_bool_fields:

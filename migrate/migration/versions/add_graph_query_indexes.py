@@ -1,7 +1,7 @@
 """add graph query indexes
 
 Revision ID: add_graph_query_indexes
-Revises: c356b162f2f7
+Revises: a1b2c3d4e5f6
 Create Date: 2026-01-13
 
 This migration adds critical indexes for graph API endpoints to achieve <3 second response times.
@@ -15,7 +15,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "add_graph_query_indexes"
-down_revision: Union[str, None] = "c356b162f2f7"
+down_revision: Union[str, None] = "a1b2c3d4e5f6"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
