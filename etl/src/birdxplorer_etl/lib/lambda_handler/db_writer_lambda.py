@@ -1,8 +1,10 @@
 import json
 import logging
 import traceback
+from typing import Any
 
 from sqlalchemy import update
+from sqlalchemy.dialects.postgresql import insert
 
 from birdxplorer_common.storage import (
     NoteTopicAssociation,
@@ -20,8 +22,8 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
-def process_insert_note(postgresql, note_id: str, data: dict) -> None:
-    """ノートの挿入処理"""
+def process_insert_note(postgresql: Any, note_id: str, data: dict) -> None:
+    """ノートの挿入処理（UPSERT使用）"""
     note_data = data
     required_fields = ["note_id", "summary", "tweet_id", "created_at_millis"]
 
@@ -29,29 +31,24 @@ def process_insert_note(postgresql, note_id: str, data: dict) -> None:
     if missing_fields:
         raise ValueError(f"Missing required fields for insert_note: {missing_fields}")
 
-    # 既存ノートのチェック
-    existing_note = postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id == note_data["note_id"]).first()
-
-    if existing_note:
-        logger.info(f"[SKIP] Note {note_data['note_id']} already exists, skipping insert")
-        return
-
     logger.info(
-        f"[DB_INSERT] Inserting note {note_data['note_id']} "
+        f"[DB_UPSERT] Upserting note {note_data['note_id']} "
         f"(tweet_id: {note_data['tweet_id']}, summary length: {len(note_data['summary'])})"
     )
 
-    row_note = RowNoteRecord(
+    # UPSERT: 既存なら何もしない
+    stmt = insert(RowNoteRecord).values(
         note_id=note_data["note_id"],
         summary=note_data["summary"],
         tweet_id=note_data["tweet_id"],
         created_at_millis=note_data["created_at_millis"],
-    )
-    postgresql.add(row_note)
-    logger.info(f"[STAGED] Note {note_data['note_id']} staged for commit")
+    ).on_conflict_do_nothing(index_elements=["note_id"])
+
+    postgresql.execute(stmt)
+    logger.info(f"[STAGED] Note {note_data['note_id']} upsert staged for commit")
 
 
-def process_update_language(postgresql, note_id: str, data: dict) -> None:
+def process_update_language(postgresql: Any, note_id: str, data: dict) -> None:
     """言語更新処理"""
     language = data.get("language")
     if not language:
@@ -62,8 +59,8 @@ def process_update_language(postgresql, note_id: str, data: dict) -> None:
     logger.info(f"[STAGED] Language update for note {note_id} staged for commit")
 
 
-def process_update_topics(postgresql, note_id: str, data: dict) -> None:
-    """トピック更新処理"""
+def process_update_topics(postgresql: Any, note_id: str, data: dict) -> None:
+    """トピック更新処理（bulk操作使用）"""
     topic_ids = data.get("topic_ids", [])
     logger.info(f"[DB_UPDATE] Updating topics for note {note_id}: {topic_ids}")
 
@@ -76,7 +73,7 @@ def process_update_topics(postgresql, note_id: str, data: dict) -> None:
     if deleted_count > 0:
         logger.info(f"[DB_DELETE] Deleted {deleted_count} existing topic associations for note {note_id}")
 
-    # 新しい関連付けを挿入
+    # 新しい関連付けをbulk insert
     if topic_ids:
         # 存在するtopic_idのみをフィルタリング
         existing_topic_ids = postgresql.query(TopicRecord.topic_id).filter(TopicRecord.topic_id.in_(topic_ids)).all()
@@ -87,53 +84,51 @@ def process_update_topics(postgresql, note_id: str, data: dict) -> None:
         if invalid_topic_ids:
             logger.warning(f"[WARNING] Skipping non-existent topic IDs for note {note_id}: {list(invalid_topic_ids)}")
 
-        # 有効なtopic_idのみ挿入
-        for topic_id in valid_topic_ids:
-            note_topic_association = NoteTopicAssociation(note_id=note_id, topic_id=topic_id)
-            postgresql.add(note_topic_association)
-
-        logger.info(
-            f"[STAGED] Topics for note {note_id}: {len(valid_topic_ids)}/{len(topic_ids)} valid topics staged for commit"
-        )
+        # 有効なtopic_idをbulk insert
+        if valid_topic_ids:
+            postgresql.bulk_insert_mappings(
+                NoteTopicAssociation,
+                [{"note_id": note_id, "topic_id": tid} for tid in valid_topic_ids]
+            )
+            logger.info(
+                f"[STAGED] Topics for note {note_id}: "
+                f"{len(valid_topic_ids)}/{len(topic_ids)} valid topics bulk-inserted"
+            )
     else:
         logger.warning(f"[WARNING] No topics to save for note {note_id}")
 
 
-def process_save_post_data(postgresql, data: dict) -> None:
-    """ポストデータ保存処理"""
+def process_save_post_data(postgresql: Any, data: dict) -> None:
+    """ポストデータ保存処理（UPSERT使用）"""
     post_data = data.get("post_data")
     if not post_data:
         raise ValueError(f"Missing post_data in data: {data}")
 
     logger.info(f"[DB_UPDATE] Saving post data for post_id: {post_data.get('post_id')}")
 
-    # ユーザーデータの保存
+    # ユーザーデータのUPSERT
     user_data = post_data.get("user")
     if user_data:
-        is_user_exist = (
-            postgresql.query(RowUserRecord).filter(RowUserRecord.user_id == user_data["user_id"]).first()
-        )
+        stmt = insert(RowUserRecord).values(
+            user_id=user_data["user_id"],
+            name=user_data.get("name"),
+            user_name=user_data.get("user_name"),
+            description=user_data.get("description"),
+            profile_image_url=user_data.get("profile_image_url"),
+            followers_count=user_data.get("followers_count"),
+            following_count=user_data.get("following_count"),
+            tweet_count=user_data.get("tweet_count"),
+            verified=user_data.get("verified", False),
+            verified_type=user_data.get("verified_type", ""),
+            location=user_data.get("location", ""),
+            url=user_data.get("url", ""),
+        ).on_conflict_do_nothing(index_elements=["user_id"])
 
-        if is_user_exist is None:
-            row_user = RowUserRecord(
-                user_id=user_data["user_id"],
-                name=user_data.get("name"),
-                user_name=user_data.get("user_name"),
-                description=user_data.get("description"),
-                profile_image_url=user_data.get("profile_image_url"),
-                followers_count=user_data.get("followers_count"),
-                following_count=user_data.get("following_count"),
-                tweet_count=user_data.get("tweet_count"),
-                verified=user_data.get("verified", False),
-                verified_type=user_data.get("verified_type", ""),
-                location=user_data.get("location", ""),
-                url=user_data.get("url", ""),
-            )
-            postgresql.add(row_user)
-            logger.info(f"[STAGED] User {user_data['user_id']} staged for commit")
+        postgresql.execute(stmt)
+        logger.info(f"[STAGED] User {user_data['user_id']} upsert staged for commit")
 
-    # ポストデータの保存
-    row_post = RowPostRecord(
+    # ポストデータのUPSERT
+    stmt = insert(RowPostRecord).values(
         post_id=post_data["post_id"],
         author_id=post_data["author_id"],
         text=post_data["text"],
@@ -146,49 +141,41 @@ def process_save_post_data(postgresql, data: dict) -> None:
         reply_count=post_data["reply_count"],
         lang=post_data["lang"],
         extracted_at=post_data["extracted_at"],
-    )
-    postgresql.add(row_post)
-    logger.info(f"[STAGED] Post {post_data['post_id']} staged for commit")
+    ).on_conflict_do_nothing(index_elements=["post_id"])
 
-    # メディアデータの保存
+    postgresql.execute(stmt)
+    logger.info(f"[STAGED] Post {post_data['post_id']} upsert staged for commit")
+
+    # メディアデータのbulk insert（重複は無視）
     media_list = post_data.get("media", [])
     if media_list:
-        media_recs = [
-            RowPostMediaRecord(
+        for m in media_list:
+            stmt = insert(RowPostMediaRecord).values(
                 media_key=m["media_key"],
                 type=m["type"],
                 url=m["url"],
                 width=m["width"],
                 height=m["height"],
                 post_id=post_data["post_id"],
-            )
-            for m in media_list
-        ]
-        postgresql.add_all(media_recs)
-        logger.info(f"[STAGED] {len(media_recs)} media records staged for commit")
+            ).on_conflict_do_nothing(index_elements=["media_key"])
+            postgresql.execute(stmt)
+        logger.info(f"[STAGED] {len(media_list)} media records upsert staged for commit")
 
-    # 埋め込みURLデータの保存
+    # 埋め込みURLデータのUPSERT
     embed_urls = post_data.get("embed_urls", [])
     if embed_urls:
         for url_data in embed_urls:
-            is_url_exist = (
-                postgresql.query(RowPostEmbedURLRecord)
-                .filter(RowPostEmbedURLRecord.post_id == post_data["post_id"])
-                .filter(RowPostEmbedURLRecord.url == url_data["url"])
-                .first()
-            )
-            if is_url_exist is None:
-                post_url = RowPostEmbedURLRecord(
-                    post_id=post_data["post_id"],
-                    url=url_data.get("url"),
-                    expanded_url=url_data.get("expanded_url"),
-                    unwound_url=url_data.get("unwound_url"),
-                )
-                postgresql.add(post_url)
-                logger.info(f"[STAGED] Embed URL for post {post_data['post_id']} staged for commit")
+            stmt = insert(RowPostEmbedURLRecord).values(
+                post_id=post_data["post_id"],
+                url=url_data.get("url"),
+                expanded_url=url_data.get("expanded_url"),
+                unwound_url=url_data.get("unwound_url"),
+            ).on_conflict_do_nothing(index_elements=["post_id", "url"])
+            postgresql.execute(stmt)
+        logger.info(f"[STAGED] {len(embed_urls)} embed URLs upsert staged for commit")
 
 
-def lambda_handler(event, context):
+def lambda_handler(event: dict, context: Any) -> dict:
     """
     DB書き込み専用Lambda関数（バッチ処理対応）
 
@@ -213,7 +200,7 @@ def lambda_handler(event, context):
     logger.info("=" * 80)
 
     postgresql = init_postgresql()
-    batch_item_failures = []  # 失敗したメッセージのIDを格納
+    batch_item_failures: list[dict[str, str]] = []
 
     try:
         if "Records" not in event:
@@ -302,26 +289,33 @@ def lambda_handler(event, context):
 
 
 # ローカルテスト用の関数
-def test_local():
-    """
-    ローカルでテストする場合の関数
-    """
-    # バッチテスト用のイベント
+def test_local() -> None:
+    """ローカルでテストする場合の関数"""
     test_event = {
         "Records": [
             {
                 "messageId": "msg-1",
-                "body": json.dumps({"operation": "update_language", "note_id": "1234567890", "data": {"language": "ja"}}),
+                "body": json.dumps({
+                    "operation": "update_language",
+                    "note_id": "1234567890",
+                    "data": {"language": "ja"}
+                }),
             },
             {
                 "messageId": "msg-2",
-                "body": json.dumps(
-                    {"operation": "update_topics", "note_id": "1234567890", "data": {"topic_ids": [1, 2, 3]}}
-                ),
+                "body": json.dumps({
+                    "operation": "update_topics",
+                    "note_id": "1234567890",
+                    "data": {"topic_ids": [1, 2, 3]}
+                }),
             },
             {
                 "messageId": "msg-3",
-                "body": json.dumps({"operation": "update_language", "note_id": "0987654321", "data": {"language": "en"}}),
+                "body": json.dumps({
+                    "operation": "update_language",
+                    "note_id": "0987654321",
+                    "data": {"language": "en"}
+                }),
             },
         ]
     }
