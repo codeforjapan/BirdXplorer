@@ -272,7 +272,7 @@ def lambda_handler(event, context):
 
     except Exception as e:
         logger.error(f"Lambda execution error: {str(e)}")
-        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
+        raise  # 例外を再送出してDLQに送る
 
 
 # ローカルテスト用の関数
