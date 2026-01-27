@@ -55,24 +55,51 @@ def bearer_oauth(r):
 
 
 def connect_to_endpoint(url):
-    response = requests.request("GET", url, auth=bearer_oauth)
+    response = requests.request("GET", url, auth=bearer_oauth, timeout=30)
     if response.status_code == 429:
-        limit = response.headers["x-rate-limit-reset"]
-        logger.info("Waiting for rate limit reset...")
-        time.sleep(int(limit) - int(time.time()) + 1)
+        limit = response.headers.get("x-rate-limit-reset")
+        if limit:
+            wait_time = max(0, int(limit) - int(time.time()) + 1)
+            logger.info(f"Rate limit hit, waiting {wait_time} seconds...")
+            time.sleep(wait_time)
+        else:
+            logger.info("Rate limit hit, waiting 60 seconds...")
+            time.sleep(60)
         data = connect_to_endpoint(url)
         return data
+    elif response.status_code == 401:
+        logger.error("X API authentication failed (401). Check X_BEARER_TOKEN in environment/secrets.")
+        raise Exception("X API authentication failed: 401 Unauthorized. Token may be invalid or expired.")
+    elif response.status_code == 403:
+        logger.error("X API access forbidden (403). Check API tier/permissions.")
+        raise Exception("X API access forbidden: 403 Forbidden. Check API tier/permissions.")
     elif response.status_code != 200:
         raise Exception("Request returned an error: {} {}".format(response.status_code, response.text))
     return response.json()
 
 
 def check_existence(id):
+    """
+    ツイートの存在確認（oEmbed APIを使用）
+
+    Args:
+        id: ツイートID
+
+    Returns:
+        bool: ツイートが存在すればTrue
+    """
     url = (
-        "https://publish.twitter.com/oembed?url=https://x.com/CommunityNotes/status/{}" "&partner=&hide_thread=false"
+        "https://publish.twitter.com/oembed?url=https://x.com/CommunityNotes/status/{}&partner=&hide_thread=false"
     ).format(id)
-    status = requests.get(url).status_code
-    return status == 200
+    try:
+        response = requests.get(url, timeout=10)
+        return response.status_code == 200
+    except requests.exceptions.Timeout:
+        logger.warning(f"Timeout checking existence for tweet {id}, proceeding with API lookup")
+        return True  # タイムアウト時はAPI lookupを試みる
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"Error checking existence for tweet {id}: {e}, proceeding with API lookup")
+        return True  # エラー時もAPI lookupを試みる
 
 
 def lookup(id):
@@ -170,11 +197,11 @@ def lambda_handler(event, context):
 
             media_list = [
                 {
-                    "media_key": f"{m['media_key']}-{post['data']['id']}",
-                    "type": m["type"],
+                    "media_key": f"{m.get('media_key', '')}-{post['data']['id']}",
+                    "type": m.get("type", ""),
                     "url": m.get("url") or (m["variants"][0]["url"] if "variants" in m and m["variants"] else ""),
-                    "width": m["width"],
-                    "height": m["height"],
+                    "width": m.get("width", 0),
+                    "height": m.get("height", 0),
                 }
                 for m in media_data
             ]
@@ -193,18 +220,20 @@ def lambda_handler(event, context):
                         )
 
             # DB Writer Lambdaに送信するメッセージを作成
+            # public_metricsは安全にアクセス（API tierによって一部フィールドが返されない場合がある）
+            public_metrics = post["data"].get("public_metrics", {})
             post_data = {
                 "post_id": post["data"]["id"],
                 "author_id": post["data"]["author_id"],
                 "text": post["data"]["text"],
                 "created_at": created_at_millis,
-                "like_count": post["data"]["public_metrics"]["like_count"],
-                "repost_count": post["data"]["public_metrics"]["retweet_count"],
-                "bookmark_count": post["data"]["public_metrics"]["bookmark_count"],
-                "impression_count": post["data"]["public_metrics"]["impression_count"],
-                "quote_count": post["data"]["public_metrics"]["quote_count"],
-                "reply_count": post["data"]["public_metrics"]["reply_count"],
-                "lang": post["data"]["lang"],
+                "like_count": public_metrics.get("like_count", 0),
+                "repost_count": public_metrics.get("retweet_count", 0),
+                "bookmark_count": public_metrics.get("bookmark_count", 0),
+                "impression_count": public_metrics.get("impression_count", 0),
+                "quote_count": public_metrics.get("quote_count", 0),
+                "reply_count": public_metrics.get("reply_count", 0),
+                "lang": post["data"].get("lang", ""),
                 "extracted_at": now_millis,
                 "user": user_info,
                 "media": media_list,
