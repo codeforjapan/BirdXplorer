@@ -304,7 +304,7 @@ def lambda_handler(event, context):
         import traceback
 
         logger.error(traceback.format_exc())
-        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
+        raise  # 例外を再送出してDLQに送る
     finally:
         postgresql.close()
         logger.info("[CLEANUP] Database connection closed")
