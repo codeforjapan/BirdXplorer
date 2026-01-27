@@ -23,14 +23,12 @@ def extract_data(postgresql: Session):
     logging.info("Downloading community notes data")
 
     # Noteデータを取得してPostgreSQLに保存
-    date = datetime.now()
-    two_days_ago = datetime.now() - timedelta(days=2)
-    two_days_ago_timestamp = int(two_days_ago.timestamp())
+    # 古い日から新しい日に向かって処理（新しいデータで上書きするため）
+    start_date = datetime.now() - timedelta(days=2)  # 2日前から開始
+    end_date = datetime.now()  # 当日まで
+    date = start_date
 
-    while True:
-        if datetime.timestamp(date) < two_days_ago_timestamp:
-            break
-
+    while date <= end_date:
         dateString = date.strftime("%Y/%m/%d")
         note_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/notes/notes-00000.zip"
         if settings.USE_DUMMY_DATA:
@@ -59,10 +57,14 @@ def extract_data(postgresql: Session):
                         reader = csv.DictReader(tsv_data, delimiter="\t")
                         reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
 
-            rows_to_add = []
+            rows_to_add = {}  # note_idをキーにして重複を防ぐ
             rows_to_update = []
             for index, row in enumerate(reader):
-                existing_note = postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id == row["note_id"]).first()
+                note_id = row["note_id"]
+                # 既にrows_to_addに追加済みの場合はスキップ
+                if note_id in rows_to_add:
+                    continue
+                existing_note = postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id == note_id).first()
 
                 # BinaryBoolフィールドの値を正規化
                 binary_bool_fields = [
@@ -153,31 +155,36 @@ def extract_data(postgresql: Session):
                         row[key] = None
 
                 if existing_note:
+                    # 既存レコードの更新（セッションにattachされているのでcommit時に自動更新）
                     for key, value in row.items():
                         if hasattr(existing_note, key):
                             setattr(existing_note, key, value)
                     rows_to_update.append(existing_note)
                 else:
                     note_record = RowNoteRecord(**row)
-                    rows_to_add.append(note_record)
+                    rows_to_add[note_id] = note_record
 
                 if index % 1000 == 0:
-                    postgresql.bulk_save_objects(rows_to_add)
+                    # 新規レコードの挿入
+                    postgresql.bulk_save_objects(list(rows_to_add.values()))
+                    # 更新レコードはセッションにattachされているのでflush/commitで反映
+                    postgresql.flush()
                     postgresql.commit()
 
                     # バッチ処理後にSQSキューイング（新規追加のみ）
-                    for note in rows_to_add:
+                    for note in rows_to_add.values():
                         enqueue_notes(note.note_id, note.summary, note.tweet_id)
 
-                    rows_to_add = []
+                    rows_to_add = {}
                     rows_to_update = []
 
             # 最後のバッチを処理
-            postgresql.bulk_save_objects(rows_to_add)
+            postgresql.bulk_save_objects(list(rows_to_add.values()))
+            postgresql.flush()
             postgresql.commit()
 
             # 最後のバッチのSQSキューイング（新規追加のみ）
-            for note in rows_to_add:
+            for note in rows_to_add.values():
                 enqueue_notes(note.note_id, note.summary, note.tweet_id)
 
             status_url = (
@@ -265,9 +272,8 @@ def extract_data(postgresql: Session):
                 for note_id in notes_to_update_status:
                     enqueue_note_status_update(note_id)
 
-                break
-
-        date = date - timedelta(days=1)
+        # 次の日に進む（古い日→新しい日の順で処理）
+        date = date + timedelta(days=1)
 
     postgresql.commit()
 
