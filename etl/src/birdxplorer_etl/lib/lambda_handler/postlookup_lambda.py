@@ -206,6 +206,10 @@ def lambda_handler(event: dict, context: Any) -> dict:
                         logger.error("[CONFIG_ERROR] TWEET_LOOKUP_QUEUE_URL not configured")
                         raise Exception("TWEET_LOOKUP_QUEUE_URL not configured")
 
+                    # レート制限時も60秒スリープして、連鎖的なレート制限ヒットを防ぐ
+                    logger.info("[WAIT] Sleeping 60 seconds to prevent rate limit cascade...")
+                    time.sleep(60)
+
                     return {
                         "statusCode": 200,
                         "body": json.dumps({
