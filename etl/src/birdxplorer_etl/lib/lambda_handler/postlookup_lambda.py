@@ -340,6 +340,27 @@ def lambda_handler(event: dict, context: Any) -> dict:
                 logger.error("[CONFIG_ERROR] DB_WRITE_QUEUE_URL not configured")
                 return {"statusCode": 500, "body": json.dumps({"error": "DB_WRITE_QUEUE_URL not configured"})}
 
+            # Post Transform Queueにメッセージを送信（遅延付き）
+            post_transform_queue_url = os.environ.get("POST_TRANSFORM_QUEUE_URL")
+            if post_transform_queue_url:
+                transform_message = {
+                    "operation": "transform_post",
+                    "post_id": post["data"]["id"],
+                    "retry_count": 0,
+                }
+                logger.info("[SQS_SEND] Sending transform request to post-transform queue (60s delay)...")
+                message_id = sqs_handler.send_message(
+                    queue_url=post_transform_queue_url,
+                    message_body=transform_message,
+                    delay_seconds=60,  # db_writer完了を待つため60秒遅延
+                )
+                if message_id:
+                    logger.info(f"[SQS_SUCCESS] Sent transform request, messageId={message_id}")
+                else:
+                    logger.warning("[SQS_WARNING] Failed to send transform request (non-critical)")
+            else:
+                logger.warning("[CONFIG_WARNING] POST_TRANSFORM_QUEUE_URL not configured, skipping post-transform")
+
             logger.info("=" * 80)
             logger.info("[COMPLETED] Postlookup Lambda completed successfully")
             logger.info("=" * 80)
