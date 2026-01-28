@@ -3,6 +3,7 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
+from typing import Any, Optional
 
 import requests
 
@@ -13,7 +14,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
-def create_url(id):
+def create_url(id: str) -> str:
     expansions = (
         "expansions=attachments.poll_ids,attachments.media_keys,author_id,"
         "edit_history_tweet_ids,entities.mentions.username,geo.place_id,"
@@ -40,11 +41,8 @@ def create_url(id):
     return url
 
 
-def bearer_oauth(r):
-    """
-    Method required by bearer token authentication.
-    """
-    # Lambda環境変数からトークンを取得
+def bearer_oauth(r: Any) -> Any:
+    """Method required by bearer token authentication."""
     bearer_token = os.environ.get("X_BEARER_TOKEN")
     if not bearer_token:
         raise ValueError("X_BEARER_TOKEN environment variable is not set")
@@ -54,37 +52,81 @@ def bearer_oauth(r):
     return r
 
 
-def connect_to_endpoint(url):
-    response = requests.request("GET", url, auth=bearer_oauth)
+def parse_api_error(json_response: dict) -> Optional[dict]:
+    """
+    X API v2のエラーレスポンスを解析する
+
+    Returns:
+        エラー情報のdict、またはエラーがなければNone
+        {
+            "status": "deleted" | "protected" | "error",
+            "title": str,
+            "detail": str
+        }
+    """
+    if "errors" not in json_response or "data" in json_response:
+        return None
+
+    error = json_response["errors"][0]
+    error_type = error.get("type", "")
+    error_title = error.get("title", "Unknown Error")
+    error_detail = error.get("detail", "No detail provided")
+
+    if "resource-not-found" in error_type or error_title == "Not Found Error":
+        return {"status": "deleted", "title": error_title, "detail": error_detail}
+    elif "not-authorized" in error_type or error_title == "Authorization Error":
+        return {"status": "protected", "title": error_title, "detail": error_detail}
+    else:
+        return {"status": "error", "title": error_title, "detail": error_detail}
+
+
+def connect_to_endpoint(url: str) -> dict:
+    response = requests.request("GET", url, auth=bearer_oauth, timeout=30)
+
     if response.status_code == 429:
-        limit = response.headers["x-rate-limit-reset"]
-        logger.info("Waiting for rate limit reset...")
-        time.sleep(int(limit) - int(time.time()) + 1)
-        data = connect_to_endpoint(url)
-        return data
+        limit = response.headers.get("x-rate-limit-reset")
+        if limit:
+            wait_time = max(0, int(limit) - int(time.time()) + 1)
+        else:
+            wait_time = 60
+
+        logger.warning(f"Rate limit hit, need to wait {wait_time} seconds.")
+        # レート制限情報を返す（呼び出し元で遅延再キューイング）
+        return {"status": "rate_limited", "wait_time": wait_time}
+    elif response.status_code == 401:
+        logger.error("X API authentication failed (401). Check X_BEARER_TOKEN in environment/secrets.")
+        raise Exception("X API authentication failed: 401 Unauthorized. Token may be invalid or expired.")
+    elif response.status_code == 403:
+        logger.error("X API access forbidden (403). Check API tier/permissions.")
+        raise Exception("X API access forbidden: 403 Forbidden. Check API tier/permissions.")
     elif response.status_code != 200:
         raise Exception("Request returned an error: {} {}".format(response.status_code, response.text))
+
     return response.json()
 
 
-def check_existence(id):
-    url = (
-        "https://publish.twitter.com/oembed?url=https://x.com/CommunityNotes/status/{}" "&partner=&hide_thread=false"
-    ).format(id)
-    status = requests.get(url).status_code
-    return status == 200
+def lookup(id: str) -> dict:
+    """
+    ツイートを取得する
 
-
-def lookup(id):
-    isExist = check_existence(id)
-    if not isExist:
-        return None
+    Returns:
+        成功時: {"data": {...}, "includes": {...}}
+        削除時: {"status": "deleted", "title": ..., "detail": ...}
+        非公開時: {"status": "protected", "title": ..., "detail": ...}
+        その他エラー: {"status": "error", "title": ..., "detail": ...}
+    """
     url = create_url(id)
     json_response = connect_to_endpoint(url)
+
+    # エラーレスポンスをチェック
+    error_info = parse_api_error(json_response)
+    if error_info:
+        return error_info
+
     return json_response
 
 
-def lambda_handler(event, context):
+def lambda_handler(event: dict, context: Any) -> dict:
     """
     AWS Lambda用のハンドラー関数（VPC外で実行、RDSアクセスなし）
 
@@ -124,12 +166,79 @@ def lambda_handler(event, context):
 
             post = lookup(tweet_id)
 
-            if post is None or "data" not in post:
-                logger.error(f"Lambda execution error: failed get tweet: {tweet_id}")
+            # 削除/非公開/レート制限/エラーの場合
+            if "status" in post:
+                status = post["status"]
+
+                # レート制限の場合は遅延付きで再キューイング
+                if status == "rate_limited":
+                    wait_time = post.get("wait_time", 60)
+                    # SQSの最大遅延は15分（900秒）
+                    delay_seconds = min(wait_time, 900)
+
+                    # 元のメッセージを遅延付きで再送信
+                    tweet_lookup_queue_url = os.environ.get("TWEET_LOOKUP_QUEUE_URL")
+                    if tweet_lookup_queue_url:
+                        requeue_message = {
+                            "tweet_id": tweet_id,
+                            "note_id": event.get("Records", [{}])[0].get("body", "{}"),
+                            "processing_type": "tweet_lookup",
+                        }
+                        # note_idをパースして取得
+                        try:
+                            original_body = json.loads(event["Records"][0]["body"])
+                            requeue_message["note_id"] = original_body.get("note_id")
+                        except (KeyError, json.JSONDecodeError):
+                            pass
+
+                        logger.info(f"[REQUEUE] Rate limited. Requeuing with {delay_seconds}s delay...")
+                        message_id = sqs_handler.send_message(
+                            queue_url=tweet_lookup_queue_url,
+                            message_body=requeue_message,
+                            delay_seconds=delay_seconds,
+                        )
+                        if message_id:
+                            logger.info(f"[REQUEUE_SUCCESS] Message requeued with delay, messageId={message_id}")
+                        else:
+                            logger.error("[REQUEUE_FAILED] Failed to requeue message")
+                            raise Exception("Failed to requeue rate-limited message")
+                    else:
+                        logger.error("[CONFIG_ERROR] TWEET_LOOKUP_QUEUE_URL not configured")
+                        raise Exception("TWEET_LOOKUP_QUEUE_URL not configured")
+
+                    return {
+                        "statusCode": 200,
+                        "body": json.dumps({
+                            "rate_limited": True,
+                            "tweet_id": tweet_id,
+                            "delay_seconds": delay_seconds,
+                        }),
+                    }
+
+                # 削除/非公開/その他エラーの場合はスキップ
+                detail = post.get("detail", "")
+                if status == "deleted":
+                    logger.warning(f"[SKIP] Tweet {tweet_id} was deleted: {detail}")
+                elif status == "protected":
+                    logger.warning(f"[SKIP] Tweet {tweet_id} is protected/not authorized: {detail}")
+                else:
+                    logger.warning(f"[SKIP] Tweet {tweet_id} has error: {post.get('title')} - {detail}")
+
+                # 正常終了として返す（DLQに送らない）
                 return {
-                    "statusCode": 500,
-                    "body": json.dumps({"error": f"Lambda execution error: failed get tweet: {tweet_id}"}),
+                    "statusCode": 200,
+                    "body": json.dumps({
+                        "skipped": True,
+                        "tweet_id": tweet_id,
+                        "reason": status,
+                        "detail": detail,
+                    }),
                 }
+
+            # dataがない場合は予期しないエラー
+            if "data" not in post:
+                logger.error(f"[ERROR] Unexpected response for tweet {tweet_id}: {json.dumps(post)}")
+                raise Exception(f"Unexpected API response for tweet: {tweet_id}")
 
             created_at = datetime.strptime(post["data"]["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ").replace(
                 tzinfo=timezone.utc
@@ -170,11 +279,11 @@ def lambda_handler(event, context):
 
             media_list = [
                 {
-                    "media_key": f"{m['media_key']}-{post['data']['id']}",
-                    "type": m["type"],
+                    "media_key": f"{m.get('media_key', '')}-{post['data']['id']}",
+                    "type": m.get("type", ""),
                     "url": m.get("url") or (m["variants"][0]["url"] if "variants" in m and m["variants"] else ""),
-                    "width": m["width"],
-                    "height": m["height"],
+                    "width": m.get("width", 0),
+                    "height": m.get("height", 0),
                 }
                 for m in media_data
             ]
@@ -193,18 +302,19 @@ def lambda_handler(event, context):
                         )
 
             # DB Writer Lambdaに送信するメッセージを作成
+            public_metrics = post["data"].get("public_metrics", {})
             post_data = {
                 "post_id": post["data"]["id"],
                 "author_id": post["data"]["author_id"],
                 "text": post["data"]["text"],
                 "created_at": created_at_millis,
-                "like_count": post["data"]["public_metrics"]["like_count"],
-                "repost_count": post["data"]["public_metrics"]["retweet_count"],
-                "bookmark_count": post["data"]["public_metrics"]["bookmark_count"],
-                "impression_count": post["data"]["public_metrics"]["impression_count"],
-                "quote_count": post["data"]["public_metrics"]["quote_count"],
-                "reply_count": post["data"]["public_metrics"]["reply_count"],
-                "lang": post["data"]["lang"],
+                "like_count": public_metrics.get("like_count", 0),
+                "repost_count": public_metrics.get("retweet_count", 0),
+                "bookmark_count": public_metrics.get("bookmark_count", 0),
+                "impression_count": public_metrics.get("impression_count", 0),
+                "quote_count": public_metrics.get("quote_count", 0),
+                "reply_count": public_metrics.get("reply_count", 0),
+                "lang": post["data"].get("lang", ""),
                 "extracted_at": now_millis,
                 "user": user_info,
                 "media": media_list,
@@ -215,13 +325,13 @@ def lambda_handler(event, context):
             if db_write_queue_url:
                 db_write_message = {"operation": "save_post_data", "data": {"post_data": post_data}}
 
-                logger.info(f"[SQS_SEND] Sending post data to db-write queue...")
+                logger.info("[SQS_SEND] Sending post data to db-write queue...")
                 message_id = sqs_handler.send_message(queue_url=db_write_queue_url, message_body=db_write_message)
 
                 if message_id:
                     logger.info(f"[SQS_SUCCESS] Sent post data to db-write queue, messageId={message_id}")
                 else:
-                    logger.error(f"[SQS_FAILED] Failed to send post data to db-write queue")
+                    logger.error("[SQS_FAILED] Failed to send post data to db-write queue")
                     return {
                         "statusCode": 500,
                         "body": json.dumps({"error": "Failed to send post data to db-write queue"}),
@@ -234,6 +344,10 @@ def lambda_handler(event, context):
             logger.info("[COMPLETED] Postlookup Lambda completed successfully")
             logger.info("=" * 80)
 
+            # レート制限回避のため10秒待機（X API Basic: 15分で100リクエスト = 9秒/件）
+            logger.info("[WAIT] Sleeping 10 seconds to avoid rate limit...")
+            time.sleep(10)
+
             return {"statusCode": 200, "body": json.dumps({"tweet_id": tweet_id, "data": post})}
         else:
             return {
@@ -243,18 +357,13 @@ def lambda_handler(event, context):
 
     except Exception as e:
         logger.error(f"Lambda execution error: {str(e)}")
-        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
+        raise  # 例外を再送出してDLQに送る
 
 
 # ローカルテスト用の関数
-def test_local():
-    """
-    ローカルでテストする場合の関数
-    """
-    # テスト用のイベント
+def test_local() -> None:
+    """ローカルでテストする場合の関数"""
     test_event = {"tweet_id": "1234567890"}
-
-    # テスト用のコンテキスト（空のオブジェクト）
     test_context = {}
 
     result = lambda_handler(test_event, test_context)
@@ -262,5 +371,4 @@ def test_local():
 
 
 if __name__ == "__main__":
-    # ローカルでテストする場合
     test_local()
