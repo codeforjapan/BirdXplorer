@@ -177,9 +177,9 @@ def lambda_handler(event: dict, context: Any) -> dict:
 
                 # レート制限の場合は遅延付きで再キューイング
                 if status == "rate_limited":
-                    wait_time = post.get("wait_time", 60)
-                    # SQSの最大遅延は15分（900秒）
-                    delay_seconds = min(wait_time, 900)
+                    wait_time = post.get("wait_time", 65)
+                    # 最小65秒（レート制限回避）、最大900秒（SQS制限）
+                    delay_seconds = max(65, min(wait_time, 900))
 
                     # 元のメッセージを遅延付きで再送信
                     tweet_lookup_queue_url = os.environ.get("TWEET_LOOKUP_QUEUE_URL")
@@ -375,6 +375,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
             logger.info("=" * 80)
 
             # レート制限回避のため65秒待機（X API: 15分で15リクエスト = 60秒/件 + バッファ5秒）
+            # 新規メッセージはtopic_detectでSQS delay設定済みだが、既存メッセージ対応のため残す
             logger.info("[WAIT] Sleeping 65 seconds to avoid rate limit...")
             time.sleep(65)
 
