@@ -83,10 +83,15 @@ def parse_api_error(json_response: dict) -> Optional[dict]:
 def connect_to_endpoint(url: str) -> dict:
     response = requests.request("GET", url, auth=bearer_oauth, timeout=30)
 
+    # レート制限ヘッダーをログ出力（デバッグ用）
+    rate_limit = response.headers.get("x-rate-limit-limit")
+    rate_remaining = response.headers.get("x-rate-limit-remaining")
+    rate_reset = response.headers.get("x-rate-limit-reset")
+    logger.info(f"[RATE_LIMIT_HEADERS] limit={rate_limit}, remaining={rate_remaining}, reset={rate_reset}")
+
     if response.status_code == 429:
-        limit = response.headers.get("x-rate-limit-reset")
-        if limit:
-            wait_time = max(0, int(limit) - int(time.time()) + 1)
+        if rate_reset:
+            wait_time = max(0, int(rate_reset) - int(time.time()) + 1)
         else:
             wait_time = 60
 
@@ -172,9 +177,9 @@ def lambda_handler(event: dict, context: Any) -> dict:
 
                 # レート制限の場合は遅延付きで再キューイング
                 if status == "rate_limited":
-                    wait_time = post.get("wait_time", 60)
-                    # SQSの最大遅延は15分（900秒）
-                    delay_seconds = min(wait_time, 900)
+                    wait_time = post.get("wait_time", 65)
+                    # 最小65秒（レート制限回避）、最大900秒（SQS制限）
+                    delay_seconds = max(65, min(wait_time, 900))
 
                     # 元のメッセージを遅延付きで再送信
                     tweet_lookup_queue_url = os.environ.get("TWEET_LOOKUP_QUEUE_URL")
@@ -205,6 +210,10 @@ def lambda_handler(event: dict, context: Any) -> dict:
                     else:
                         logger.error("[CONFIG_ERROR] TWEET_LOOKUP_QUEUE_URL not configured")
                         raise Exception("TWEET_LOOKUP_QUEUE_URL not configured")
+
+                    # レート制限時も60秒スリープして、連鎖的なレート制限ヒットを防ぐ
+                    logger.info("[WAIT] Sleeping 60 seconds to prevent rate limit cascade...")
+                    time.sleep(60)
 
                     return {
                         "statusCode": 200,
@@ -340,13 +349,35 @@ def lambda_handler(event: dict, context: Any) -> dict:
                 logger.error("[CONFIG_ERROR] DB_WRITE_QUEUE_URL not configured")
                 return {"statusCode": 500, "body": json.dumps({"error": "DB_WRITE_QUEUE_URL not configured"})}
 
+            # Post Transform Queueにメッセージを送信（遅延付き）
+            post_transform_queue_url = os.environ.get("POST_TRANSFORM_QUEUE_URL")
+            if post_transform_queue_url:
+                transform_message = {
+                    "operation": "transform_post",
+                    "post_id": post["data"]["id"],
+                    "retry_count": 0,
+                }
+                logger.info("[SQS_SEND] Sending transform request to post-transform queue (60s delay)...")
+                message_id = sqs_handler.send_message(
+                    queue_url=post_transform_queue_url,
+                    message_body=transform_message,
+                    delay_seconds=60,  # db_writer完了を待つため60秒遅延
+                )
+                if message_id:
+                    logger.info(f"[SQS_SUCCESS] Sent transform request, messageId={message_id}")
+                else:
+                    logger.warning("[SQS_WARNING] Failed to send transform request (non-critical)")
+            else:
+                logger.warning("[CONFIG_WARNING] POST_TRANSFORM_QUEUE_URL not configured, skipping post-transform")
+
             logger.info("=" * 80)
             logger.info("[COMPLETED] Postlookup Lambda completed successfully")
             logger.info("=" * 80)
 
-            # レート制限回避のため10秒待機（X API Basic: 15分で100リクエスト = 9秒/件）
-            logger.info("[WAIT] Sleeping 10 seconds to avoid rate limit...")
-            time.sleep(10)
+            # レート制限回避のため65秒待機（X API: 15分で15リクエスト = 60秒/件 + バッファ5秒）
+            # 新規メッセージはtopic_detectでSQS delay設定済みだが、既存メッセージ対応のため残す
+            logger.info("[WAIT] Sleeping 65 seconds to avoid rate limit...")
+            time.sleep(65)
 
             return {"statusCode": 200, "body": json.dumps({"tweet_id": tweet_id, "data": post})}
         else:
