@@ -374,9 +374,9 @@ def lambda_handler(event: dict, context: Any) -> dict:
             logger.info("[COMPLETED] Postlookup Lambda completed successfully")
             logger.info("=" * 80)
 
-            # レート制限回避のため10秒待機（X API Basic: 15分で100リクエスト = 9秒/件）
-            logger.info("[WAIT] Sleeping 10 seconds to avoid rate limit...")
-            time.sleep(10)
+            # レート制限回避のため65秒待機（X API: 15分で15リクエスト = 60秒/件 + バッファ5秒）
+            logger.info("[WAIT] Sleeping 65 seconds to avoid rate limit...")
+            time.sleep(65)
 
             return {"statusCode": 200, "body": json.dumps({"tweet_id": tweet_id, "data": post})}
         else:
