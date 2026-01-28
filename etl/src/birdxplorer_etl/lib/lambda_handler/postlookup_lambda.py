@@ -83,10 +83,15 @@ def parse_api_error(json_response: dict) -> Optional[dict]:
 def connect_to_endpoint(url: str) -> dict:
     response = requests.request("GET", url, auth=bearer_oauth, timeout=30)
 
+    # レート制限ヘッダーをログ出力（デバッグ用）
+    rate_limit = response.headers.get("x-rate-limit-limit")
+    rate_remaining = response.headers.get("x-rate-limit-remaining")
+    rate_reset = response.headers.get("x-rate-limit-reset")
+    logger.info(f"[RATE_LIMIT_HEADERS] limit={rate_limit}, remaining={rate_remaining}, reset={rate_reset}")
+
     if response.status_code == 429:
-        limit = response.headers.get("x-rate-limit-reset")
-        if limit:
-            wait_time = max(0, int(limit) - int(time.time()) + 1)
+        if rate_reset:
+            wait_time = max(0, int(rate_reset) - int(time.time()) + 1)
         else:
             wait_time = 60
 
