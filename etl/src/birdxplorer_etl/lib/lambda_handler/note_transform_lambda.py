@@ -14,7 +14,6 @@ from birdxplorer_common.storage import (
     TopicRecord,
 )
 from birdxplorer_etl import settings
-from birdxplorer_etl.lib.ai_model.ai_model_interface import get_ai_service
 from birdxplorer_etl.lib.lambda_handler.common.sqs_handler import SQSHandler
 from birdxplorer_etl.lib.sqlite.init import init_postgresql
 
@@ -151,222 +150,236 @@ def load_topics_from_db(postgresql):
     return topics
 
 
+def process_single_message(message: dict, postgresql, sqs_handler, topics_cache: dict) -> dict:
+    """
+    単一メッセージを処理する
+
+    Args:
+        message: SQSメッセージ
+        postgresql: DBセッション
+        sqs_handler: SQSハンドラー
+        topics_cache: トピックキャッシュ
+
+    Returns:
+        処理結果の辞書
+
+    Raises:
+        Exception: 処理失敗時（DLQに送られる）
+    """
+    message_body = message["body"]
+    note_id = message_body.get("note_id")
+    processing_type = message_body.get("processing_type")
+    message_language = message_body.get("language")
+    retry_count = message_body.get("retry_count", 0)
+
+    if not note_id:
+        raise Exception("Missing note_id in message")
+
+    if processing_type != "note_transform":
+        raise Exception(f"Invalid processing_type: {processing_type}")
+
+    logger.info(f"Processing note transformation for note: {note_id}")
+
+    # PostgreSQLからrow_notesデータを取得
+    note_query = postgresql.execute(
+        select(
+            RowNoteRecord.note_id,
+            RowNoteRecord.note_author_participant_id,
+            RowNoteRecord.tweet_id,
+            RowNoteRecord.summary,
+            RowNoteRecord.language,
+            RowNoteRecord.created_at_millis,
+            RowNoteStatusRecord.current_status,
+        )
+        .outerjoin(RowNoteStatusRecord, RowNoteRecord.note_id == RowNoteStatusRecord.note_id)
+        .filter(RowNoteRecord.note_id == note_id)
+    )
+
+    note_row = note_query.first()
+
+    if note_row is None:
+        raise Exception(f"Note not found in row_notes: {note_id}")
+
+    # 既にnotesテーブルに存在するかチェック
+    existing_note = postgresql.query(NoteRecord).filter(NoteRecord.note_id == note_id).first()
+
+    if existing_note:
+        logger.info(f"Note already exists in notes table: {note_id}")
+        return {"note_id": note_id, "status": "skipped", "message": "Note already exists"}
+
+    # 言語を取得（優先順位: メッセージ > DB）
+    detected_language = message_language or note_row.language
+
+    if message_language:
+        logger.info(f"Using language from message for note {note_id}: {detected_language}")
+    elif note_row.language:
+        logger.info(f"Using language from DB for note {note_id}: {detected_language}")
+    else:
+        # 言語がない場合、リトライカウント付きで再キュー
+        max_retries = 3
+        if retry_count >= max_retries:
+            raise Exception(f"Language not available after {max_retries} retries for note {note_id}")
+
+        # 遅延付きで再キュー（30秒後に再処理）
+        retry_message = {
+            "note_id": note_id,
+            "processing_type": "note_transform",
+            "retry_count": retry_count + 1,
+        }
+        sent_message_id = sqs_handler.send_message(
+            queue_url=settings.NOTE_TRANSFORM_QUEUE_URL,
+            message_body=retry_message,
+            delay_seconds=30,
+        )
+        if sent_message_id:
+            logger.info(
+                f"Language not available for note {note_id}, "
+                f"requeued with retry_count={retry_count + 1}, delay=30s"
+            )
+            return {"note_id": note_id, "status": "requeued", "retry_count": retry_count + 1}
+        else:
+            raise Exception(f"Failed to requeue note {note_id}")
+
+    # notesテーブルに新しいレコードを作成
+    new_note = NoteRecord(
+        note_id=note_row.note_id,
+        note_author_participant_id=note_row.note_author_participant_id,
+        post_id=note_row.tweet_id,
+        language=detected_language,
+        summary=note_row.summary,
+        current_status=note_row.current_status,
+        created_at=note_row.created_at_millis,
+    )
+
+    postgresql.add(new_note)
+    logger.info(f"Successfully transformed note: {note_id}")
+
+    return {
+        "note_id": note_id,
+        "status": "success",
+        "detected_language": str(detected_language),
+        "summary": note_row.summary,
+        "post_id": note_row.tweet_id,
+        "created_at_millis": int(note_row.created_at_millis),
+    }
+
+
 def lambda_handler(event, context):
     """
-    ノート変換Lambda関数
+    ノート変換Lambda関数（batchItemFailures対応）
     row_notesテーブルからnotesテーブルへの変換を実行
-    言語情報はrow_notesから取得（language_detect_lambdaで事前に判定済み）
 
-    期待されるeventの形式:
-    {
-        "Records": [
-            {
-                "body": "{\"note_id\": \"1234567890\", \"processing_type\": \"note_transform\"}"
-            }
-        ]
-    }
+    失敗したメッセージのみを再処理/DLQに送る
     """
     postgresql = init_postgresql()
     sqs_handler = SQSHandler()
+    batch_item_failures = []
+    results = []
 
     # トピック一覧をDBから取得（Lambda起動時に一度だけ実行）
-    # Lambda関数がウォーム状態の間はキャッシュされる
     if not hasattr(lambda_handler, "_topics_cache"):
         lambda_handler._topics_cache = load_topics_from_db(postgresql)
         logger.info(f"Initialized topics cache: {len(lambda_handler._topics_cache)} topics")
 
     try:
-        # SQSイベントからメッセージを解析
-        messages = sqs_handler.parse_sqs_event(event)
+        records = event.get("Records", [])
+        if not records:
+            logger.warning("No records found in SQS event")
+            return {"batchItemFailures": []}
 
-        if not messages:
-            logger.warning("No valid messages found in SQS event")
-            return {"statusCode": 400, "body": json.dumps({"error": "No valid messages found"})}
-
-        results = []
-
-        for message in messages:
+        # 各メッセージを個別に処理
+        for record in records:
+            message_id = record.get("messageId")
             try:
-                message_body = message["body"]
-                note_id = message_body.get("note_id")
-                processing_type = message_body.get("processing_type")
+                message_body = json.loads(record["body"])
+                message = {"body": message_body, "message_id": message_id}
 
-                if not note_id:
-                    logger.error("Missing note_id in message")
-                    continue
-
-                if processing_type != "note_transform":
-                    logger.error(f"Invalid processing_type: {processing_type}")
-                    continue
-
-                logger.info(f"Processing note transformation for note: {note_id}")
-
-                # PostgreSQLからrow_notesデータを取得（言語情報を含む）
-                # LEFT OUTER JOINを使用: row_note_statusが存在しないノートも処理可能にする
-                # （新しいノートはステータスが未確定でnoteStatusHistoryに含まれないことがある）
-                note_query = postgresql.execute(
-                    select(
-                        RowNoteRecord.note_id,
-                        RowNoteRecord.note_author_participant_id,
-                        RowNoteRecord.tweet_id,
-                        RowNoteRecord.summary,
-                        RowNoteRecord.language,
-                        RowNoteRecord.created_at_millis,
-                        RowNoteStatusRecord.current_status,
-                    )
-                    .outerjoin(RowNoteStatusRecord, RowNoteRecord.note_id == RowNoteStatusRecord.note_id)
-                    .filter(RowNoteRecord.note_id == note_id)
-                )
-
-                note_row = note_query.first()
-
-                if note_row is None:
-                    logger.error(f"Note not found in row_notes: {note_id}")
-                    results.append({"note_id": note_id, "status": "error", "message": "Note not found in row_notes"})
-                    continue
-
-                # 既にnotesテーブルに存在するかチェック
-                existing_note = postgresql.query(NoteRecord).filter(NoteRecord.note_id == note_id).first()
-
-                if existing_note:
-                    logger.info(f"Note already exists in notes table: {note_id}")
-                    results.append(
-                        {"note_id": note_id, "status": "skipped", "message": "Note already exists in notes table"}
-                    )
-                    continue
-
-                # row_notesから言語を取得（language_detect_lambdaで事前に判定済み）
-                detected_language = note_row.language
-
-                # 言語が未判定の場合のフォールバック処理
-                if not detected_language:
-                    logger.warning(f"Language not detected for note {note_id}, using fallback")
-                    ai_service = get_ai_service()
-                    detected_language = ai_service.detect_language(note_row.summary)
-                    logger.info(f"Fallback language detection for note {note_id}: {detected_language}")
-                else:
-                    logger.info(f"Using pre-detected language for note {note_id}: {detected_language}")
-
-                # notesテーブルに新しいレコードを作成
-                new_note = NoteRecord(
-                    note_id=note_row.note_id,
-                    note_author_participant_id=note_row.note_author_participant_id,
-                    post_id=note_row.tweet_id,
-                    language=detected_language,
-                    summary=note_row.summary,
-                    current_status=note_row.current_status,
-                    created_at=note_row.created_at_millis,
-                )
-
-                postgresql.add(new_note)
-
-                results.append(
-                    {
-                        "note_id": note_id,
-                        "status": "success",
-                        "detected_language": str(detected_language),
-                        "summary": note_row.summary,  # summaryを保存
-                        "post_id": note_row.tweet_id,  # post_idを保存
-                        "created_at_millis": int(note_row.created_at_millis),  # created_at_millisを保存
-                        "message": "Note transformed successfully",
-                    }
-                )
-
-                logger.info(f"Successfully transformed note: {note_id}")
+                result = process_single_message(message, postgresql, sqs_handler, lambda_handler._topics_cache)
+                results.append(result)
 
             except Exception as e:
-                logger.error(f"Error processing message for note {note_id}: {str(e)}")
-                results.append({"note_id": note_id, "status": "error", "message": str(e)})
+                logger.error(f"Error processing message {message_id}: {str(e)}")
+                # 失敗したメッセージをbatchItemFailuresに追加
+                batch_item_failures.append({"itemIdentifier": message_id})
+
+        # 成功した処理をコミット
+        if any(r.get("status") == "success" for r in results):
+            try:
+                postgresql.commit()
+                logger.info("Successfully committed note transformations")
+            except Exception as e:
+                logger.error(f"Commit error: {e}")
+                postgresql.rollback()
+                # コミット失敗時は全メッセージを失敗扱い
+                return {
+                    "batchItemFailures": [
+                        {"itemIdentifier": record.get("messageId")} for record in records
+                    ]
+                }
+
+        # 成功したノートに対してtopic-detect-queueに送信
+        settings_config = load_settings()
+        filter_config = settings_config.get("filter", {})
+        languages = filter_config.get("languages", ["ja", "en"])
+        keywords = filter_config.get("keywords", [])
+        start_millis = filter_config["start_millis"]
+        end_millis = filter_config.get("end_millis")
+
+        topic_detect_queued = 0
+        for result in results:
+            if result.get("status") != "success":
                 continue
 
-        # 全ての処理が完了したらコミット
-        try:
-            postgresql.commit()
-            logger.info("Successfully committed note transformations")
+            note_id = result["note_id"]
+            detected_language = result.get("detected_language", "")
+            summary = result.get("summary", "")
+            post_id = result.get("post_id")
+            created_at_millis = result.get("created_at_millis")
 
-            # 統合設定ファイルから設定を読み込む
-            settings_config = load_settings()
-            filter_config = settings_config.get("filter", {})
-            languages = filter_config.get("languages", ["ja", "en"])
-            keywords = filter_config.get("keywords", [])
-            start_millis = filter_config["start_millis"]  # Required field, validated in load_settings()
-            end_millis = filter_config.get("end_millis")  # Optional field, None means no upper limit
+            # フィルタリング
+            if detected_language not in languages:
+                logger.info(f"Note {note_id} language '{detected_language}' not in {languages}, skipping")
+                continue
 
-            # 成功したノートに対して条件判定を行い、topic-detect-queueに送信
-            successful_results = [result for result in results if result["status"] == "success"]
-            topic_detect_queued = 0
-            date_filtered_count = 0
+            if not check_keyword_match(summary, keywords):
+                logger.info(f"Note {note_id} does not match keywords, skipping")
+                continue
 
-            for result in successful_results:
-                note_id = result["note_id"]
-                detected_language = result.get("detected_language", "")
-                summary = result.get("summary", "")
-                post_id = result.get("post_id")
-                created_at_millis = result.get("created_at_millis")
+            if created_at_millis is not None and not check_date_filter(created_at_millis, start_millis, end_millis):
+                logger.info(f"Note {note_id} outside date range, skipping")
+                continue
 
-                # 条件1: 言語フィルタ（settings.jsonから取得）
-                if detected_language not in languages:
-                    logger.info(
-                        f"Note {note_id} language '{detected_language}' not in {languages}, skipping topic detection"
-                    )
-                    continue
+            # topic-detect-queueに送信
+            topic_detect_message = {
+                "note_id": note_id,
+                "summary": summary,
+                "post_id": post_id,
+                "topics": lambda_handler._topics_cache,
+                "processing_type": "topic_detect",
+            }
 
-                # 条件2: キーワードマッチ（キーワードが空の場合は常にTrue）
-                if not check_keyword_match(summary, keywords):
-                    logger.info(f"Note {note_id} does not match any keywords, skipping topic detection")
-                    continue
+            if sqs_handler.send_message(queue_url=settings.TOPIC_DETECT_QUEUE_URL, message_body=topic_detect_message):
+                logger.info(f"Enqueued note {note_id} to topic-detect queue")
+                topic_detect_queued += 1
+            else:
+                logger.error(f"Failed to enqueue note {note_id} to topic-detect queue")
 
-                # 条件3: 日付フィルタ（settings.jsonから取得）
-                if created_at_millis is not None and not check_date_filter(created_at_millis, start_millis, end_millis):
-                    logger.info(
-                        f"Note {note_id} created_at {created_at_millis} is outside range "
-                        f"[{start_millis}, {end_millis}], skipping topic detection"
-                    )
-                    date_filtered_count += 1
-                    continue
+        logger.info(
+            f"Batch complete: {len(results)} processed, "
+            f"{len(batch_item_failures)} failed, {topic_detect_queued} queued for topic detection"
+        )
 
-                # 条件を満たす場合、topic-detect-queueに送信（summary、post_id、topicsを含める）
-                topic_detect_message = {
-                    "note_id": note_id,
-                    "summary": summary,
-                    "post_id": post_id,
-                    "topics": lambda_handler._topics_cache,  # トピック一覧を含める
-                    "processing_type": "topic_detect",
-                }
-
-                message_id = sqs_handler.send_message(
-                    queue_url=settings.TOPIC_DETECT_QUEUE_URL, message_body=topic_detect_message
-                )
-
-                if message_id:
-                    logger.info(
-                        f"Enqueued note {note_id} to topic-detect queue "
-                        f"(language={detected_language}), messageId={message_id}"
-                    )
-                    topic_detect_queued += 1
-                else:
-                    logger.error(f"Failed to enqueue note {note_id} to topic-detect queue")
-
-        except Exception as e:
-            logger.error(f"Commit error: {e}")
-            postgresql.rollback()
-            raise
-
-        return {
-            "statusCode": 200,
-            "body": json.dumps(
-                {
-                    "message": "Note transformation completed",
-                    "results": results,
-                    "topic_detect_queued": topic_detect_queued,
-                    "date_filtered_count": date_filtered_count,
-                }
-            ),
-        }
+        # batchItemFailuresを返す（失敗したメッセージのみ再処理/DLQ行き）
+        return {"batchItemFailures": batch_item_failures}
 
     except Exception as e:
         logger.error(f"Lambda execution error: {str(e)}")
-        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
+        # 全体エラー時は全メッセージを失敗扱い
+        return {
+            "batchItemFailures": [
+                {"itemIdentifier": record.get("messageId")} for record in event.get("Records", [])
+            ]
+        }
     finally:
         postgresql.close()
 

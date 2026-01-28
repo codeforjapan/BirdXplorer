@@ -105,7 +105,11 @@ def lambda_handler(event, context):
 
             # 次の処理（note-transform）をSQSキューにトリガー
             if settings.NOTE_TRANSFORM_QUEUE_URL:
-                note_transform_message = {"note_id": note_id, "processing_type": "note_transform"}
+                note_transform_message = {
+                    "note_id": note_id,
+                    "language": detected_language,  # 言語情報を含めてレースコンディションを回避
+                    "processing_type": "note_transform",
+                }
 
                 logger.info(f"[SQS_SEND] Sending message to note-transform queue...")
                 message_id = sqs_handler.send_message(
@@ -154,7 +158,7 @@ def lambda_handler(event, context):
         import traceback
 
         logger.error(traceback.format_exc())
-        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
+        raise  # 例外を再送出してDLQに送る
 
 
 # ローカルテスト用の関数
