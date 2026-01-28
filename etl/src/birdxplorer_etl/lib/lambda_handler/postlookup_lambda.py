@@ -80,14 +80,6 @@ def parse_api_error(json_response: dict) -> Optional[dict]:
         return {"status": "error", "title": error_title, "detail": error_detail}
 
 
-class RateLimitError(Exception):
-    """X APIのレート制限エラー"""
-
-    def __init__(self, wait_time: int):
-        self.wait_time = wait_time
-        super().__init__(f"Rate limit hit, retry after {wait_time} seconds")
-
-
 def connect_to_endpoint(url: str) -> dict:
     response = requests.request("GET", url, auth=bearer_oauth, timeout=30)
 
@@ -97,9 +89,10 @@ def connect_to_endpoint(url: str) -> dict:
             wait_time = max(0, int(limit) - int(time.time()) + 1)
         else:
             wait_time = 60
-        # sleepせずに例外を投げてSQSに戻す（visibilityTimeout後に自動リトライ）
-        logger.warning(f"Rate limit hit, need to wait {wait_time} seconds. Returning message to queue.")
-        raise RateLimitError(wait_time)
+
+        logger.warning(f"Rate limit hit, need to wait {wait_time} seconds.")
+        # レート制限情報を返す（呼び出し元で遅延再キューイング）
+        return {"status": "rate_limited", "wait_time": wait_time}
     elif response.status_code == 401:
         logger.error("X API authentication failed (401). Check X_BEARER_TOKEN in environment/secrets.")
         raise Exception("X API authentication failed: 401 Unauthorized. Token may be invalid or expired.")
@@ -173,11 +166,57 @@ def lambda_handler(event: dict, context: Any) -> dict:
 
             post = lookup(tweet_id)
 
-            # 削除/非公開/エラーの場合はスキップ（DLQに送らない）
+            # 削除/非公開/レート制限/エラーの場合
             if "status" in post:
                 status = post["status"]
-                detail = post.get("detail", "")
 
+                # レート制限の場合は遅延付きで再キューイング
+                if status == "rate_limited":
+                    wait_time = post.get("wait_time", 60)
+                    # SQSの最大遅延は15分（900秒）
+                    delay_seconds = min(wait_time, 900)
+
+                    # 元のメッセージを遅延付きで再送信
+                    tweet_lookup_queue_url = os.environ.get("TWEET_LOOKUP_QUEUE_URL")
+                    if tweet_lookup_queue_url:
+                        requeue_message = {
+                            "tweet_id": tweet_id,
+                            "note_id": event.get("Records", [{}])[0].get("body", "{}"),
+                            "processing_type": "tweet_lookup",
+                        }
+                        # note_idをパースして取得
+                        try:
+                            original_body = json.loads(event["Records"][0]["body"])
+                            requeue_message["note_id"] = original_body.get("note_id")
+                        except (KeyError, json.JSONDecodeError):
+                            pass
+
+                        logger.info(f"[REQUEUE] Rate limited. Requeuing with {delay_seconds}s delay...")
+                        message_id = sqs_handler.send_message(
+                            queue_url=tweet_lookup_queue_url,
+                            message_body=requeue_message,
+                            delay_seconds=delay_seconds,
+                        )
+                        if message_id:
+                            logger.info(f"[REQUEUE_SUCCESS] Message requeued with delay, messageId={message_id}")
+                        else:
+                            logger.error("[REQUEUE_FAILED] Failed to requeue message")
+                            raise Exception("Failed to requeue rate-limited message")
+                    else:
+                        logger.error("[CONFIG_ERROR] TWEET_LOOKUP_QUEUE_URL not configured")
+                        raise Exception("TWEET_LOOKUP_QUEUE_URL not configured")
+
+                    return {
+                        "statusCode": 200,
+                        "body": json.dumps({
+                            "rate_limited": True,
+                            "tweet_id": tweet_id,
+                            "delay_seconds": delay_seconds,
+                        }),
+                    }
+
+                # 削除/非公開/その他エラーの場合はスキップ
+                detail = post.get("detail", "")
                 if status == "deleted":
                     logger.warning(f"[SKIP] Tweet {tweet_id} was deleted: {detail}")
                 elif status == "protected":
@@ -305,9 +344,9 @@ def lambda_handler(event: dict, context: Any) -> dict:
             logger.info("[COMPLETED] Postlookup Lambda completed successfully")
             logger.info("=" * 80)
 
-            # レート制限回避のため60秒待機（1分に1ツイート）
-            logger.info("[WAIT] Sleeping 60 seconds to avoid rate limit...")
-            time.sleep(60)
+            # レート制限回避のため10秒待機（X API Basic: 15分で100リクエスト = 9秒/件）
+            logger.info("[WAIT] Sleeping 10 seconds to avoid rate limit...")
+            time.sleep(10)
 
             return {"statusCode": 200, "body": json.dumps({"tweet_id": tweet_id, "data": post})}
         else:
@@ -316,10 +355,6 @@ def lambda_handler(event: dict, context: Any) -> dict:
                 "body": json.dumps({"error": "Missing tweet_id in event or no valid tweet_lookup message found"}),
             }
 
-    except RateLimitError as e:
-        # レート制限エラーは再スローしてSQSに戻す（visibilityTimeout後に自動リトライ）
-        logger.warning(f"[RATE_LIMIT] {str(e)} - Message will be retried after visibility timeout")
-        raise
     except Exception as e:
         logger.error(f"Lambda execution error: {str(e)}")
         raise  # 例外を再送出してDLQに送る
