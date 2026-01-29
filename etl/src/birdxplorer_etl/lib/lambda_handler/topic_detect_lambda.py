@@ -105,13 +105,12 @@ def lambda_handler(event, context):
                 logger.error("[CONFIG_ERROR] DB_WRITE_QUEUE_URL not configured")
 
             # SQSメッセージ送信（post_idがある場合）
-            # X APIレート制限（15リクエスト/15分）を考慮して65秒遅延
             if post_id and TWEET_LOOKUP_QUEUE_URL:
                 try:
                     tweet_lookup_message = {"tweet_id": post_id, "note_id": note_id, "processing_type": "tweet_lookup"}
-                    logger.info(f"[SQS_SEND] Sending tweet lookup message with 65s delay...")
+                    logger.info(f"[SQS_SEND] Sending tweet lookup message...")
                     message_id = sqs_handler.send_message(
-                        queue_url=TWEET_LOOKUP_QUEUE_URL, message_body=tweet_lookup_message, delay_seconds=65
+                        queue_url=TWEET_LOOKUP_QUEUE_URL, message_body=tweet_lookup_message
                     )
 
                     if message_id:
