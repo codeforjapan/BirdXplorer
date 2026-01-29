@@ -325,19 +325,3 @@ def enqueue_note_status_update(note_id: str):
     except Exception as e:
         logging.error(f"Failed to enqueue note {note_id} to note-status-update queue: {e}")
 
-
-def enqueue_tweets(tweet_id: str):
-    """
-    ツイート取得用のSQSキューにメッセージを送信
-    """
-    message_body = json.dumps({"tweet_id": tweet_id, "processing_type": "tweet_lookup"})
-    sqs_client = boto3.client("sqs", region_name=os.environ.get("AWS_REGION", "ap-northeast-1"))
-
-    try:
-        response = sqs_client.send_message(
-            QueueUrl=settings.TWEET_LOOKUP_QUEUE_URL,  # 新しい環境変数を使用
-            MessageBody=message_body,
-        )
-        logging.info(f"Enqueued tweet {tweet_id} to tweet-lookup queue, messageId={response.get('MessageId')}")
-    except Exception as e:
-        logging.error(f"Failed to enqueue tweet {tweet_id} to tweet-lookup queue: {e}")
