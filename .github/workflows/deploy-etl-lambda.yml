@@ -37,6 +37,7 @@ jobs:
           - { dockerfile: Dockerfile.postlookup, repository: birdxplorer-etl-postlookup }
           - { dockerfile: Dockerfile.db_writer, repository: birdxplorer-etl-db-writer }
           - { dockerfile: Dockerfile.note_status_update, repository: birdxplorer-etl-note-status-update }
+          - { dockerfile: Dockerfile.post_transform, repository: birdxplorer-etl-post-transform }
 
     steps:
       - uses: actions/checkout@v5
@@ -81,6 +82,7 @@ jobs:
         birdxplorer-etl-topic,
         birdxplorer-etl-postlookup,
         birdxplorer-etl-db-writer,
-        birdxplorer-etl-note-status-update
+        birdxplorer-etl-note-status-update,
+        birdxplorer-etl-post-transform
       stacks: "devbird-xplorerStack"
     secrets: inherit
