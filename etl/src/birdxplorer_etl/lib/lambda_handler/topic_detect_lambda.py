@@ -3,7 +3,9 @@ import logging
 import os
 
 from birdxplorer_etl.lib.ai_model.ai_model_interface import get_ai_service
-from birdxplorer_etl.lib.lambda_handler.common.retry_handler import call_ai_api_with_retry
+from birdxplorer_etl.lib.lambda_handler.common.retry_handler import (
+    call_ai_api_with_retry,
+)
 from birdxplorer_etl.lib.lambda_handler.common.sqs_handler import SQSHandler
 from birdxplorer_etl.settings import TWEET_LOOKUP_QUEUE_URL
 
@@ -40,6 +42,8 @@ def lambda_handler(event, context):
         summary = None
         post_id = None
         topics = None
+        skip_topic_detect = False
+        skip_tweet_lookup = False
 
         # SQSイベントの場合
         if "Records" in event:
@@ -54,6 +58,8 @@ def lambda_handler(event, context):
                         summary = message_body.get("summary")
                         post_id = message_body.get("post_id")
                         topics = message_body.get("topics")  # トピック一覧を取得
+                        skip_topic_detect = message_body.get("skip_topic_detect", False)
+                        skip_tweet_lookup = message_body.get("skip_tweet_lookup", False)
                         logger.info(f"Found topic_detect message for note_id: {note_id}")
                         if topics:
                             logger.info(f"Received {len(topics)} topics from SQS message")
@@ -65,49 +71,62 @@ def lambda_handler(event, context):
         if note_id and summary:
             logger.info(f"[START] Detecting topics for note: {note_id}")
 
-            # トピック一覧をAIサービスに渡す
-            # topicsがNoneの場合、OpenAIServiceは従来通りload_topics()を呼ぶ
-            ai_service = get_ai_service()
-
-            # OpenAIServiceの場合、topicsを設定
-            if topics and hasattr(ai_service, "topics"):
-                ai_service.topics = topics
-                logger.info(f"[TOPICS] Set {len(topics)} topics to AI service")
-
-            # トピック推定を実行（リトライ付き）
-            logger.info(f"[PROCESSING] Calling AI service for topic detection...")
-            topics_info = call_ai_api_with_retry(
-                ai_service.detect_topic,
-                note_id,
-                summary,
-                max_retries=3,
-                initial_delay=1.0,
-            )
-
-            logger.info(f"Topics detected for note {note_id}: {topics_info}")
-
-            # トピック情報を取得
-            topic_ids = topics_info.get("topics", []) if topics_info else []
-
-            # DB書き込みをSQSキューに送信
-            db_write_queue_url = os.getenv("DB_WRITE_QUEUE_URL")
-            if db_write_queue_url:
-                db_write_message = {"operation": "update_topics", "note_id": note_id, "data": {"topic_ids": topic_ids}}
-
-                logger.info(f"[SQS_SEND] Sending topics update to db-write queue...")
-                message_id = sqs_handler.send_message(queue_url=db_write_queue_url, message_body=db_write_message)
-
-                if message_id:
-                    logger.info(f"[SQS_SUCCESS] Sent topics update to db-write queue, messageId={message_id}")
-                else:
-                    logger.error(f"[SQS_FAILED] Failed to send topics update to db-write queue")
+            if skip_topic_detect:
+                logger.info(f"[SKIP] Topics already assigned for note: {note_id}, skipping AI detection")
+                topic_ids = []
             else:
-                logger.error("[CONFIG_ERROR] DB_WRITE_QUEUE_URL not configured")
+                # トピック一覧をAIサービスに渡す
+                # topicsがNoneの場合、OpenAIServiceは従来通りload_topics()を呼ぶ
+                ai_service = get_ai_service()
+
+                # OpenAIServiceの場合、topicsを設定
+                if topics and hasattr(ai_service, "topics"):
+                    ai_service.topics = topics
+                    logger.info(f"[TOPICS] Set {len(topics)} topics to AI service")
+
+                # トピック推定を実行（リトライ付き）
+                logger.info(f"[PROCESSING] Calling AI service for topic detection...")
+                topics_info = call_ai_api_with_retry(
+                    ai_service.detect_topic,
+                    note_id,
+                    summary,
+                    max_retries=3,
+                    initial_delay=1.0,
+                )
+
+                logger.info(f"Topics detected for note {note_id}: {topics_info}")
+
+                # トピック情報を取得
+                topic_ids = topics_info.get("topics", []) if topics_info else []
+
+                # DB書き込みをSQSキューに送信
+                db_write_queue_url = os.getenv("DB_WRITE_QUEUE_URL")
+                if db_write_queue_url:
+                    db_write_message = {
+                        "operation": "update_topics",
+                        "note_id": note_id,
+                        "data": {"topic_ids": topic_ids},
+                    }
+
+                    logger.info(f"[SQS_SEND] Sending topics update to db-write queue...")
+                    message_id = sqs_handler.send_message(queue_url=db_write_queue_url, message_body=db_write_message)
+
+                    if message_id:
+                        logger.info(f"[SQS_SUCCESS] Sent topics update to db-write queue, messageId={message_id}")
+                    else:
+                        logger.error(f"[SQS_FAILED] Failed to send topics update to db-write queue")
+                else:
+                    logger.error("[CONFIG_ERROR] DB_WRITE_QUEUE_URL not configured")
 
             # SQSメッセージ送信（post_idがある場合）
             if post_id and TWEET_LOOKUP_QUEUE_URL:
                 try:
-                    tweet_lookup_message = {"tweet_id": post_id, "note_id": note_id, "processing_type": "tweet_lookup"}
+                    tweet_lookup_message = {
+                        "tweet_id": post_id,
+                        "note_id": note_id,
+                        "processing_type": "tweet_lookup",
+                        "skip_tweet_lookup": skip_tweet_lookup,
+                    }
                     logger.info(f"[SQS_SEND] Sending tweet lookup message...")
                     message_id = sqs_handler.send_message(
                         queue_url=TWEET_LOOKUP_QUEUE_URL, message_body=tweet_lookup_message

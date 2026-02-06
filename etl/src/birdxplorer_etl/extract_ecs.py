@@ -173,7 +173,7 @@ def extract_data(postgresql: Session):
 
                     # バッチ処理後にSQSキューイング（新規追加のみ）
                     for note in rows_to_add.values():
-                        enqueue_notes(note.note_id, note.summary, note.tweet_id)
+                        enqueue_notes(note.note_id, note.summary, note.tweet_id, note.language)
 
                     rows_to_add = {}
                     rows_to_update = []
@@ -185,7 +185,7 @@ def extract_data(postgresql: Session):
 
             # 最後のバッチのSQSキューイング（新規追加のみ）
             for note in rows_to_add.values():
-                enqueue_notes(note.note_id, note.summary, note.tweet_id)
+                enqueue_notes(note.note_id, note.summary, note.tweet_id, note.language)
 
             status_url = (
                 f"https://ton.twimg.com/birdwatch-public-data/{dateString}/"
@@ -280,7 +280,7 @@ def extract_data(postgresql: Session):
     return
 
 
-def enqueue_notes(note_id: str, summary: str, post_id: str = None):
+def enqueue_notes(note_id: str, summary: str, post_id: str = None, language: str = None):
     """
     ノート処理用のSQSキューにメッセージを送信
     lang-detect-queueに送信（summaryとpost_idも含める）
@@ -288,9 +288,10 @@ def enqueue_notes(note_id: str, summary: str, post_id: str = None):
     sqs_client = boto3.client("sqs", region_name=os.environ.get("AWS_REGION", "ap-northeast-1"))
 
     # lang-detect-queue用のメッセージ（summaryとpost_idを含める）
-    lang_detect_message = json.dumps(
-        {"note_id": note_id, "summary": summary, "post_id": post_id, "processing_type": "language_detect"}
-    )
+    message = {"note_id": note_id, "summary": summary, "post_id": post_id, "processing_type": "language_detect"}
+    if language:
+        message["language"] = language
+    lang_detect_message = json.dumps(message)
 
     # lang-detect-queueに送信
     try:
@@ -324,4 +325,3 @@ def enqueue_note_status_update(note_id: str):
         logging.info(f"Enqueued note {note_id} to note-status-update queue, messageId={response.get('MessageId')}")
     except Exception as e:
         logging.error(f"Failed to enqueue note {note_id} to note-status-update queue: {e}")
-
