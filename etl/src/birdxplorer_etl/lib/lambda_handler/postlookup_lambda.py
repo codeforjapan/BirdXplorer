@@ -179,12 +179,17 @@ def lambda_handler(event: dict, context: Any) -> dict:
                     "post_id": tweet_id,
                     "retry_count": 0,
                 }
-                sqs_handler.send_message(
+                message_id = sqs_handler.send_message(
                     queue_url=post_transform_queue_url,
                     message_body=transform_message,
-                    delay_seconds=5,
+                    delay_seconds=5,  # skip時はDB書き込みがないため短い遅延で十分
                 )
-                logger.info(f"[SQS_SUCCESS] Sent transform request for skipped tweet {tweet_id}")
+                if message_id:
+                    logger.info(f"[SQS_SUCCESS] Sent transform request for skipped tweet {tweet_id}")
+                else:
+                    logger.error(f"[SQS_FAILED] Failed to send transform request for skipped tweet {tweet_id}")
+            else:
+                logger.warning("[CONFIG_WARNING] POST_TRANSFORM_QUEUE_URL not configured, skipping transform enqueue")
             return {"statusCode": 200, "body": json.dumps({"skipped": True, "tweet_id": tweet_id})}
 
         if tweet_id:
