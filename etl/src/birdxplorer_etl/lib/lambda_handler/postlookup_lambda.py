@@ -150,6 +150,8 @@ def lambda_handler(event: dict, context: Any) -> dict:
     try:
         tweet_id = None
 
+        skip_tweet_lookup = False
+
         # SQSイベントの場合
         if "Records" in event:
             for record in event["Records"]:
@@ -157,6 +159,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
                     message_body = json.loads(record["body"])
                     if message_body.get("processing_type") == "tweet_lookup":
                         tweet_id = message_body.get("tweet_id")
+                        skip_tweet_lookup = message_body.get("skip_tweet_lookup", False)
                         break
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse SQS message body: {e}")
@@ -165,6 +168,24 @@ def lambda_handler(event: dict, context: Any) -> dict:
         # 直接呼び出しの場合
         elif "tweet_id" in event:
             tweet_id = event["tweet_id"]
+
+        if tweet_id and skip_tweet_lookup:
+            logger.info(f"[SKIP] Post already fetched for tweet: {tweet_id}")
+            # POST_TRANSFORM_QUEUEへの転送のみ実行
+            post_transform_queue_url = os.environ.get("POST_TRANSFORM_QUEUE_URL")
+            if post_transform_queue_url:
+                transform_message = {
+                    "operation": "transform_post",
+                    "post_id": tweet_id,
+                    "retry_count": 0,
+                }
+                sqs_handler.send_message(
+                    queue_url=post_transform_queue_url,
+                    message_body=transform_message,
+                    delay_seconds=5,
+                )
+                logger.info(f"[SQS_SUCCESS] Sent transform request for skipped tweet {tweet_id}")
+            return {"statusCode": 200, "body": json.dumps({"skipped": True, "tweet_id": tweet_id})}
 
         if tweet_id:
             logger.info(f"Looking up tweet: {tweet_id}")
@@ -217,11 +238,13 @@ def lambda_handler(event: dict, context: Any) -> dict:
 
                     return {
                         "statusCode": 200,
-                        "body": json.dumps({
-                            "rate_limited": True,
-                            "tweet_id": tweet_id,
-                            "delay_seconds": delay_seconds,
-                        }),
+                        "body": json.dumps(
+                            {
+                                "rate_limited": True,
+                                "tweet_id": tweet_id,
+                                "delay_seconds": delay_seconds,
+                            }
+                        ),
                     }
 
                 # 削除/非公開/その他エラーの場合はスキップ
@@ -236,12 +259,14 @@ def lambda_handler(event: dict, context: Any) -> dict:
                 # 正常終了として返す（DLQに送らない）
                 return {
                     "statusCode": 200,
-                    "body": json.dumps({
-                        "skipped": True,
-                        "tweet_id": tweet_id,
-                        "reason": status,
-                        "detail": detail,
-                    }),
+                    "body": json.dumps(
+                        {
+                            "skipped": True,
+                            "tweet_id": tweet_id,
+                            "reason": status,
+                            "detail": detail,
+                        }
+                    ),
                 }
 
             # dataがない場合は予期しないエラー

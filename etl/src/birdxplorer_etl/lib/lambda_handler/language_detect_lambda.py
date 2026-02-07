@@ -4,7 +4,9 @@ import os
 
 from birdxplorer_etl import settings
 from birdxplorer_etl.lib.ai_model.ai_model_interface import get_ai_service
-from birdxplorer_etl.lib.lambda_handler.common.retry_handler import call_ai_api_with_retry
+from birdxplorer_etl.lib.lambda_handler.common.retry_handler import (
+    call_ai_api_with_retry,
+)
 from birdxplorer_etl.lib.lambda_handler.common.sqs_handler import SQSHandler
 
 # Lambda用のロガー設定
@@ -37,6 +39,7 @@ def lambda_handler(event, context):
     try:
         note_id = None
         summary = None
+        existing_language = None
 
         # SQSイベントの場合
         if "Records" in event:
@@ -53,6 +56,7 @@ def lambda_handler(event, context):
                     if processing_type == "language_detect":
                         note_id = message_body.get("note_id")
                         summary = message_body.get("summary")
+                        existing_language = message_body.get("language")
                         logger.info(f"Found language_detect message for note_id: {note_id}")
                         break
                     else:
@@ -71,16 +75,20 @@ def lambda_handler(event, context):
         if note_id and summary:
             logger.info(f"[START] Detecting language for note: {note_id}")
 
-            ai_service = get_ai_service()
+            if existing_language:
+                logger.info(f"[SKIP] Language already known for note {note_id}: {existing_language}")
+                detected_language = existing_language
+            else:
+                ai_service = get_ai_service()
 
-            # 言語判定を実行（リトライ付き）
-            logger.info(f"[PROCESSING] Calling AI service for language detection...")
-            detected_language = call_ai_api_with_retry(
-                ai_service.detect_language,
-                summary,
-                max_retries=3,
-                initial_delay=1.0,
-            )
+                # 言語判定を実行（リトライ付き）
+                logger.info(f"[PROCESSING] Calling AI service for language detection...")
+                detected_language = call_ai_api_with_retry(
+                    ai_service.detect_language,
+                    summary,
+                    max_retries=3,
+                    initial_delay=1.0,
+                )
 
             logger.info(f"[SUCCESS] Language detected for note {note_id}: {detected_language}")
 

@@ -9,8 +9,10 @@ from sqlalchemy import select
 
 from birdxplorer_common.storage import (
     NoteRecord,
+    NoteTopicAssociation,
     RowNoteRecord,
     RowNoteStatusRecord,
+    RowPostRecord,
     TopicRecord,
 )
 from birdxplorer_etl import settings
@@ -204,8 +206,31 @@ def process_single_message(message: dict, postgresql, sqs_handler, topics_cache:
     existing_note = postgresql.query(NoteRecord).filter(NoteRecord.note_id == note_id).first()
 
     if existing_note:
-        logger.info(f"Note already exists in notes table: {note_id}")
-        return {"note_id": note_id, "status": "skipped", "message": "Note already exists"}
+        logger.info(f"Note already exists in notes table: {note_id}, checking downstream status")
+
+        # note_topicテーブルでトピック設定済みかチェック
+        has_topics = (
+            postgresql.query(NoteTopicAssociation).filter(NoteTopicAssociation.note_id == note_id).first() is not None
+        )
+
+        # row_postsテーブルで投稿取得済みかチェック
+        post_id = existing_note.post_id
+        has_post = False
+        if post_id:
+            has_post = postgresql.query(RowPostRecord).filter(RowPostRecord.post_id == post_id).first() is not None
+
+        logger.info(f"Note {note_id}: has_topics={has_topics}, has_post={has_post}")
+
+        return {
+            "note_id": note_id,
+            "status": "existing",
+            "detected_language": str(existing_note.language) if existing_note.language else "",
+            "summary": existing_note.summary,
+            "post_id": str(post_id) if post_id else None,
+            "created_at_millis": int(existing_note.created_at) if existing_note.created_at else None,
+            "skip_topic_detect": has_topics,
+            "skip_tweet_lookup": has_post,
+        }
 
     # 言語を取得（優先順位: メッセージ > DB）
     detected_language = message_language or note_row.language
@@ -233,8 +258,7 @@ def process_single_message(message: dict, postgresql, sqs_handler, topics_cache:
         )
         if sent_message_id:
             logger.info(
-                f"Language not available for note {note_id}, "
-                f"requeued with retry_count={retry_count + 1}, delay=30s"
+                f"Language not available for note {note_id}, " f"requeued with retry_count={retry_count + 1}, delay=30s"
             )
             return {"note_id": note_id, "status": "requeued", "retry_count": retry_count + 1}
         else:
@@ -311,11 +335,7 @@ def lambda_handler(event, context):
                 logger.error(f"Commit error: {e}")
                 postgresql.rollback()
                 # コミット失敗時は全メッセージを失敗扱い
-                return {
-                    "batchItemFailures": [
-                        {"itemIdentifier": record.get("messageId")} for record in records
-                    ]
-                }
+                return {"batchItemFailures": [{"itemIdentifier": record.get("messageId")} for record in records]}
 
         # 成功したノートに対してtopic-detect-queueに送信
         settings_config = load_settings()
@@ -327,7 +347,7 @@ def lambda_handler(event, context):
 
         topic_detect_queued = 0
         for result in results:
-            if result.get("status") != "success":
+            if result.get("status") not in ("success", "existing"):
                 continue
 
             note_id = result["note_id"]
@@ -356,6 +376,8 @@ def lambda_handler(event, context):
                 "post_id": post_id,
                 "topics": lambda_handler._topics_cache,
                 "processing_type": "topic_detect",
+                "skip_topic_detect": result.get("skip_topic_detect", False),
+                "skip_tweet_lookup": result.get("skip_tweet_lookup", False),
             }
 
             if sqs_handler.send_message(queue_url=settings.TOPIC_DETECT_QUEUE_URL, message_body=topic_detect_message):
@@ -376,9 +398,7 @@ def lambda_handler(event, context):
         logger.error(f"Lambda execution error: {str(e)}")
         # 全体エラー時は全メッセージを失敗扱い
         return {
-            "batchItemFailures": [
-                {"itemIdentifier": record.get("messageId")} for record in event.get("Records", [])
-            ]
+            "batchItemFailures": [{"itemIdentifier": record.get("messageId")} for record in event.get("Records", [])]
         }
     finally:
         postgresql.close()
