@@ -2,8 +2,8 @@
   "filter": {
     "languages": ["ja"],
     "keywords": [],
-    "start_millis": 1767193200000,
+    "start_millis": 1762009200000,
     "end_millis": 1771858740000
   },
-  "description": "Note filtering configuration. start_millis is required. end_millis is optional (null = no upper limit). Timestamps in milliseconds UTC. Current: 2026-01-01 00:00:00 JST ~ 2026-02-23 23:59:00 JST"
+  "description": "Note filtering configuration. start_millis is required. end_millis is optional (null = no upper limit). Timestamps in milliseconds UTC. Current: 2025-11-01 00:00:00 JST ~ 2026-02-23 23:59:00 JST"
 }
