@@ -22,6 +22,10 @@ from birdxplorer_common.storage import (
 def extract_data(postgresql: Session):
     logging.info("Downloading community notes data")
 
+    # 既存のrow_notesのnote_idをメモリに読み込み（1行ずつのDBクエリを削減）
+    existing_row_note_ids = set(r[0] for r in postgresql.query(RowNoteRecord.note_id).all())
+    logging.info(f"Loaded {len(existing_row_note_ids)} existing note IDs from row_notes")
+
     # Noteデータを取得してPostgreSQLに保存
     # 古い日から新しい日に向かって処理（新しいデータで上書きするため）
     start_date = datetime.now() - timedelta(days=2)  # 2日前から開始
@@ -64,7 +68,11 @@ def extract_data(postgresql: Session):
                 # 既にrows_to_addに追加済みの場合はスキップ
                 if note_id in rows_to_add:
                     continue
-                existing_note = postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id == note_id).first()
+                # セットで存在チェックし、既存の場合のみDBクエリで実レコードを取得
+                if note_id in existing_row_note_ids:
+                    existing_note = postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id == note_id).first()
+                else:
+                    existing_note = None
 
                 # BinaryBoolフィールドの値を正規化
                 binary_bool_fields = [
@@ -171,6 +179,9 @@ def extract_data(postgresql: Session):
                     postgresql.flush()
                     postgresql.commit()
 
+                    # 新規追加したnote_idをセットに追加
+                    existing_row_note_ids.update(rows_to_add.keys())
+
                     # バッチ処理後にSQSキューイング（新規追加のみ）
                     for note in rows_to_add.values():
                         enqueue_notes(note.note_id, note.summary, note.tweet_id, note.language)
@@ -182,6 +193,9 @@ def extract_data(postgresql: Session):
             postgresql.bulk_save_objects(list(rows_to_add.values()))
             postgresql.flush()
             postgresql.commit()
+
+            # 新規追加したnote_idをセットに追加
+            existing_row_note_ids.update(rows_to_add.keys())
 
             # 最後のバッチのSQSキューイング（新規追加のみ）
             for note in rows_to_add.values():
@@ -220,22 +234,22 @@ def extract_data(postgresql: Session):
                             reader = csv.DictReader(tsv_data, delimiter="\t")
                             reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
 
+                # notesテーブルのnote_idセットを取得（ステータス更新キュー送信判定用）
+                existing_note_record_ids = set(r[0] for r in postgresql.query(NoteRecord.note_id).all())
+                logging.info(f"Loaded {len(existing_note_record_ids)} existing note IDs from notes table")
+
                 rows_to_add = []
                 notes_to_update_status = []
+                skipped_count = 0
+                index = -1
                 for index, row in enumerate(reader):
                     for key, value in list(row.items()):
                         if value == "":
                             row[key] = None
 
-                    # 対応するnote_idがrow_notesテーブルに存在するかを確認
-                    note_exists = (
-                        postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id == row["note_id"]).first()
-                    )
-                    if note_exists is None:
-                        # 対応するnoteが存在しない場合はスキップ
-                        logging.warning(
-                            f"Note ID {row['note_id']} not found in row_notes table. Skipping note status record."
-                        )
+                    # 対応するnote_idがrow_notesテーブルに存在するかをセットで確認
+                    if row["note_id"] not in existing_row_note_ids:
+                        skipped_count += 1
                         continue
 
                     status = (
@@ -250,10 +264,7 @@ def extract_data(postgresql: Session):
                         rows_to_add.append(RowNoteStatusRecord(**row))
 
                         # NoteRecordが既に存在する場合、ステータス更新キューに追加
-                        existing_note_record = (
-                            postgresql.query(NoteRecord).filter(NoteRecord.note_id == row["note_id"]).first()
-                        )
-                        if existing_note_record:
+                        if row["note_id"] in existing_note_record_ids:
                             notes_to_update_status.append(row["note_id"])
 
                     if index % 1000 == 0:
@@ -271,6 +282,11 @@ def extract_data(postgresql: Session):
 
                 for note_id in notes_to_update_status:
                     enqueue_note_status_update(note_id)
+
+                logging.info(
+                    f"NoteStatusHistory processing complete: "
+                    f"{index + 1} total rows, {skipped_count} skipped (not in row_notes)"
+                )
 
         # 次の日に進む（古い日→新しい日の順で処理）
         date = date + timedelta(days=1)
