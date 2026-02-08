@@ -56,9 +56,7 @@ def process_post_transform(
         {"status": "not_found"} - maxリトライ超過（例外を発生させる）
     """
     # row_postsからデータを取得
-    row_post = postgresql.execute(
-        select(RowPostRecord).where(RowPostRecord.post_id == post_id)
-    ).scalar_one_or_none()
+    row_post = postgresql.execute(select(RowPostRecord).where(RowPostRecord.post_id == post_id)).scalar_one_or_none()
 
     if not row_post:
         # まだ保存されていない場合
@@ -96,34 +94,42 @@ def process_post_transform(
 
     # x_usersへのUPSERT
     if row_user:
-        stmt = insert(XUserRecord).values(
-            user_id=row_user.user_id,
-            name=row_user.name,
-            profile_image=row_user.profile_image_url,
-            followers_count=row_user.followers_count,
-            following_count=row_user.following_count,
-        ).on_conflict_do_nothing(index_elements=["user_id"])
+        stmt = (
+            insert(XUserRecord)
+            .values(
+                user_id=row_user.user_id,
+                name=row_user.name,
+                profile_image=row_user.profile_image_url,
+                followers_count=row_user.followers_count,
+                following_count=row_user.following_count,
+            )
+            .on_conflict_do_nothing(index_elements=["user_id"])
+        )
         postgresql.execute(stmt)
         logger.info(f"[STAGED] x_user {row_user.user_id} upsert staged")
 
     # postsへのUPSERT
-    stmt = insert(PostRecord).values(
-        post_id=row_post.post_id,
-        user_id=row_post.author_id,
-        text=row_post.text,
-        created_at=row_post.created_at,
-        aggregated_at=row_post.aggregated_at,
-        like_count=row_post.like_count,
-        repost_count=row_post.repost_count,
-        impression_count=row_post.impression_count,
-    ).on_conflict_do_nothing(index_elements=["post_id"])
+    stmt = (
+        insert(PostRecord)
+        .values(
+            post_id=row_post.post_id,
+            user_id=row_post.author_id,
+            text=row_post.text,
+            created_at=row_post.created_at,
+            aggregated_at=row_post.aggregated_at,
+            like_count=row_post.like_count,
+            repost_count=row_post.repost_count,
+            impression_count=row_post.impression_count,
+        )
+        .on_conflict_do_nothing(index_elements=["post_id"])
+    )
     postgresql.execute(stmt)
     logger.info(f"[STAGED] post {row_post.post_id} upsert staged")
 
     # row_post_mediaからメディアデータを取得し変換
-    row_media_list = postgresql.execute(
-        select(RowPostMediaRecord).where(RowPostMediaRecord.post_id == post_id)
-    ).scalars().all()
+    row_media_list = (
+        postgresql.execute(select(RowPostMediaRecord).where(RowPostMediaRecord.post_id == post_id)).scalars().all()
+    )
 
     for row_media in row_media_list:
         # mediaへのUPSERT
@@ -132,29 +138,39 @@ def process_post_transform(
         if f"-{post_id}" in original_media_key:
             original_media_key = original_media_key.replace(f"-{post_id}", "")
 
-        stmt = insert(MediaRecord).values(
-            media_key=original_media_key,
-            type=row_media.type,
-            url=row_media.url,
-            width=row_media.width,
-            height=row_media.height,
-        ).on_conflict_do_nothing(index_elements=["media_key"])
+        stmt = (
+            insert(MediaRecord)
+            .values(
+                media_key=original_media_key,
+                type=row_media.type,
+                url=row_media.url,
+                width=row_media.width,
+                height=row_media.height,
+            )
+            .on_conflict_do_nothing(index_elements=["media_key"])
+        )
         postgresql.execute(stmt)
 
         # post_media関連付けのUPSERT
-        stmt = insert(PostMediaAssociation).values(
-            post_id=post_id,
-            media_key=original_media_key,
-        ).on_conflict_do_nothing(index_elements=["post_id", "media_key"])
+        stmt = (
+            insert(PostMediaAssociation)
+            .values(
+                post_id=post_id,
+                media_key=original_media_key,
+            )
+            .on_conflict_do_nothing(index_elements=["post_id", "media_key"])
+        )
         postgresql.execute(stmt)
 
     if row_media_list:
         logger.info(f"[STAGED] {len(row_media_list)} media records for post {post_id}")
 
     # row_post_embed_urlsからリンクデータを取得し変換
-    row_urls = postgresql.execute(
-        select(RowPostEmbedURLRecord).where(RowPostEmbedURLRecord.post_id == post_id)
-    ).scalars().all()
+    row_urls = (
+        postgresql.execute(select(RowPostEmbedURLRecord).where(RowPostEmbedURLRecord.post_id == post_id))
+        .scalars()
+        .all()
+    )
 
     for row_url in row_urls:
         # unwound_urlを使用（最終的なリダイレクト先URL）
@@ -162,17 +178,25 @@ def process_post_transform(
         link_id = generate_link_id(final_url)
 
         # linksへのUPSERT
-        stmt = insert(LinkRecord).values(
-            link_id=link_id,
-            url=final_url,
-        ).on_conflict_do_nothing(index_elements=["link_id"])
+        stmt = (
+            insert(LinkRecord)
+            .values(
+                link_id=link_id,
+                url=final_url,
+            )
+            .on_conflict_do_nothing(index_elements=["link_id"])
+        )
         postgresql.execute(stmt)
 
         # post_link関連付けのUPSERT
-        stmt = insert(PostLinkAssociation).values(
-            post_id=post_id,
-            link_id=link_id,
-        ).on_conflict_do_nothing(index_elements=["post_id", "link_id"])
+        stmt = (
+            insert(PostLinkAssociation)
+            .values(
+                post_id=post_id,
+                link_id=link_id,
+            )
+            .on_conflict_do_nothing(index_elements=["post_id", "link_id"])
+        )
         postgresql.execute(stmt)
 
     if row_urls:
@@ -285,10 +309,7 @@ def test_local() -> None:
         "Records": [
             {
                 "messageId": "msg-1",
-                "body": json.dumps({
-                    "operation": "transform_post",
-                    "post_id": "1234567890"
-                }),
+                "body": json.dumps({"operation": "transform_post", "post_id": "1234567890"}),
             },
         ]
     }

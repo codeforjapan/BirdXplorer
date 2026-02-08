@@ -106,9 +106,7 @@ def call_ai_api_with_retry(
                 logger.error(f"[RETRY_EXHAUSTED] All {max_retries} retries failed: {e}")
                 raise AIAPIError(f"AI API call failed after {max_retries} retries: {e}") from e
 
-            logger.warning(
-                f"[RETRY] Attempt {attempt + 1}/{max_retries} failed: {e}. " f"Retrying in {delay:.1f}s..."
-            )
+            logger.warning(f"[RETRY] Attempt {attempt + 1}/{max_retries} failed: {e}. " f"Retrying in {delay:.1f}s...")
             time.sleep(delay)
             delay = min(delay * backoff_factor, max_delay)
 
