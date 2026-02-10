@@ -99,12 +99,13 @@ def connect_to_endpoint(url: str) -> dict:
         # レート制限情報を返す（呼び出し元で遅延再キューイング）
         return {"status": "rate_limited", "wait_time": wait_time}
     elif response.status_code == 401:
-        logger.error("X API authentication failed (401). Check X_BEARER_TOKEN in environment/secrets.")
+        logger.error("[DLQ_CAUSE:AUTH_FAILED] X API 401 Unauthorized. Check X_BEARER_TOKEN.")
         raise Exception("X API authentication failed: 401 Unauthorized. Token may be invalid or expired.")
     elif response.status_code == 403:
-        logger.error("X API access forbidden (403). Check API tier/permissions.")
+        logger.error("[DLQ_CAUSE:ACCESS_FORBIDDEN] X API 403 Forbidden. Check API tier/permissions.")
         raise Exception("X API access forbidden: 403 Forbidden. Check API tier/permissions.")
     elif response.status_code != 200:
+        logger.error(f"[DLQ_CAUSE:API_ERROR] X API returned {response.status_code}")
         raise Exception("Request returned an error: {} {}".format(response.status_code, response.text))
 
     return response.json()
@@ -187,7 +188,8 @@ def lambda_handler(event: dict, context: Any) -> dict:
                 if message_id:
                     logger.info(f"[SQS_SUCCESS] Sent transform request for skipped tweet {tweet_id}")
                 else:
-                    logger.error(f"[SQS_FAILED] Failed to send transform request for skipped tweet {tweet_id}")
+                    logger.error(f"[DLQ_CAUSE:SQS_SEND_FAILED] tweet_id={tweet_id} queue=post-transform-queue")
+                    raise Exception(f"Failed to send transform request for skipped tweet {tweet_id}")
             else:
                 logger.warning("[CONFIG_WARNING] POST_TRANSFORM_QUEUE_URL not configured, skipping transform enqueue")
             return {"statusCode": 200, "body": json.dumps({"skipped": True, "tweet_id": tweet_id})}
@@ -204,8 +206,8 @@ def lambda_handler(event: dict, context: Any) -> dict:
                 # レート制限の場合は遅延付きで再キューイング
                 if status == "rate_limited":
                     wait_time = post.get("wait_time", 65)
-                    # 最小65秒（レート制限回避）、最大900秒（SQS制限）
-                    delay_seconds = max(65, min(wait_time, 900))
+                    # 最小5秒（レート制限回避）、最大900秒（SQS制限）
+                    delay_seconds = max(5, min(wait_time, 900))
 
                     # 元のメッセージを遅延付きで再送信
                     tweet_lookup_queue_url = os.environ.get("TWEET_LOOKUP_QUEUE_URL")
@@ -231,15 +233,17 @@ def lambda_handler(event: dict, context: Any) -> dict:
                         if message_id:
                             logger.info(f"[REQUEUE_SUCCESS] Message requeued with delay, messageId={message_id}")
                         else:
-                            logger.error("[REQUEUE_FAILED] Failed to requeue message")
-                            raise Exception("Failed to requeue rate-limited message")
+                            logger.error(f"[DLQ_CAUSE:REQUEUE_FAILED] tweet_id={tweet_id} queue=tweet-lookup-queue")
+                            raise Exception(f"Failed to requeue rate-limited message for tweet {tweet_id}")
                     else:
-                        logger.error("[CONFIG_ERROR] TWEET_LOOKUP_QUEUE_URL not configured")
-                        raise Exception("TWEET_LOOKUP_QUEUE_URL not configured")
+                        logger.error(
+                            f"[DLQ_CAUSE:CONFIG_ERROR] tweet_id={tweet_id} TWEET_LOOKUP_QUEUE_URL not configured"
+                        )
+                        raise Exception(f"TWEET_LOOKUP_QUEUE_URL not configured, tweet_id={tweet_id}")
 
-                    # レート制限時も60秒スリープして、連鎖的なレート制限ヒットを防ぐ
-                    logger.info("[WAIT] Sleeping 60 seconds to prevent rate limit cascade...")
-                    time.sleep(60)
+                    # レート制限時も5秒スリープして、連鎖的なレート制限ヒットを防ぐ
+                    logger.info("[WAIT] Sleeping 5 seconds to prevent rate limit cascade...")
+                    time.sleep(5)
 
                     return {
                         "statusCode": 200,
@@ -276,7 +280,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
 
             # dataがない場合は予期しないエラー
             if "data" not in post:
-                logger.error(f"[ERROR] Unexpected response for tweet {tweet_id}: {json.dumps(post)}")
+                logger.error(f"[DLQ_CAUSE:UNEXPECTED_RESPONSE] tweet_id={tweet_id} response={json.dumps(post)}")
                 raise Exception(f"Unexpected API response for tweet: {tweet_id}")
 
             created_at = datetime.strptime(post["data"]["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ").replace(
@@ -370,14 +374,11 @@ def lambda_handler(event: dict, context: Any) -> dict:
                 if message_id:
                     logger.info(f"[SQS_SUCCESS] Sent post data to db-write queue, messageId={message_id}")
                 else:
-                    logger.error("[SQS_FAILED] Failed to send post data to db-write queue")
-                    return {
-                        "statusCode": 500,
-                        "body": json.dumps({"error": "Failed to send post data to db-write queue"}),
-                    }
+                    logger.error(f"[DLQ_CAUSE:SQS_SEND_FAILED] tweet_id={tweet_id} queue=db-write-queue")
+                    raise Exception(f"Failed to send post data to db-write queue for tweet {tweet_id}")
             else:
-                logger.error("[CONFIG_ERROR] DB_WRITE_QUEUE_URL not configured")
-                return {"statusCode": 500, "body": json.dumps({"error": "DB_WRITE_QUEUE_URL not configured"})}
+                logger.error(f"[DLQ_CAUSE:CONFIG_ERROR] tweet_id={tweet_id} DB_WRITE_QUEUE_URL not configured")
+                raise Exception(f"DB_WRITE_QUEUE_URL not configured, tweet_id={tweet_id}")
 
             # Post Transform Queueにメッセージを送信（遅延付き）
             post_transform_queue_url = os.environ.get("POST_TRANSFORM_QUEUE_URL")
@@ -404,10 +405,10 @@ def lambda_handler(event: dict, context: Any) -> dict:
             logger.info("[COMPLETED] Postlookup Lambda completed successfully")
             logger.info("=" * 80)
 
-            # レート制限回避のため65秒待機（X API: 15分で15リクエスト = 60秒/件 + バッファ5秒）
+            # レート制限回避のため2秒待機（X API: 30リクエスト/分 = 2秒/件）
             # 新規メッセージはtopic_detectでSQS delay設定済みだが、既存メッセージ対応のため残す
-            logger.info("[WAIT] Sleeping 65 seconds to avoid rate limit...")
-            time.sleep(65)
+            logger.info("[WAIT] Sleeping 2 seconds to avoid rate limit...")
+            time.sleep(2)
 
             return {"statusCode": 200, "body": json.dumps({"tweet_id": tweet_id, "data": post})}
         else:
