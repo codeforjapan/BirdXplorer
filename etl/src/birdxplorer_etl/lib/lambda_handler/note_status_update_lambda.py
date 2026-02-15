@@ -82,7 +82,7 @@ def lambda_handler(event, context):
                     existing_history = []
 
                 if current_status and timestamp_millis:
-                    timestamp_seconds = timestamp_millis / 1000
+                    timestamp_seconds = int(timestamp_millis) / 1000
                     date_str = datetime.fromtimestamp(timestamp_seconds).isoformat()
 
                     new_history_entry = {"status": current_status, "date": date_str}
