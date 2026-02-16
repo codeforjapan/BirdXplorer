@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from birdxplorer_common.storage import (
     NoteRecord,
+    RowNoteRatingRecord,
     RowNoteRecord,
     RowNoteStatusRecord,
 )
@@ -272,6 +273,9 @@ def extract_data(postgresql: Session):
                 for note_id in notes_to_update_status:
                     enqueue_note_status_update(note_id)
 
+            # 評価データを取得して保存
+            extract_ratings(postgresql, dateString)
+
         # 次の日に進む（古い日→新しい日の順で処理）
         date = date + timedelta(days=1)
 
@@ -325,3 +329,165 @@ def enqueue_note_status_update(note_id: str):
         logging.info(f"Enqueued note {note_id} to note-status-update queue, messageId={response.get('MessageId')}")
     except Exception as e:
         logging.error(f"Failed to enqueue note {note_id} to note-status-update queue: {e}")
+
+
+def extract_ratings(postgresql: Session, dateString: str):
+    """
+    指定日付の評価データをダウンロードしてrow_note_ratingsテーブルに保存
+    ratings-00000.tsv から ratings-00006.tsv まで7つのファイルを処理
+
+    Args:
+        postgresql: データベースセッション
+        dateString: 日付文字列 (YYYY/MM/DD形式)
+    """
+    if settings.USE_DUMMY_DATA:
+        # ダミーデータには評価データが含まれていないためスキップ
+        logging.info("Skipping ratings extraction for dummy data")
+        return
+
+    # ratings-00000 から ratings-00006 まで7つのファイルを処理
+    for file_index in range(7):
+        ratings_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/ratings/ratings-0000{file_index}.zip"
+        logging.info(f"Fetching ratings from: {ratings_url}")
+
+        try:
+            res = requests.get(ratings_url)
+        except Exception as e:
+            logging.error(f"Failed to download ratings data (file {file_index}): {e}")
+            continue
+
+        if res.status_code != 200:
+            logging.warning(
+                f"Ratings data not available for {dateString} file {file_index} (status code: {res.status_code})"
+            )
+            continue
+
+        try:
+            with zipfile.ZipFile(io.BytesIO(res.content)) as zip_file:
+                tsv_filename = f"ratings-0000{file_index}.tsv"
+                if tsv_filename not in zip_file.namelist():
+                    logging.error(f"TSV file {tsv_filename} not found in the zip file.")
+                    continue
+
+                with zip_file.open(tsv_filename) as tsv_file:
+                    tsv_data = tsv_file.read().decode("utf-8").splitlines()
+                    reader = csv.DictReader(tsv_data, delimiter="\t")
+                    reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
+
+            # BinaryBoolフィールドのリスト（評価データ用）
+            binary_bool_fields = [
+                "agree",
+                "disagree",
+                "helpful",
+                "not_helpful",
+                "helpful_other",
+                "helpful_informative",
+                "helpful_clear",
+                "helpful_empathetic",
+                "helpful_good_sources",
+                "helpful_unique_context",
+                "helpful_addresses_claim",
+                "helpful_important_context",
+                "helpful_unbiased_language",
+                "not_helpful_other",
+                "not_helpful_incorrect",
+                "not_helpful_sources_missing_or_unreliable",
+                "not_helpful_opinion_speculation_or_bias",
+                "not_helpful_missing_key_points",
+                "not_helpful_outdated",
+                "not_helpful_hard_to_understand",
+                "not_helpful_argumentative_or_biased",
+                "not_helpful_off_topic",
+                "not_helpful_spam_harassment_or_abuse",
+                "not_helpful_irrelevant_sources",
+                "not_helpful_opinion_speculation",
+                "not_helpful_note_not_needed",
+            ]
+
+            rows_to_add = []
+            for index, row in enumerate(reader):
+                note_id = row.get("note_id")
+                rater_participant_id = row.get("rater_participant_id")
+
+                if not note_id or not rater_participant_id:
+                    logging.warning("Missing note_id or rater_participant_id in rating record, skipping")
+                    continue
+
+                # 対応するnote_idがrow_notesテーブルに存在するかを確認
+                note_exists = postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id == note_id).first()
+                if note_exists is None:
+                    # 対応するnoteが存在しない場合はスキップ
+                    continue
+
+                # BinaryBoolフィールドの正規化
+                for field in binary_bool_fields:
+                    if field in row:
+                        value = row[field]
+                        if value == "" or value is None or value == "empty":
+                            row[field] = "0"
+                        elif value not in ["0", "1"]:
+                            logging.warning(
+                                f"Unexpected value '{value}' for field '{field}' in rating "
+                                f"(note_id={note_id}). Setting to '0'."
+                            )
+                            row[field] = "0"
+
+                # helpfulness_levelフィールドのバリデーション
+                if "helpfulness_level" in row:
+                    value = row["helpfulness_level"]
+                    if value not in ["HELPFUL", "SOMEWHAT_HELPFUL", "NOT_HELPFUL"]:
+                        if value == "" or value is None:
+                            row["helpfulness_level"] = "NOT_HELPFUL"  # デフォルト値
+                        else:
+                            logging.warning(
+                                f"Invalid helpfulness_level '{value}' for note_id={note_id}, setting to 'NOT_HELPFUL'"
+                            )
+                            row["helpfulness_level"] = "NOT_HELPFUL"
+
+                # 空文字列フィールドをNoneに変換
+                for key, value in row.items():
+                    if value == "" and key not in ["helpfulness_level"]:
+                        row[key] = None
+
+                # 既存レコードの確認（composite primary key）
+                existing_rating = (
+                    postgresql.query(RowNoteRatingRecord)
+                    .filter(
+                        RowNoteRatingRecord.note_id == note_id,
+                        RowNoteRatingRecord.rater_participant_id == rater_participant_id,
+                    )
+                    .first()
+                )
+
+                if existing_rating:
+                    # 既存レコードを更新
+                    for key, value in row.items():
+                        if hasattr(existing_rating, key):
+                            setattr(existing_rating, key, value)
+                else:
+                    # 新規レコードを追加
+                    try:
+                        rating_record = RowNoteRatingRecord(**row)
+                        rows_to_add.append(rating_record)
+                    except Exception as e:
+                        logging.error(f"Failed to create RowNoteRatingRecord for note_id={note_id}: {e}")
+                        continue
+
+                # 1000件ごとにバッチ処理
+                if index % 1000 == 0 and rows_to_add:
+                    postgresql.bulk_save_objects(rows_to_add)
+                    postgresql.commit()
+                    logging.info(f"Saved {len(rows_to_add)} rating records (batch at index {index}, file {file_index})")
+                    rows_to_add = []
+
+            # 最後のバッチを処理
+            if rows_to_add:
+                postgresql.bulk_save_objects(rows_to_add)
+                postgresql.commit()
+                logging.info(f"Saved final batch of {len(rows_to_add)} rating records (file {file_index})")
+
+            logging.info(f"Successfully processed ratings file {file_index} for {dateString}")
+
+        except Exception as e:
+            logging.error(f"Error processing ratings data for {dateString} file {file_index}: {e}")
+            postgresql.rollback()

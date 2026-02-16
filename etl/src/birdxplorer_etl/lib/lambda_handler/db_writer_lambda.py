@@ -37,12 +37,16 @@ def process_insert_note(postgresql: Any, note_id: str, data: dict) -> None:
     )
 
     # UPSERT: 既存なら何もしない
-    stmt = insert(RowNoteRecord).values(
-        note_id=note_data["note_id"],
-        summary=note_data["summary"],
-        tweet_id=note_data["tweet_id"],
-        created_at_millis=note_data["created_at_millis"],
-    ).on_conflict_do_nothing(index_elements=["note_id"])
+    stmt = (
+        insert(RowNoteRecord)
+        .values(
+            note_id=note_data["note_id"],
+            summary=note_data["summary"],
+            tweet_id=note_data["tweet_id"],
+            created_at_millis=note_data["created_at_millis"],
+        )
+        .on_conflict_do_nothing(index_elements=["note_id"])
+    )
 
     postgresql.execute(stmt)
     logger.info(f"[STAGED] Note {note_data['note_id']} upsert staged for commit")
@@ -87,8 +91,7 @@ def process_update_topics(postgresql: Any, note_id: str, data: dict) -> None:
         # 有効なtopic_idをbulk insert
         if valid_topic_ids:
             postgresql.bulk_insert_mappings(
-                NoteTopicAssociation,
-                [{"note_id": note_id, "topic_id": tid} for tid in valid_topic_ids]
+                NoteTopicAssociation, [{"note_id": note_id, "topic_id": tid} for tid in valid_topic_ids]
             )
             logger.info(
                 f"[STAGED] Topics for note {note_id}: "
@@ -109,39 +112,47 @@ def process_save_post_data(postgresql: Any, data: dict) -> None:
     # ユーザーデータのUPSERT
     user_data = post_data.get("user")
     if user_data:
-        stmt = insert(RowUserRecord).values(
-            user_id=user_data["user_id"],
-            name=user_data.get("name"),
-            user_name=user_data.get("user_name"),
-            description=user_data.get("description"),
-            profile_image_url=user_data.get("profile_image_url"),
-            followers_count=user_data.get("followers_count"),
-            following_count=user_data.get("following_count"),
-            tweet_count=user_data.get("tweet_count"),
-            verified=user_data.get("verified", False),
-            verified_type=user_data.get("verified_type", ""),
-            location=user_data.get("location", ""),
-            url=user_data.get("url", ""),
-        ).on_conflict_do_nothing(index_elements=["user_id"])
+        stmt = (
+            insert(RowUserRecord)
+            .values(
+                user_id=user_data["user_id"],
+                name=user_data.get("name"),
+                user_name=user_data.get("user_name"),
+                description=user_data.get("description"),
+                profile_image_url=user_data.get("profile_image_url"),
+                followers_count=user_data.get("followers_count"),
+                following_count=user_data.get("following_count"),
+                tweet_count=user_data.get("tweet_count"),
+                verified=user_data.get("verified", False),
+                verified_type=user_data.get("verified_type", ""),
+                location=user_data.get("location", ""),
+                url=user_data.get("url", ""),
+            )
+            .on_conflict_do_nothing(index_elements=["user_id"])
+        )
 
         postgresql.execute(stmt)
         logger.info(f"[STAGED] User {user_data['user_id']} upsert staged for commit")
 
     # ポストデータのUPSERT
-    stmt = insert(RowPostRecord).values(
-        post_id=post_data["post_id"],
-        author_id=post_data["author_id"],
-        text=post_data["text"],
-        created_at=post_data["created_at"],
-        like_count=post_data["like_count"],
-        repost_count=post_data["repost_count"],
-        bookmark_count=post_data["bookmark_count"],
-        impression_count=post_data["impression_count"],
-        quote_count=post_data["quote_count"],
-        reply_count=post_data["reply_count"],
-        lang=post_data["lang"],
-        extracted_at=post_data["extracted_at"],
-    ).on_conflict_do_nothing(index_elements=["post_id"])
+    stmt = (
+        insert(RowPostRecord)
+        .values(
+            post_id=post_data["post_id"],
+            author_id=post_data["author_id"],
+            text=post_data["text"],
+            created_at=post_data["created_at"],
+            like_count=post_data["like_count"],
+            repost_count=post_data["repost_count"],
+            bookmark_count=post_data["bookmark_count"],
+            impression_count=post_data["impression_count"],
+            quote_count=post_data["quote_count"],
+            reply_count=post_data["reply_count"],
+            lang=post_data["lang"],
+            extracted_at=post_data["extracted_at"],
+        )
+        .on_conflict_do_nothing(index_elements=["post_id"])
+    )
 
     postgresql.execute(stmt)
     logger.info(f"[STAGED] Post {post_data['post_id']} upsert staged for commit")
@@ -150,14 +161,18 @@ def process_save_post_data(postgresql: Any, data: dict) -> None:
     media_list = post_data.get("media", [])
     if media_list:
         for m in media_list:
-            stmt = insert(RowPostMediaRecord).values(
-                media_key=m["media_key"],
-                type=m["type"],
-                url=m["url"],
-                width=m["width"],
-                height=m["height"],
-                post_id=post_data["post_id"],
-            ).on_conflict_do_nothing(index_elements=["media_key"])
+            stmt = (
+                insert(RowPostMediaRecord)
+                .values(
+                    media_key=m["media_key"],
+                    type=m["type"],
+                    url=m["url"],
+                    width=m["width"],
+                    height=m["height"],
+                    post_id=post_data["post_id"],
+                )
+                .on_conflict_do_nothing(index_elements=["media_key"])
+            )
             postgresql.execute(stmt)
         logger.info(f"[STAGED] {len(media_list)} media records upsert staged for commit")
 
@@ -165,12 +180,16 @@ def process_save_post_data(postgresql: Any, data: dict) -> None:
     embed_urls = post_data.get("embed_urls", [])
     if embed_urls:
         for url_data in embed_urls:
-            stmt = insert(RowPostEmbedURLRecord).values(
-                post_id=post_data["post_id"],
-                url=url_data.get("url"),
-                expanded_url=url_data.get("expanded_url"),
-                unwound_url=url_data.get("unwound_url"),
-            ).on_conflict_do_nothing(index_elements=["post_id", "url"])
+            stmt = (
+                insert(RowPostEmbedURLRecord)
+                .values(
+                    post_id=post_data["post_id"],
+                    url=url_data.get("url"),
+                    expanded_url=url_data.get("expanded_url"),
+                    unwound_url=url_data.get("unwound_url"),
+                )
+                .on_conflict_do_nothing(index_elements=["post_id", "url"])
+            )
             postgresql.execute(stmt)
         logger.info(f"[STAGED] {len(embed_urls)} embed URLs upsert staged for commit")
 
@@ -295,27 +314,21 @@ def test_local() -> None:
         "Records": [
             {
                 "messageId": "msg-1",
-                "body": json.dumps({
-                    "operation": "update_language",
-                    "note_id": "1234567890",
-                    "data": {"language": "ja"}
-                }),
+                "body": json.dumps(
+                    {"operation": "update_language", "note_id": "1234567890", "data": {"language": "ja"}}
+                ),
             },
             {
                 "messageId": "msg-2",
-                "body": json.dumps({
-                    "operation": "update_topics",
-                    "note_id": "1234567890",
-                    "data": {"topic_ids": [1, 2, 3]}
-                }),
+                "body": json.dumps(
+                    {"operation": "update_topics", "note_id": "1234567890", "data": {"topic_ids": [1, 2, 3]}}
+                ),
             },
             {
                 "messageId": "msg-3",
-                "body": json.dumps({
-                    "operation": "update_language",
-                    "note_id": "0987654321",
-                    "data": {"language": "en"}
-                }),
+                "body": json.dumps(
+                    {"operation": "update_language", "note_id": "0987654321", "data": {"language": "en"}}
+                ),
             },
         ]
     }
