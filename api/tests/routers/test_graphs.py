@@ -1,5 +1,6 @@
 """Tests for graph API endpoints."""
 
+from datetime import datetime, timedelta, timezone
 from typing import List
 
 from fastapi.testclient import TestClient
@@ -7,9 +8,25 @@ from fastapi.testclient import TestClient
 from birdxplorer_common.models import Note
 
 
+def get_timestamp_range(days: int) -> tuple[int, int]:
+    """Helper function to generate timestamp range for testing.
+
+    Args:
+        days: Number of days in the range (inclusive)
+
+    Returns:
+        Tuple of (start_timestamp, end_timestamp) in milliseconds
+    """
+    # Use a timestamp 1 hour in the past to avoid race conditions with TwitterTimestamp validation
+    end_date = datetime.now(timezone.utc) - timedelta(hours=1)
+    start_date = end_date - timedelta(days=days - 1)
+    return int(start_date.timestamp() * 1000), int(end_date.timestamp() * 1000)
+
+
 def test_daily_notes_get_success(client: TestClient, note_samples: List[Note]) -> None:
     """Test GET /api/v1/graphs/daily-notes returns valid response."""
-    response = client.get("/api/v1/graphs/daily-notes?period=1week")
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/daily-notes?start_date={start_ts}&end_date={end_ts}")
 
     # Print error for debugging if not 200
     if response.status_code != 200:
@@ -35,7 +52,8 @@ def test_daily_notes_get_success(client: TestClient, note_samples: List[Note]) -
 
 def test_daily_notes_get_with_status_filter(client: TestClient, note_samples: List[Note]) -> None:
     """Test GET /api/v1/graphs/daily-notes with status filter."""
-    response = client.get("/api/v1/graphs/daily-notes?period=1week&status=published")
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/daily-notes?start_date={start_ts}&end_date={end_ts}&status=published")
     assert response.status_code == 200
 
     res_json = response.json()
@@ -43,36 +61,54 @@ def test_daily_notes_get_with_status_filter(client: TestClient, note_samples: Li
     assert isinstance(res_json["data"], list)
 
 
-def test_daily_notes_get_different_periods(client: TestClient, note_samples: List[Note]) -> None:
-    """Test GET /api/v1/graphs/daily-notes with different period parameters."""
-    periods = ["1week", "1month", "3months", "6months", "1year"]
+def test_daily_notes_get_different_ranges(client: TestClient, note_samples: List[Note]) -> None:
+    """Test GET /api/v1/graphs/daily-notes with different date ranges."""
+    ranges = [7, 14, 30]  # Different day ranges
 
-    for period in periods:
-        response = client.get(f"/api/v1/graphs/daily-notes?period={period}")
-        assert response.status_code == 200, f"Failed for period={period}"
+    for days in ranges:
+        start_ts, end_ts = get_timestamp_range(days)
+        response = client.get(f"/api/v1/graphs/daily-notes?start_date={start_ts}&end_date={end_ts}")
+        assert response.status_code == 200, f"Failed for {days} days range"
 
         res_json = response.json()
         assert "data" in res_json
         assert isinstance(res_json["data"], list)
 
 
-def test_daily_notes_get_missing_period(client: TestClient) -> None:
-    """Test GET /api/v1/graphs/daily-notes without required period parameter returns error."""
+def test_daily_notes_get_missing_timestamps(client: TestClient) -> None:
+    """Test GET /api/v1/graphs/daily-notes without required timestamp parameters returns error."""
+    # Missing both parameters
     response = client.get("/api/v1/graphs/daily-notes")
-    # FastAPI should return 422 for missing required parameter
+    assert response.status_code == 422
+
+    # Missing end_date
+    start_ts, _ = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/daily-notes?start_date={start_ts}")
+    assert response.status_code == 422
+
+    # Missing start_date
+    _, end_ts = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/daily-notes?end_date={end_ts}")
     assert response.status_code == 422
 
 
-def test_daily_notes_get_invalid_period(client: TestClient) -> None:
-    """Test GET /api/v1/graphs/daily-notes with invalid period returns error."""
-    response = client.get("/api/v1/graphs/daily-notes?period=invalid")
-    # FastAPI Literal validation should return 422
-    assert response.status_code == 422
+def test_daily_notes_get_invalid_timestamp_range(client: TestClient) -> None:
+    """Test GET /api/v1/graphs/daily-notes with invalid timestamp range returns error."""
+    # start_date > end_date
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/daily-notes?start_date={end_ts}&end_date={start_ts}")
+    assert response.status_code == 400
+
+    # Range exceeds 30 days (need 32 days since get_timestamp_range uses days-1)
+    start_ts, end_ts = get_timestamp_range(32)
+    response = client.get(f"/api/v1/graphs/daily-notes?start_date={start_ts}&end_date={end_ts}")
+    assert response.status_code == 400
 
 
 def test_daily_notes_get_invalid_status(client: TestClient) -> None:
     """Test GET /api/v1/graphs/daily-notes with invalid status returns error."""
-    response = client.get("/api/v1/graphs/daily-notes?period=1week&status=invalid")
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/daily-notes?start_date={start_ts}&end_date={end_ts}&status=invalid")
     # FastAPI Literal validation should return 422
     assert response.status_code == 422
 
@@ -80,9 +116,10 @@ def test_daily_notes_get_invalid_status(client: TestClient) -> None:
 def test_daily_notes_get_all_status_values(client: TestClient, note_samples: List[Note]) -> None:
     """Test GET /api/v1/graphs/daily-notes with all valid status values."""
     statuses = ["all", "published", "evaluating", "unpublished", "temporarilyPublished"]
+    start_ts, end_ts = get_timestamp_range(7)
 
     for status in statuses:
-        response = client.get(f"/api/v1/graphs/daily-notes?period=1week&status={status}")
+        response = client.get(f"/api/v1/graphs/daily-notes?start_date={start_ts}&end_date={end_ts}&status={status}")
         assert response.status_code == 200, f"Failed for status={status}"
 
         res_json = response.json()
@@ -91,7 +128,8 @@ def test_daily_notes_get_all_status_values(client: TestClient, note_samples: Lis
 
 def test_daily_notes_gap_filling(client: TestClient, note_samples: List[Note]) -> None:
     """Test GET /api/v1/graphs/daily-notes fills gaps in date series."""
-    response = client.get("/api/v1/graphs/daily-notes?period=1week")
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/daily-notes?start_date={start_ts}&end_date={end_ts}")
     assert response.status_code == 200
 
     res_json = response.json()
@@ -99,7 +137,7 @@ def test_daily_notes_gap_filling(client: TestClient, note_samples: List[Note]) -
 
     if len(data) >= 2:
         # Verify dates are continuous (no gaps)
-        from datetime import date, timedelta
+        from datetime import date
 
         prev_date = None
         for item in data:
@@ -113,7 +151,8 @@ def test_daily_notes_gap_filling(client: TestClient, note_samples: List[Note]) -
 
 def test_daily_notes_response_format(client: TestClient, note_samples: List[Note]) -> None:
     """Test GET /api/v1/graphs/daily-notes response follows GraphListResponse format."""
-    response = client.get("/api/v1/graphs/daily-notes?period=1week")
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/daily-notes?start_date={start_ts}&end_date={end_ts}")
     assert response.status_code == 200
 
     res_json = response.json()
@@ -137,7 +176,8 @@ def test_daily_notes_response_format(client: TestClient, note_samples: List[Note
 
 def test_daily_notes_counts_are_non_negative(client: TestClient, note_samples: List[Note]) -> None:
     """Test GET /api/v1/graphs/daily-notes returns non-negative counts."""
-    response = client.get("/api/v1/graphs/daily-notes?period=1week")
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/daily-notes?start_date={start_ts}&end_date={end_ts}")
     assert response.status_code == 200
 
     res_json = response.json()
@@ -151,7 +191,8 @@ def test_daily_notes_counts_are_non_negative(client: TestClient, note_samples: L
 # User Story 2: Daily Posts Tests (T029-T031)
 def test_daily_posts_get_success(client: TestClient, note_samples: List[Note]) -> None:
     """Test GET /api/v1/graphs/daily-posts returns valid response."""
-    response = client.get("/api/v1/graphs/daily-posts?range=2006-07_2006-08")
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/daily-posts?start_date={start_ts}&end_date={end_ts}")
 
     # Print error for debugging if not 200
     if response.status_code != 200:
@@ -174,23 +215,22 @@ def test_daily_posts_get_success(client: TestClient, note_samples: List[Note]) -
 
 
 def test_daily_posts_range_validation(client: TestClient) -> None:
-    """Test GET /api/v1/graphs/daily-posts validates range format."""
-    # Invalid format (missing underscore)
-    response = client.get("/api/v1/graphs/daily-posts?range=2025-01-2025-03")
-    assert response.status_code == 400 or response.status_code == 422
+    """Test GET /api/v1/graphs/daily-posts validates timestamp range."""
+    # start_date > end_date
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/daily-posts?start_date={end_ts}&end_date={start_ts}")
+    assert response.status_code == 400
 
-    # Invalid month format
-    response = client.get("/api/v1/graphs/daily-posts?range=2025-13_2025-14")
-    assert response.status_code == 400 or response.status_code == 422
-
-    # Start > End
-    response = client.get("/api/v1/graphs/daily-posts?range=2025-03_2025-01")
-    assert response.status_code == 400 or response.status_code == 422
+    # Range exceeds 30 days (need 32 days since get_timestamp_range uses days-1)
+    start_ts, end_ts = get_timestamp_range(32)
+    response = client.get(f"/api/v1/graphs/daily-posts?start_date={start_ts}&end_date={end_ts}")
+    assert response.status_code == 400
 
 
 def test_daily_posts_without_notes_default_unpublished(client: TestClient, note_samples: List[Note]) -> None:
     """Test posts without notes default to unpublished status."""
-    response = client.get("/api/v1/graphs/daily-posts?range=2006-07_2006-08&status=unpublished")
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/daily-posts?start_date={start_ts}&end_date={end_ts}&status=unpublished")
     assert response.status_code == 200
 
     res_json = response.json()
@@ -200,7 +240,9 @@ def test_daily_posts_without_notes_default_unpublished(client: TestClient, note_
 # User Story 3: Notes Annual Tests (T041-T043)
 def test_notes_annual_get_success(client: TestClient, note_samples: List[Note]) -> None:
     """Test GET /api/v1/graphs/notes-annual returns valid response."""
-    response = client.get("/api/v1/graphs/notes-annual?range=2006-01_2006-12")
+    # Use a 365-day range (12 months)
+    start_ts, end_ts = get_timestamp_range(365)
+    response = client.get(f"/api/v1/graphs/notes-annual?start_date={start_ts}&end_date={end_ts}")
 
     # Print error for debugging if not 200
     if response.status_code != 200:
@@ -227,7 +269,8 @@ def test_notes_annual_get_success(client: TestClient, note_samples: List[Note]) 
 
 def test_notes_annual_publication_rate_calculation(client: TestClient, note_samples: List[Note]) -> None:
     """Test publication rate calculation (published / total)."""
-    response = client.get("/api/v1/graphs/notes-annual?range=2006-01_2006-12")
+    start_ts, end_ts = get_timestamp_range(365)
+    response = client.get(f"/api/v1/graphs/notes-annual?start_date={start_ts}&end_date={end_ts}")
     assert response.status_code == 200
 
     res_json = response.json()
@@ -244,8 +287,13 @@ def test_notes_annual_publication_rate_calculation(client: TestClient, note_samp
 
 def test_notes_annual_zero_division_handling(client: TestClient, note_samples: List[Note]) -> None:
     """Test zero-division handling (0 notes returns 0.0 rate)."""
-    # Request range with no data
-    response = client.get("/api/v1/graphs/notes-annual?range=2000-01_2000-02")
+    # Request range with potentially no data (old dates)
+    start_date = datetime(2006, 7, 15, tzinfo=timezone.utc)
+    end_date = start_date + timedelta(days=30)
+    start_ts = int(start_date.timestamp() * 1000)
+    end_ts = int(end_date.timestamp() * 1000)
+
+    response = client.get(f"/api/v1/graphs/notes-annual?start_date={start_ts}&end_date={end_ts}")
     assert response.status_code == 200
 
     res_json = response.json()
@@ -254,21 +302,23 @@ def test_notes_annual_zero_division_handling(client: TestClient, note_samples: L
         assert item["publicationRate"] == 0.0
 
 
-def test_notes_annual_range_validation_max_24_months(client: TestClient) -> None:
-    """Test range validation (max 24 months)."""
-    # Request range exceeding 24 months
-    response = client.get("/api/v1/graphs/notes-annual?range=2020-01_2023-01")
+def test_notes_annual_range_validation_max_365_days(client: TestClient) -> None:
+    """Test range validation (max 365 days)."""
+    # Request range exceeding 365 days (need 367 days since get_timestamp_range uses days-1)
+    start_ts, end_ts = get_timestamp_range(367)
+    response = client.get(f"/api/v1/graphs/notes-annual?start_date={start_ts}&end_date={end_ts}")
     assert response.status_code == 400
 
     res_json = response.json()
     assert "detail" in res_json
-    assert "24 months" in res_json["detail"].lower() or "exceed" in res_json["detail"].lower()
+    assert "365 days" in res_json["detail"].lower() or "exceed" in res_json["detail"].lower()
 
 
 # User Story 4: Notes Evaluation Tests (T054-T057)
 def test_notes_evaluation_get_success(client: TestClient, note_samples: List[Note]) -> None:
     """Test GET /api/v1/graphs/notes-evaluation returns valid response."""
-    response = client.get("/api/v1/graphs/notes-evaluation?period=1month")
+    start_ts, end_ts = get_timestamp_range(30)
+    response = client.get(f"/api/v1/graphs/notes-evaluation?start_date={start_ts}&end_date={end_ts}")
 
     if response.status_code != 200:
         print(f"\nError response: {response.json()}")
@@ -293,18 +343,20 @@ def test_notes_evaluation_get_success(client: TestClient, note_samples: List[Not
 
 def test_notes_evaluation_limit_200_enforcement(client: TestClient, note_samples: List[Note]) -> None:
     """Test TOP 200 limit enforcement."""
+    start_ts, end_ts = get_timestamp_range(30)
     # Request with limit parameter
-    response = client.get("/api/v1/graphs/notes-evaluation?period=1month&limit=50")
+    response = client.get(f"/api/v1/graphs/notes-evaluation?start_date={start_ts}&end_date={end_ts}&limit=50")
     assert response.status_code == 200
 
     # Max limit should be 200 - FastAPI returns 422 for validation errors
-    response = client.get("/api/v1/graphs/notes-evaluation?period=1month&limit=300")
+    response = client.get(f"/api/v1/graphs/notes-evaluation?start_date={start_ts}&end_date={end_ts}&limit=300")
     assert response.status_code == 422
 
 
 def test_notes_evaluation_descending_impression_order(client: TestClient, note_samples: List[Note]) -> None:
     """Test descending impression_count ordering."""
-    response = client.get("/api/v1/graphs/notes-evaluation?period=1month")
+    start_ts, end_ts = get_timestamp_range(30)
+    response = client.get(f"/api/v1/graphs/notes-evaluation?start_date={start_ts}&end_date={end_ts}")
     assert response.status_code == 200
 
     res_json = response.json()
@@ -316,13 +368,14 @@ def test_notes_evaluation_descending_impression_order(client: TestClient, note_s
             prev_count = item["impressionCount"]
 
 
-def test_notes_evaluation_period_filtering(client: TestClient, note_samples: List[Note]) -> None:
-    """Test optional period filtering."""
-    periods = ["1week", "1month", "3months", "6months", "1year"]
+def test_notes_evaluation_timestamp_filtering(client: TestClient, note_samples: List[Note]) -> None:
+    """Test timestamp-based filtering with different ranges."""
+    ranges = [7, 14, 30]
 
-    for period in periods:
-        response = client.get(f"/api/v1/graphs/notes-evaluation?period={period}")
-        assert response.status_code == 200, f"Failed for period={period}"
+    for days in ranges:
+        start_ts, end_ts = get_timestamp_range(days)
+        response = client.get(f"/api/v1/graphs/notes-evaluation?start_date={start_ts}&end_date={end_ts}")
+        assert response.status_code == 200, f"Failed for {days} days range"
 
         res_json = response.json()
         assert "data" in res_json
@@ -331,7 +384,8 @@ def test_notes_evaluation_period_filtering(client: TestClient, note_samples: Lis
 # User Story 5: Notes Evaluation Status Tests (T069-T070)
 def test_notes_evaluation_status_get_success(client: TestClient, note_samples: List[Note]) -> None:
     """Test GET /api/v1/graphs/notes-evaluation-status returns valid response."""
-    response = client.get("/api/v1/graphs/notes-evaluation-status?period=1month")
+    start_ts, end_ts = get_timestamp_range(30)
+    response = client.get(f"/api/v1/graphs/notes-evaluation-status?start_date={start_ts}&end_date={end_ts}")
 
     if response.status_code != 200:
         print(f"\nError response: {response.json()}")
@@ -356,7 +410,8 @@ def test_notes_evaluation_status_get_success(client: TestClient, note_samples: L
 
 def test_notes_evaluation_status_descending_helpful_order(client: TestClient, note_samples: List[Note]) -> None:
     """Test descending helpful_count ordering (different from impression order)."""
-    response = client.get("/api/v1/graphs/notes-evaluation-status?period=1month")
+    start_ts, end_ts = get_timestamp_range(30)
+    response = client.get(f"/api/v1/graphs/notes-evaluation-status?start_date={start_ts}&end_date={end_ts}")
     assert response.status_code == 200
 
     res_json = response.json()
@@ -371,7 +426,8 @@ def test_notes_evaluation_status_descending_helpful_order(client: TestClient, no
 # User Story 6: Post Influence Tests (T077-T080)
 def test_post_influence_get_success(client: TestClient, note_samples: List[Note]) -> None:
     """Test GET /api/v1/graphs/post-influence returns valid response."""
-    response = client.get("/api/v1/graphs/post-influence?period=1month")
+    start_ts, end_ts = get_timestamp_range(30)
+    response = client.get(f"/api/v1/graphs/post-influence?start_date={start_ts}&end_date={end_ts}")
 
     if response.status_code != 200:
         print(f"\nError response: {response.json()}")
@@ -396,18 +452,20 @@ def test_post_influence_get_success(client: TestClient, note_samples: List[Note]
 
 def test_post_influence_limit_200_enforcement(client: TestClient, note_samples: List[Note]) -> None:
     """Test TOP 200 limit enforcement."""
+    start_ts, end_ts = get_timestamp_range(30)
     # Request with limit parameter
-    response = client.get("/api/v1/graphs/post-influence?period=1month&limit=50")
+    response = client.get(f"/api/v1/graphs/post-influence?start_date={start_ts}&end_date={end_ts}&limit=50")
     assert response.status_code == 200
 
     # Max limit should be 200 - FastAPI returns 422 for validation errors
-    response = client.get("/api/v1/graphs/post-influence?period=1month&limit=300")
+    response = client.get(f"/api/v1/graphs/post-influence?start_date={start_ts}&end_date={end_ts}&limit=300")
     assert response.status_code == 422
 
 
 def test_post_influence_descending_impression_order(client: TestClient, note_samples: List[Note]) -> None:
     """Test descending impression_count ordering."""
-    response = client.get("/api/v1/graphs/post-influence?period=1month")
+    start_ts, end_ts = get_timestamp_range(30)
+    response = client.get(f"/api/v1/graphs/post-influence?start_date={start_ts}&end_date={end_ts}")
     assert response.status_code == 200
 
     res_json = response.json()
@@ -421,7 +479,8 @@ def test_post_influence_descending_impression_order(client: TestClient, note_sam
 
 def test_post_influence_status_filtering(client: TestClient, note_samples: List[Note]) -> None:
     """Test status filtering for posts (by associated note status)."""
-    response = client.get("/api/v1/graphs/post-influence?period=1month&status=published")
+    start_ts, end_ts = get_timestamp_range(30)
+    response = client.get(f"/api/v1/graphs/post-influence?start_date={start_ts}&end_date={end_ts}&status=published")
     assert response.status_code == 200
 
     res_json = response.json()

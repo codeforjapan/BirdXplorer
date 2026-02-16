@@ -538,7 +538,8 @@ def mock_storage(
     mock._fill_monthly_gaps.side_effect = _fill_monthly_gaps
 
     def _get_note_evaluation_points(
-        period: Union[str, None] = None,
+        start_date: Union[str, None] = None,
+        end_date: Union[str, None] = None,
         status_filter: Union[str, None] = None,
         limit: int = 200,
         order_by: str = "impression_count",
@@ -549,7 +550,8 @@ def mock_storage(
     mock.get_note_evaluation_points.side_effect = _get_note_evaluation_points
 
     def _get_post_influence_points(
-        period: Union[str, None] = None,
+        start_date: Union[str, None] = None,
+        end_date: Union[str, None] = None,
         status_filter: Union[str, None] = None,
         limit: int = 200,
     ) -> List[dict[str, Union[str, int]]]:
