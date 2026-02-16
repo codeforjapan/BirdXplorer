@@ -850,7 +850,8 @@ class Storage:
 
     def get_note_evaluation_points(
         self,
-        period: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
         status_filter: Optional[str] = None,
         limit: int = 200,
         order_by: str = "impression_count",
@@ -858,7 +859,8 @@ class Storage:
         """Get individual note evaluation metrics with configurable ordering.
 
         Args:
-            period: Optional time period filter ("1week", "1month", "3months", "6months", "1year")
+            start_date: Optional start date filter (ISO format YYYY-MM-DD)
+            end_date: Optional end date filter (ISO format YYYY-MM-DD)
             status_filter: Optional status filter
                 ("all", "published", "evaluating", "unpublished", "temporarilyPublished")
             limit: Maximum number of results to return (default: 200, max: 200)
@@ -881,8 +883,7 @@ class Storage:
                 ...
             ]
         """
-        from datetime import date as date_type
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timezone
 
         # Validate and cap limit
         if limit > 200:
@@ -905,23 +906,11 @@ class Storage:
             .join(PostRecord, NoteRecord.post_id == PostRecord.post_id)
         )
 
-        # Add period filter if specified
-        if period:
-            # Calculate date range
-            end_date = date_type.today()
-            days_map = {
-                "1week": 7,
-                "1month": 30,
-                "3months": 90,
-                "6months": 180,
-                "1year": 365,
-            }
-            days = days_map.get(period, 30)
-            start_date = end_date - timedelta(days=days - 1)
-
-            # Convert to TwitterTimestamp
-            start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
-            end_dt = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
+        # Add date range filter if specified
+        if start_date and end_date:
+            # Convert ISO date strings to TwitterTimestamp (milliseconds)
+            start_dt = datetime.fromisoformat(start_date).replace(tzinfo=timezone.utc)
+            end_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
             start_ts = int(start_dt.timestamp() * 1000)
             end_ts = int(end_dt.timestamp() * 1000)
 
@@ -963,14 +952,16 @@ class Storage:
 
     def get_post_influence_points(
         self,
-        period: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
         status_filter: Optional[str] = None,
         limit: int = 200,
     ) -> List[dict[str, Any]]:
         """Get individual post influence metrics ordered by impression count.
 
         Args:
-            period: Optional time period filter ("1week", "1month", "3months", "6months", "1year")
+            start_date: Optional start date filter (ISO format YYYY-MM-DD)
+            end_date: Optional end date filter (ISO format YYYY-MM-DD)
             status_filter: Optional status filter for associated notes
                 ("all", "published", "evaluating", "unpublished", "temporarilyPublished")
             limit: Maximum number of results to return (default: 200, max: 200)
@@ -992,8 +983,7 @@ class Storage:
                 ...
             ]
         """
-        from datetime import date as date_type
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timezone
 
         # Validate and cap limit
         if limit > 200:
@@ -1027,23 +1017,11 @@ class Storage:
                 .outerjoin(NoteRecord, PostRecord.post_id == NoteRecord.post_id)
             )
 
-        # Add period filter if specified
-        if period:
-            # Calculate date range
-            end_date = date_type.today()
-            days_map = {
-                "1week": 7,
-                "1month": 30,
-                "3months": 90,
-                "6months": 180,
-                "1year": 365,
-            }
-            days = days_map.get(period, 30)
-            start_date = end_date - timedelta(days=days - 1)
-
-            # Convert to TwitterTimestamp
-            start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
-            end_dt = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
+        # Add date range filter if specified
+        if start_date and end_date:
+            # Convert ISO date strings to TwitterTimestamp (milliseconds)
+            start_dt = datetime.fromisoformat(start_date).replace(tzinfo=timezone.utc)
+            end_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
             start_ts = int(start_dt.timestamp() * 1000)
             end_ts = int(end_dt.timestamp() * 1000)
 
