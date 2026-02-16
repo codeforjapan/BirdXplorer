@@ -336,7 +336,7 @@ def gen_router(storage: Storage) -> APIRouter:
         start_date: TwitterTimestamp = Query(..., description="Start timestamp in milliseconds (Unix epoch, UTC)"),
         end_date: TwitterTimestamp = Query(..., description="End timestamp in milliseconds (Unix epoch, UTC)"),
         status: StatusType = Query("all", description="Filter by note publication status"),
-        limit: int = Query(200, ge=1, le=200, description="Maximum number of results (max 200)"),
+        limit: int = Query(200, ge=1, le=5000, description="Maximum number of results (max 5000)"),
     ) -> GraphListResponse[NoteEvaluationDataItem]:
         """Get individual note evaluation metrics.
 
@@ -367,7 +367,7 @@ def gen_router(storage: Storage) -> APIRouter:
             start_date: Start timestamp in milliseconds (required)
             end_date: End timestamp in milliseconds (required)
             status: Filter by specific status or "all" (default: "all")
-            limit: Maximum number of results (default: 200, max: 200)
+            limit: Maximum number of results (default: 200, max: 5000)
 
         Returns:
             GraphListResponse containing:
@@ -382,8 +382,8 @@ def gen_router(storage: Storage) -> APIRouter:
             validate_timestamp_range(start_date, end_date, max_days=30)
 
             # Validate limit
-            if limit > 200:
-                raise ValueError("Limit cannot exceed 200")
+            if limit > 5000:
+                raise ValueError("Limit cannot exceed 5000")
 
             # Convert timestamps to ISO date strings
             start_date_str = twitter_timestamp_to_iso_date(start_date)
@@ -417,7 +417,7 @@ def gen_router(storage: Storage) -> APIRouter:
         start_date: TwitterTimestamp = Query(..., description="Start timestamp in milliseconds (Unix epoch, UTC)"),
         end_date: TwitterTimestamp = Query(..., description="End timestamp in milliseconds (Unix epoch, UTC)"),
         status: StatusType = Query("all", description="Filter by note publication status"),
-        limit: int = Query(200, ge=1, le=200, description="Maximum number of results (max 200)"),
+        limit: int = Query(200, ge=1, le=5000, description="Maximum number of results (max 5000)"),
     ) -> GraphListResponse[NoteEvaluationDataItem]:
         """Get individual note evaluation metrics ordered by helpful count.
 
@@ -448,7 +448,7 @@ def gen_router(storage: Storage) -> APIRouter:
             start_date: Start timestamp in milliseconds (required)
             end_date: End timestamp in milliseconds (required)
             status: Filter by specific status or "all" (default: "all")
-            limit: Maximum number of results (default: 200, max: 200)
+            limit: Maximum number of results (default: 200, max: 5000)
 
         Returns:
             GraphListResponse containing:
@@ -463,8 +463,8 @@ def gen_router(storage: Storage) -> APIRouter:
             validate_timestamp_range(start_date, end_date, max_days=30)
 
             # Validate limit
-            if limit > 200:
-                raise ValueError("Limit cannot exceed 200")
+            if limit > 5000:
+                raise ValueError("Limit cannot exceed 5000")
 
             # Convert timestamps to ISO date strings
             start_date_str = twitter_timestamp_to_iso_date(start_date)
@@ -499,7 +499,7 @@ def gen_router(storage: Storage) -> APIRouter:
         start_date: TwitterTimestamp = Query(..., description="Start timestamp in milliseconds (Unix epoch, UTC)"),
         end_date: TwitterTimestamp = Query(..., description="End timestamp in milliseconds (Unix epoch, UTC)"),
         status: StatusType = Query("all", description="Filter by note publication status"),
-        limit: int = Query(200, ge=1, le=200, description="Maximum number of results (max 200)"),
+        limit: int = Query(200, ge=1, le=5000, description="Maximum number of results (max 5000)"),
     ) -> GraphListResponse[PostInfluenceDataItem]:
         """Get individual post influence metrics.
 
@@ -530,7 +530,7 @@ def gen_router(storage: Storage) -> APIRouter:
             start_date: Start timestamp in milliseconds (required)
             end_date: End timestamp in milliseconds (required)
             status: Filter by specific note status or "all" (default: "all")
-            limit: Maximum number of results (default: 200, max: 200)
+            limit: Maximum number of results (default: 200, max: 5000)
 
         Returns:
             GraphListResponse containing:
@@ -545,8 +545,8 @@ def gen_router(storage: Storage) -> APIRouter:
             validate_timestamp_range(start_date, end_date, max_days=30)
 
             # Validate limit
-            if limit > 200:
-                raise ValueError("Limit cannot exceed 200")
+            if limit > 5000:
+                raise ValueError("Limit cannot exceed 5000")
 
             # Convert timestamps to ISO date strings
             start_date_str = twitter_timestamp_to_iso_date(start_date)
