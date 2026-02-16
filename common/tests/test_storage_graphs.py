@@ -314,7 +314,8 @@ def test_get_post_influence_points(
 
     # Get influence points
     result = storage.get_post_influence_points(
-        period=None,  # All time
+        start_date=None,  # All time
+        end_date=None,
         status_filter="all",
         limit=200,
     )
@@ -344,7 +345,8 @@ def test_get_note_evaluation_points(
 
     # Get evaluation points
     result = storage.get_note_evaluation_points(
-        period=None,  # All time
+        start_date=None,  # All time
+        end_date=None,
         status_filter="all",
         limit=200,
     )
