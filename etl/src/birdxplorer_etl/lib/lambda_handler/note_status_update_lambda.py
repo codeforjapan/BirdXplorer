@@ -5,7 +5,6 @@ from datetime import datetime
 from sqlalchemy import select, update
 
 from birdxplorer_common.storage import NoteRecord, RowNoteStatusRecord
-from birdxplorer_etl.lib.lambda_handler.common.sqs_handler import SQSHandler
 from birdxplorer_etl.lib.sqlite.init import init_postgresql
 
 # Lambda用のロガー設定
@@ -15,43 +14,36 @@ logger.setLevel(logging.INFO)
 
 def lambda_handler(event, context):
     """
-    ノートステータス更新Lambda関数
+    ノートステータス更新Lambda関数（バッチ処理対応）
     RowNoteStatusRecordからNoteRecordへステータス情報を転送
+
+    Partial Batch Response対応：失敗したメッセージのみ再処理される。
 
     期待されるeventの形式:
     {
         "Records": [
             {
+                "messageId": "xxx",
                 "body": "{\"note_id\": \"1234567890\", \"processing_type\": \"note_status_update\"}"
             }
         ]
     }
     """
     postgresql = init_postgresql()
-    sqs_handler = SQSHandler()
+    batch_item_failures = []
 
     try:
-        # SQSイベントからメッセージを解析
-        messages = sqs_handler.parse_sqs_event(event)
+        logger.info(f"Processing {len(event.get('Records', []))} messages")
 
-        if not messages:
-            logger.warning("No valid messages found in SQS event")
-            return {"statusCode": 400, "body": json.dumps({"error": "No valid messages found"})}
-
-        results = []
-
-        for message in messages:
+        for record in event["Records"]:
+            message_id = record.get("messageId", "unknown")
             try:
-                message_body = message["body"]
+                message_body = json.loads(record["body"])
                 note_id = message_body.get("note_id")
                 processing_type = message_body.get("processing_type")
 
-                if not note_id:
-                    logger.error("Missing note_id in message")
-                    continue
-
-                if processing_type != "note_status_update":
-                    logger.error(f"Invalid processing_type: {processing_type}")
+                if not note_id or processing_type != "note_status_update":
+                    logger.error(f"Invalid message {message_id}: note_id={note_id}, type={processing_type}")
                     continue
 
                 logger.info(f"Processing note status update for note: {note_id}")
@@ -60,9 +52,6 @@ def lambda_handler(event, context):
 
                 if not existing_note:
                     logger.warning(f"Note not found in notes table: {note_id}")
-                    results.append(
-                        {"note_id": note_id, "status": "skipped", "message": "Note not found in notes table"}
-                    )
                     continue
 
                 status_query = postgresql.execute(
@@ -77,13 +66,6 @@ def lambda_handler(event, context):
 
                 if status_row is None:
                     logger.warning(f"Status not found in row_note_status table: {note_id}")
-                    results.append(
-                        {
-                            "note_id": note_id,
-                            "status": "skipped",
-                            "message": "Status not found in row_note_status table",
-                        }
-                    )
                     continue
 
                 current_status = status_row.current_status
@@ -100,7 +82,7 @@ def lambda_handler(event, context):
                     existing_history = []
 
                 if current_status and timestamp_millis:
-                    timestamp_seconds = timestamp_millis / 1000
+                    timestamp_seconds = int(timestamp_millis) / 1000
                     date_str = datetime.fromtimestamp(timestamp_seconds).isoformat()
 
                     new_history_entry = {"status": current_status, "date": date_str}
@@ -124,46 +106,28 @@ def lambda_handler(event, context):
                     )
                 )
 
-                results.append(
-                    {
-                        "note_id": note_id,
-                        "status": "success",
-                        "current_status": current_status,
-                        "locked_status": locked_status,
-                        "message": "Note status updated successfully",
-                    }
-                )
-
                 logger.info(f"Successfully updated status for note: {note_id}")
 
             except Exception as e:
-                logger.error(f"Error processing message for note {note_id}: {str(e)}")
-                results.append({"note_id": note_id, "status": "error", "message": str(e)})
-                continue
+                logger.error(f"[ERROR] Failed to process message {message_id}: {str(e)}")
+                batch_item_failures.append({"itemIdentifier": message_id})
 
-        # 全ての処理が完了したらコミット
         try:
             postgresql.commit()
-            logger.info("Successfully committed note status updates")
-
+            success_count = len(event["Records"]) - len(batch_item_failures)
+            logger.info(f"Committed successfully: {success_count}/{len(event['Records'])} messages")
         except Exception as e:
-            logger.error(f"Commit error: {e}")
+            logger.error(f"[ERROR] Commit failed: {str(e)}")
             postgresql.rollback()
-            raise
+            batch_item_failures = [
+                {"itemIdentifier": r.get("messageId", "unknown")} for r in event["Records"]
+            ]
 
-        return {
-            "statusCode": 200,
-            "body": json.dumps(
-                {
-                    "message": "Note status update completed",
-                    "results": results,
-                }
-            ),
-        }
+        return {"batchItemFailures": batch_item_failures}
 
     except Exception as e:
         logger.error(f"Lambda execution error: {str(e)}")
-        raise  # 例外を再送出してDLQに送る
+        raise
     finally:
         postgresql.close()
 

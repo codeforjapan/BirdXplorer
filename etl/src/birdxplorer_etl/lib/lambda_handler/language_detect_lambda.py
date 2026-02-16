@@ -92,9 +92,11 @@ def lambda_handler(event, context):
 
             logger.info(f"[SUCCESS] Language detected for note {note_id}: {detected_language}")
 
-            # DB書き込みをSQSキューに送信
+            # DB書き込みをSQSキューに送信（既知の言語の場合はスキップ）
             db_write_queue_url = os.getenv("DB_WRITE_QUEUE_URL")
-            if db_write_queue_url:
+            if existing_language:
+                logger.info(f"[SKIP_DB] Language already in DB for note {note_id}, skipping db-write")
+            elif db_write_queue_url:
                 db_write_message = {
                     "operation": "update_language",
                     "note_id": note_id,
