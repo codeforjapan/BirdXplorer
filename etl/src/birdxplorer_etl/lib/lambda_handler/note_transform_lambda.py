@@ -369,6 +369,11 @@ def lambda_handler(event, context):
                 logger.info(f"Note {note_id} outside date range, skipping")
                 continue
 
+            # 既存ノートで下流処理が全て完了済みの場合はキュー送信をスキップ
+            if result.get("skip_topic_detect") and result.get("skip_tweet_lookup"):
+                logger.info(f"Note {note_id} already fully processed, skipping downstream queues")
+                continue
+
             # topic-detect-queueに送信
             topic_detect_message = {
                 "note_id": note_id,
