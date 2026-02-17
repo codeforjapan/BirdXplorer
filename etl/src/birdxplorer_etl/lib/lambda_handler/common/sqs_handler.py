@@ -41,6 +41,56 @@ class SQSHandler:
             logger.error(f"Unexpected error sending message: {e}")
             return None
 
+    def receive_message(
+        self, queue_url: str, max_messages: int = 1, wait_time_seconds: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        SQSキューからメッセージを受信
+
+        Args:
+            queue_url: SQSキューのURL
+            max_messages: 最大受信メッセージ数
+            wait_time_seconds: ロングポーリング待機秒数
+
+        Returns:
+            受信したメッセージのリスト
+        """
+        try:
+            response = self.sqs_client.receive_message(
+                QueueUrl=queue_url,
+                MaxNumberOfMessages=max_messages,
+                WaitTimeSeconds=wait_time_seconds,
+            )
+            return response.get("Messages", [])
+        except ClientError as e:
+            logger.error(f"Failed to receive message from {queue_url}: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Unexpected error receiving message: {e}")
+            return []
+
+    def delete_message(self, queue_url: str, receipt_handle: str) -> bool:
+        """
+        SQSキューからメッセージを削除
+
+        Args:
+            queue_url: SQSキューのURL
+            receipt_handle: メッセージのレシートハンドル
+
+        Returns:
+            削除成功の可否
+        """
+        try:
+            self.sqs_client.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt_handle)
+            logger.info("Message deleted successfully")
+            return True
+        except ClientError as e:
+            logger.error(f"Failed to delete message from {queue_url}: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error deleting message: {e}")
+            return False
+
     def parse_sqs_event(self, event: Dict[str, Any]) -> list:
         """
         Lambda SQSイベントからメッセージを解析
