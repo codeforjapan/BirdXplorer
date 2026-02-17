@@ -222,6 +222,9 @@ def extract_data(postgresql: Session):
 
             file_index += 1
 
+        # 評価データを取得して保存（noteStatus処理より先に実行することで集計タイミングを保証）
+        extract_ratings(postgresql, dateString)
+
         # noteStatusHistory-00000.zip から順に404が返るまでダウンロード
         file_index = 0
         while True:
@@ -316,9 +319,6 @@ def extract_data(postgresql: Session):
                 break
 
             file_index += 1
-
-        # 評価データを取得して保存
-        extract_ratings(postgresql, dateString)
 
         # 次の日に進む（古い日→新しい日の順で処理）
         date = date + timedelta(days=1)
