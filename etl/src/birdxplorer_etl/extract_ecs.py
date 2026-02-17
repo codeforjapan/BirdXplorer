@@ -10,6 +10,7 @@ import boto3
 import requests
 import settings
 import stringcase
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from birdxplorer_common.storage import (
@@ -503,30 +504,11 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
                     if value == "" and key not in ["helpfulness_level"]:
                         row[key] = None
 
-                # 既存レコードの確認（composite primary key）
-                existing_rating = (
-                    postgresql.query(RowNoteRatingRecord)
-                    .filter(
-                        RowNoteRatingRecord.note_id == note_id,
-                        RowNoteRatingRecord.rater_participant_id == rater_participant_id,
-                    )
-                    .first()
-                )
-
-                if existing_rating:
-                    continue
-                else:
-                    # 新規レコードを追加
-                    try:
-                        rating_record = RowNoteRatingRecord(**row)
-                        rows_to_add.append(rating_record)
-                    except Exception as e:
-                        logging.error(f"Failed to create RowNoteRatingRecord for note_id={note_id}: {e}")
-                        continue
+                rows_to_add.append(dict(row))
 
                 # 1000件ごとにバッチ処理
                 if index % 1000 == 0 and rows_to_add:
-                    postgresql.bulk_save_objects(rows_to_add)
+                    postgresql.execute(insert(RowNoteRatingRecord).on_conflict_do_nothing(), rows_to_add)
                     postgresql.commit()
                     logging.info(
                         f"Saved {len(rows_to_add)} rating records (batch at index {index}, file {file_index:05d})"
@@ -535,7 +517,7 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
 
             # 最後のバッチを処理
             if rows_to_add:
-                postgresql.bulk_save_objects(rows_to_add)
+                postgresql.execute(insert(RowNoteRatingRecord).on_conflict_do_nothing(), rows_to_add)
                 postgresql.commit()
                 logging.info(f"Saved final batch of {len(rows_to_add)} rating records (file {file_index:05d})")
 
