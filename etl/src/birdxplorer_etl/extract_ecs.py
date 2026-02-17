@@ -500,10 +500,7 @@ def extract_ratings(postgresql: Session, dateString: str):
                 )
 
                 if existing_rating:
-                    # 既存レコードを更新
-                    for key, value in row.items():
-                        if hasattr(existing_rating, key):
-                            setattr(existing_rating, key, value)
+                    continue
                 else:
                     # 新規レコードを追加
                     try:
