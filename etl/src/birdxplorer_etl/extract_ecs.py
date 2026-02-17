@@ -223,7 +223,7 @@ def extract_data(postgresql: Session):
             file_index += 1
 
         # 評価データを取得して保存（noteStatus処理より先に実行することで集計タイミングを保証）
-        extract_ratings(postgresql, dateString)
+        extract_ratings(postgresql, dateString, existing_row_note_ids)
 
         # noteStatusHistory-00000.zip から順に404が返るまでダウンロード
         file_index = 0
@@ -375,7 +375,7 @@ def enqueue_note_status_update(note_id: str):
         logging.error(f"Failed to enqueue note {note_id} to note-status-update queue: {e}")
 
 
-def extract_ratings(postgresql: Session, dateString: str):
+def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids: set):
     """
     指定日付の評価データをダウンロードしてrow_note_ratingsテーブルに保存
     ratings-00000.tsv から404が返るまで動的に処理
@@ -383,16 +383,15 @@ def extract_ratings(postgresql: Session, dateString: str):
     Args:
         postgresql: データベースセッション
         dateString: 日付文字列 (YYYY/MM/DD形式)
+        existing_row_note_ids: row_notesテーブルに存在するnote_idのセット（存在チェック用）
     """
-    if settings.USE_DUMMY_DATA:
-        # ダミーデータには評価データが含まれていないためスキップ
-        logging.info("Skipping ratings extraction for dummy data")
-        return
-
     # ratings-00000.zip から順に404が返るまでダウンロード
     file_index = 0
     while True:
-        ratings_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/ratings/ratings-{file_index:05d}.zip"
+        if settings.USE_DUMMY_DATA:
+            ratings_url = "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/notesRating_sample.tsv"
+        else:
+            ratings_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/ratings/ratings-{file_index:05d}.zip"
         logging.info(f"Fetching ratings from: {ratings_url}")
 
         try:
@@ -414,17 +413,22 @@ def extract_ratings(postgresql: Session, dateString: str):
             continue
 
         try:
-            with zipfile.ZipFile(io.BytesIO(res.content)) as zip_file:
-                tsv_filename = f"ratings-{file_index:05d}.tsv"
-                if tsv_filename not in zip_file.namelist():
-                    logging.error(f"TSV file {tsv_filename} not found in the zip file.")
-                    file_index += 1
-                    continue
+            if settings.USE_DUMMY_DATA:
+                tsv_data = res.content.decode("utf-8").splitlines()
+                reader = csv.DictReader(tsv_data, delimiter="\t")
+                reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
+            else:
+                with zipfile.ZipFile(io.BytesIO(res.content)) as zip_file:
+                    tsv_filename = f"ratings-{file_index:05d}.tsv"
+                    if tsv_filename not in zip_file.namelist():
+                        logging.error(f"TSV file {tsv_filename} not found in the zip file.")
+                        file_index += 1
+                        continue
 
-                with zip_file.open(tsv_filename) as tsv_file:
-                    tsv_data = tsv_file.read().decode("utf-8").splitlines()
-                    reader = csv.DictReader(tsv_data, delimiter="\t")
-                    reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
+                    with zip_file.open(tsv_filename) as tsv_file:
+                        tsv_data = tsv_file.read().decode("utf-8").splitlines()
+                        reader = csv.DictReader(tsv_data, delimiter="\t")
+                        reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
 
             # BinaryBoolフィールドのリスト（評価データ用）
             binary_bool_fields = [
@@ -465,10 +469,8 @@ def extract_ratings(postgresql: Session, dateString: str):
                     logging.warning("Missing note_id or rater_participant_id in rating record, skipping")
                     continue
 
-                # 対応するnote_idがrow_notesテーブルに存在するかを確認
-                note_exists = postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id == note_id).first()
-                if note_exists is None:
-                    # 対応するnoteが存在しない場合はスキップ
+                # 対応するnote_idがrow_notesテーブルに存在するかをセットで確認
+                if note_id not in existing_row_note_ids:
                     continue
 
                 # BinaryBoolフィールドの正規化
@@ -542,5 +544,9 @@ def extract_ratings(postgresql: Session, dateString: str):
         except Exception as e:
             logging.error(f"Error processing ratings data for {dateString} file {file_index:05d}: {e}")
             postgresql.rollback()
+
+        # ダミーデータの場合は1ファイルのみなのでループを抜ける
+        if settings.USE_DUMMY_DATA:
+            break
 
         file_index += 1
