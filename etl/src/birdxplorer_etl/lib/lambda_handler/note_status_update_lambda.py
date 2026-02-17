@@ -1,6 +1,5 @@
 import json
 import logging
-from datetime import datetime
 
 from sqlalchemy import select, update
 
@@ -100,13 +99,10 @@ def lambda_handler(event, context):
                     existing_history = []
 
                 if current_status and timestamp_millis:
-                    timestamp_seconds = timestamp_millis / 1000
-                    date_str = datetime.fromtimestamp(timestamp_seconds).isoformat()
-
-                    new_history_entry = {"status": current_status, "date": date_str}
+                    new_history_entry = {"status": current_status, "date": int(timestamp_millis)}
 
                     if not any(
-                        entry.get("status") == current_status and entry.get("date") == date_str
+                        entry.get("status") == current_status and entry.get("date") == int(timestamp_millis)
                         for entry in existing_history
                     ):
                         existing_history.append(new_history_entry)
