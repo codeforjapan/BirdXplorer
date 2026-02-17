@@ -392,7 +392,9 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
         if settings.USE_DUMMY_DATA:
             ratings_url = "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/notesRating_sample.tsv"
         else:
-            ratings_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/ratings/ratings-{file_index:05d}.zip"
+            ratings_url = (
+                f"https://ton.twimg.com/birdwatch-public-data/{dateString}/ratings/ratings-{file_index:05d}.zip"
+            )
         logging.info(f"Fetching ratings from: {ratings_url}")
 
         try:
@@ -491,13 +493,7 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
                 if "helpfulness_level" in row:
                     value = row["helpfulness_level"]
                     if value not in ["HELPFUL", "SOMEWHAT_HELPFUL", "NOT_HELPFUL"]:
-                        if value == "" or value is None:
-                            row["helpfulness_level"] = "NOT_HELPFUL"  # デフォルト値
-                        else:
-                            logging.warning(
-                                f"Invalid helpfulness_level '{value}' for note_id={note_id}, setting to 'NOT_HELPFUL'"
-                            )
-                            row["helpfulness_level"] = "NOT_HELPFUL"
+                        row["helpfulness_level"] = None
 
                 # 空文字列フィールドをNoneに変換
                 for key, value in row.items():
