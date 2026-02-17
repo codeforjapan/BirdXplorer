@@ -31,16 +31,28 @@ def extract_data(postgresql: Session):
 
     while date <= end_date:
         dateString = date.strftime("%Y/%m/%d")
-        note_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/notes/notes-00000.zip"
-        if settings.USE_DUMMY_DATA:
-            note_url = (
-                "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/notes_sample.tsv"
-            )
 
-        logging.info(note_url)
-        res = requests.get(note_url)
+        # notes-00000.zip から順に404が返るまでダウンロード
+        file_index = 0
+        while True:
+            if settings.USE_DUMMY_DATA:
+                note_url = "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/notes_sample.tsv"
+            else:
+                note_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/notes/notes-{file_index:05d}.zip"
 
-        if res.status_code == 200:
+            logging.info(f"Fetching notes from: {note_url}")
+            res = requests.get(note_url)
+
+            if res.status_code == 404:
+                logging.info(f"Notes file {file_index:05d} not found (404), stopping notes download for {dateString}")
+                break
+
+            if res.status_code != 200:
+                logging.warning(f"Unexpected status code {res.status_code} for notes file {file_index:05d}, skipping")
+                file_index += 1
+                continue
+
+            # TSVを読み込む
             if settings.USE_DUMMY_DATA:
                 # ダミーデータの場合はTSVファイルを直接処理
                 tsv_data = res.content.decode("utf-8").splitlines()
@@ -48,7 +60,7 @@ def extract_data(postgresql: Session):
                 reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
             else:
                 with zipfile.ZipFile(io.BytesIO(res.content)) as zip_file:
-                    tsv_filename = "notes-00000.tsv"
+                    tsv_filename = f"notes-{file_index:05d}.tsv"
                     if tsv_filename not in zip_file.namelist():
                         logging.error(f"TSV file {tsv_filename} not found in the zip file.")
                         break
@@ -188,93 +200,118 @@ def extract_data(postgresql: Session):
             for note in rows_to_add.values():
                 enqueue_notes(note.note_id, note.summary, note.tweet_id, note.language)
 
-            status_url = (
-                f"https://ton.twimg.com/birdwatch-public-data/{dateString}/"
-                f"noteStatusHistory/noteStatusHistory-00000.zip"
-            )
+            logging.info(f"Successfully processed notes file {file_index:05d} for {dateString}")
+
+            # ダミーデータの場合は1ファイルのみなのでループを抜ける
+            if settings.USE_DUMMY_DATA:
+                break
+
+            file_index += 1
+
+        # noteStatusHistory-00000.zip から順に404が返るまでダウンロード
+        file_index = 0
+        while True:
             if settings.USE_DUMMY_DATA:
                 status_url = (
                     "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/"
                     "refs/heads/main/etl/data/noteStatus_sample.tsv"
                 )
+            else:
+                status_url = (
+                    f"https://ton.twimg.com/birdwatch-public-data/{dateString}/"
+                    f"noteStatusHistory/noteStatusHistory-{file_index:05d}.zip"
+                )
 
-            logging.info(status_url)
+            logging.info(f"Fetching note status from: {status_url}")
             res = requests.get(status_url)
 
-            if res.status_code == 200:
-                if settings.USE_DUMMY_DATA:
-                    # Handle dummy data as TSV
-                    tsv_data = res.content.decode("utf-8").splitlines()
-                    reader = csv.DictReader(tsv_data, delimiter="\t")
-                    reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
-                else:
-                    # Handle real data as zip file
-                    with zipfile.ZipFile(io.BytesIO(res.content)) as zip_file:
-                        tsv_filename = "noteStatusHistory-00000.tsv"
-                        if tsv_filename not in zip_file.namelist():
-                            logging.error(f"TSV file {tsv_filename} not found in the zip file.")
-                            break
+            if res.status_code == 404:
+                logging.info(
+                    f"Note status file {file_index:05d} not found (404), stopping status download for {dateString}"
+                )
+                break
 
-                        # TSVファイルを読み込み
-                        with zip_file.open(tsv_filename) as tsv_file:
-                            tsv_data = tsv_file.read().decode("utf-8").splitlines()
-                            reader = csv.DictReader(tsv_data, delimiter="\t")
-                            reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
+            if res.status_code != 200:
+                logging.warning(f"Unexpected status code {res.status_code} for status file {file_index:05d}, skipping")
+                file_index += 1
+                continue
 
-                rows_to_add = []
-                notes_to_update_status = []
-                for index, row in enumerate(reader):
-                    for key, value in list(row.items()):
-                        if value == "":
-                            row[key] = None
+            # TSVを読み込む
+            if settings.USE_DUMMY_DATA:
+                # Handle dummy data as TSV
+                tsv_data = res.content.decode("utf-8").splitlines()
+                reader = csv.DictReader(tsv_data, delimiter="\t")
+                reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
+            else:
+                # Handle real data as zip file
+                with zipfile.ZipFile(io.BytesIO(res.content)) as zip_file:
+                    tsv_filename = f"noteStatusHistory-{file_index:05d}.tsv"
+                    if tsv_filename not in zip_file.namelist():
+                        logging.error(f"TSV file {tsv_filename} not found in the zip file.")
+                        break
 
-                    # 対応するnote_idがrow_notesテーブルに存在するかを確認
-                    note_exists = (
-                        postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id == row["note_id"]).first()
+                    # TSVファイルを読み込み
+                    with zip_file.open(tsv_filename) as tsv_file:
+                        tsv_data = tsv_file.read().decode("utf-8").splitlines()
+                        reader = csv.DictReader(tsv_data, delimiter="\t")
+                        reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
+
+            rows_to_add = []
+            notes_to_update_status = []
+            for index, row in enumerate(reader):
+                for key, value in list(row.items()):
+                    if value == "":
+                        row[key] = None
+
+                # 対応するnote_idがrow_notesテーブルに存在するかを確認
+                note_exists = postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id == row["note_id"]).first()
+                if note_exists is None:
+                    # 対応するnoteが存在しない場合はスキップ
+                    logging.warning(
+                        f"Note ID {row['note_id']} not found in row_notes table. Skipping note status record."
                     )
-                    if note_exists is None:
-                        # 対応するnoteが存在しない場合はスキップ
-                        logging.warning(
-                            f"Note ID {row['note_id']} not found in row_notes table. Skipping note status record."
-                        )
-                        continue
+                    continue
 
-                    status = (
-                        postgresql.query(RowNoteStatusRecord)
-                        .filter(RowNoteStatusRecord.note_id == row["note_id"])
-                        .first()
+                status = (
+                    postgresql.query(RowNoteStatusRecord).filter(RowNoteStatusRecord.note_id == row["note_id"]).first()
+                )
+                if status is None or status.created_at_millis > int(datetime.now().timestamp() * 1000):
+                    postgresql.query(RowNoteStatusRecord).filter(RowNoteStatusRecord.note_id == row["note_id"]).delete()
+                    rows_to_add.append(RowNoteStatusRecord(**row))
+
+                    # NoteRecordが既に存在する場合、ステータス更新キューに追加
+                    existing_note_record = (
+                        postgresql.query(NoteRecord).filter(NoteRecord.note_id == row["note_id"]).first()
                     )
-                    if status is None or status.created_at_millis > int(datetime.now().timestamp() * 1000):
-                        postgresql.query(RowNoteStatusRecord).filter(
-                            RowNoteStatusRecord.note_id == row["note_id"]
-                        ).delete()
-                        rows_to_add.append(RowNoteStatusRecord(**row))
+                    if existing_note_record:
+                        notes_to_update_status.append(row["note_id"])
 
-                        # NoteRecordが既に存在する場合、ステータス更新キューに追加
-                        existing_note_record = (
-                            postgresql.query(NoteRecord).filter(NoteRecord.note_id == row["note_id"]).first()
-                        )
-                        if existing_note_record:
-                            notes_to_update_status.append(row["note_id"])
+                if index % 1000 == 0:
+                    postgresql.bulk_save_objects(rows_to_add)
+                    postgresql.commit()
 
-                    if index % 1000 == 0:
-                        postgresql.bulk_save_objects(rows_to_add)
-                        postgresql.commit()
+                    for note_id in notes_to_update_status:
+                        enqueue_note_status_update(note_id)
 
-                        for note_id in notes_to_update_status:
-                            enqueue_note_status_update(note_id)
+                    rows_to_add = []
+                    notes_to_update_status = []
 
-                        rows_to_add = []
-                        notes_to_update_status = []
+            postgresql.bulk_save_objects(rows_to_add)
+            postgresql.commit()
 
-                postgresql.bulk_save_objects(rows_to_add)
-                postgresql.commit()
+            for note_id in notes_to_update_status:
+                enqueue_note_status_update(note_id)
 
-                for note_id in notes_to_update_status:
-                    enqueue_note_status_update(note_id)
+            logging.info(f"Successfully processed note status file {file_index:05d} for {dateString}")
 
-            # 評価データを取得して保存
-            extract_ratings(postgresql, dateString)
+            # ダミーデータの場合は1ファイルのみなのでループを抜ける
+            if settings.USE_DUMMY_DATA:
+                break
+
+            file_index += 1
+
+        # 評価データを取得して保存
+        extract_ratings(postgresql, dateString)
 
         # 次の日に進む（古い日→新しい日の順で処理）
         date = date + timedelta(days=1)
@@ -334,7 +371,7 @@ def enqueue_note_status_update(note_id: str):
 def extract_ratings(postgresql: Session, dateString: str):
     """
     指定日付の評価データをダウンロードしてrow_note_ratingsテーブルに保存
-    ratings-00000.tsv から ratings-00006.tsv まで7つのファイルを処理
+    ratings-00000.tsv から404が返るまで動的に処理
 
     Args:
         postgresql: データベースセッション
@@ -345,28 +382,36 @@ def extract_ratings(postgresql: Session, dateString: str):
         logging.info("Skipping ratings extraction for dummy data")
         return
 
-    # ratings-00000 から ratings-00006 まで7つのファイルを処理
-    for file_index in range(7):
-        ratings_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/ratings/ratings-0000{file_index}.zip"
+    # ratings-00000.zip から順に404が返るまでダウンロード
+    file_index = 0
+    while True:
+        ratings_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/ratings/ratings-{file_index:05d}.zip"
         logging.info(f"Fetching ratings from: {ratings_url}")
 
         try:
             res = requests.get(ratings_url)
         except Exception as e:
-            logging.error(f"Failed to download ratings data (file {file_index}): {e}")
+            logging.error(f"Failed to download ratings data (file {file_index:05d}): {e}")
+            file_index += 1
             continue
+
+        if res.status_code == 404:
+            logging.info(f"Ratings file {file_index:05d} not found (404), stopping ratings download for {dateString}")
+            break
 
         if res.status_code != 200:
             logging.warning(
-                f"Ratings data not available for {dateString} file {file_index} (status code: {res.status_code})"
+                f"Ratings data not available for {dateString} file {file_index:05d} (status code: {res.status_code})"
             )
+            file_index += 1
             continue
 
         try:
             with zipfile.ZipFile(io.BytesIO(res.content)) as zip_file:
-                tsv_filename = f"ratings-0000{file_index}.tsv"
+                tsv_filename = f"ratings-{file_index:05d}.tsv"
                 if tsv_filename not in zip_file.namelist():
                     logging.error(f"TSV file {tsv_filename} not found in the zip file.")
+                    file_index += 1
                     continue
 
                 with zip_file.open(tsv_filename) as tsv_file:
@@ -477,17 +522,21 @@ def extract_ratings(postgresql: Session, dateString: str):
                 if index % 1000 == 0 and rows_to_add:
                     postgresql.bulk_save_objects(rows_to_add)
                     postgresql.commit()
-                    logging.info(f"Saved {len(rows_to_add)} rating records (batch at index {index}, file {file_index})")
+                    logging.info(
+                        f"Saved {len(rows_to_add)} rating records (batch at index {index}, file {file_index:05d})"
+                    )
                     rows_to_add = []
 
             # 最後のバッチを処理
             if rows_to_add:
                 postgresql.bulk_save_objects(rows_to_add)
                 postgresql.commit()
-                logging.info(f"Saved final batch of {len(rows_to_add)} rating records (file {file_index})")
+                logging.info(f"Saved final batch of {len(rows_to_add)} rating records (file {file_index:05d})")
 
-            logging.info(f"Successfully processed ratings file {file_index} for {dateString}")
+            logging.info(f"Successfully processed ratings file {file_index:05d} for {dateString}")
 
         except Exception as e:
-            logging.error(f"Error processing ratings data for {dateString} file {file_index}: {e}")
+            logging.error(f"Error processing ratings data for {dateString} file {file_index:05d}: {e}")
             postgresql.rollback()
+
+        file_index += 1
