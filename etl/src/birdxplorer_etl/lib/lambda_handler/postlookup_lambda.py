@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -90,21 +89,16 @@ def connect_to_endpoint(url: str) -> dict:
     logger.info(f"[RATE_LIMIT_HEADERS] limit={rate_limit}, remaining={rate_remaining}, reset={rate_reset}")
 
     if response.status_code == 429:
-        if rate_reset:
-            wait_time = max(0, int(rate_reset) - int(time.time()) + 1)
-        else:
-            wait_time = 60
-
-        logger.warning(f"Rate limit hit, need to wait {wait_time} seconds.")
-        # レート制限情報を返す（呼び出し元で遅延再キューイング）
-        return {"status": "rate_limited", "wait_time": wait_time}
+        logger.warning("[RATE_LIMITED] 429 received. Message will return to queue via visibility timeout.")
+        return {"status": "rate_limited"}
     elif response.status_code == 401:
-        logger.error("X API authentication failed (401). Check X_BEARER_TOKEN in environment/secrets.")
+        logger.error("[DLQ_CAUSE:AUTH_FAILED] X API 401 Unauthorized. Check X_BEARER_TOKEN.")
         raise Exception("X API authentication failed: 401 Unauthorized. Token may be invalid or expired.")
     elif response.status_code == 403:
-        logger.error("X API access forbidden (403). Check API tier/permissions.")
+        logger.error("[DLQ_CAUSE:ACCESS_FORBIDDEN] X API 403 Forbidden. Check API tier/permissions.")
         raise Exception("X API access forbidden: 403 Forbidden. Check API tier/permissions.")
     elif response.status_code != 200:
+        logger.error(f"[DLQ_CAUSE:API_ERROR] X API returned {response.status_code}")
         raise Exception("Request returned an error: {} {}".format(response.status_code, response.text))
 
     return response.json()
@@ -119,6 +113,7 @@ def lookup(id: str) -> dict:
         削除時: {"status": "deleted", "title": ..., "detail": ...}
         非公開時: {"status": "protected", "title": ..., "detail": ...}
         その他エラー: {"status": "error", "title": ..., "detail": ...}
+        レート制限時: {"status": "rate_limited"}
     """
     url = create_url(id)
     json_response = connect_to_endpoint(url)
@@ -131,13 +126,48 @@ def lookup(id: str) -> dict:
     return json_response
 
 
+def _poll_message(sqs_handler: SQSHandler, queue_url: str) -> Optional[dict]:
+    """
+    SQSキューからメッセージを1件ポーリングする
+
+    Returns:
+        メッセージ情報のdict、またはメッセージがなければNone
+        {"tweet_id": str, "receipt_handle": str, "body": dict}
+    """
+    messages = sqs_handler.receive_message(queue_url=queue_url, max_messages=1, wait_time_seconds=0)
+    if not messages:
+        return None
+
+    msg = messages[0]
+    receipt_handle = msg["ReceiptHandle"]
+    try:
+        body = json.loads(msg["Body"])
+    except (json.JSONDecodeError, KeyError) as e:
+        logger.error(f"[POLL] Failed to parse message body: {e}")
+        sqs_handler.delete_message(queue_url, receipt_handle)
+        return None
+
+    tweet_id = body.get("tweet_id")
+    if not tweet_id:
+        logger.error(f"[POLL] Message missing tweet_id: {json.dumps(body)}")
+        sqs_handler.delete_message(queue_url, receipt_handle)
+        return None
+
+    return {
+        "tweet_id": tweet_id,
+        "receipt_handle": receipt_handle,
+        "body": body,
+    }
+
+
 def lambda_handler(event: dict, context: Any) -> dict:
     """
     AWS Lambda用のハンドラー関数（VPC外で実行、RDSアクセスなし）
 
-    期待されるeventの形式:
-    1. 直接呼び出し: {"tweet_id": "1234567890"}
-    2. SQS経由: {"Records": [{"body": "{\"tweet_id\": \"1234567890\", \"processing_type\": \"tweet_lookup\"}"}]}
+    起動パターン:
+    1. EventBridge (定期実行): event={} → SQSキューをポーリング
+    2. 直接呼び出し: {"tweet_id": "1234567890"}
+    3. SQS経由 (レガシー): {"Records": [{"body": "..."}]}
     """
     logger.info("=" * 80)
     logger.info("Postlookup Lambda started")
@@ -146,13 +176,14 @@ def lambda_handler(event: dict, context: Any) -> dict:
 
     sqs_handler = SQSHandler()
     db_write_queue_url = os.environ.get("DB_WRITE_QUEUE_URL")
+    tweet_lookup_queue_url = os.environ.get("TWEET_LOOKUP_QUEUE_URL")
 
     try:
         tweet_id = None
-
         skip_tweet_lookup = False
+        receipt_handle = None
 
-        # SQSイベントの場合
+        # 1. SQSイベントの場合（レガシー: SQSトリガー）
         if "Records" in event:
             for record in event["Records"]:
                 try:
@@ -165,9 +196,27 @@ def lambda_handler(event: dict, context: Any) -> dict:
                     logger.error(f"Failed to parse SQS message body: {e}")
                     continue
 
-        # 直接呼び出しの場合
+        # 2. 直接呼び出しの場合
         elif "tweet_id" in event:
             tweet_id = event["tweet_id"]
+
+        # 3. EventBridge起動の場合（Records も tweet_id もない）
+        else:
+            if not tweet_lookup_queue_url:
+                logger.error("[POLL] TWEET_LOOKUP_QUEUE_URL not configured")
+                return {"statusCode": 500, "body": json.dumps({"error": "TWEET_LOOKUP_QUEUE_URL not configured"})}
+
+            logger.info(f"[POLL] Polling message from {tweet_lookup_queue_url}")
+            poll_result = _poll_message(sqs_handler, tweet_lookup_queue_url)
+
+            if not poll_result:
+                logger.info("[POLL] No messages in queue, returning")
+                return {"statusCode": 200, "body": json.dumps({"message": "no_messages"})}
+
+            tweet_id = poll_result["tweet_id"]
+            receipt_handle = poll_result["receipt_handle"]
+            skip_tweet_lookup = poll_result["body"].get("skip_tweet_lookup", False)
+            logger.info(f"[POLL] Got message for tweet_id={tweet_id}")
 
         if tweet_id and skip_tweet_lookup:
             logger.info(f"[SKIP] Post already fetched for tweet: {tweet_id}")
@@ -179,12 +228,23 @@ def lambda_handler(event: dict, context: Any) -> dict:
                     "post_id": tweet_id,
                     "retry_count": 0,
                 }
-                sqs_handler.send_message(
+                message_id = sqs_handler.send_message(
                     queue_url=post_transform_queue_url,
                     message_body=transform_message,
                     delay_seconds=5,
                 )
-                logger.info(f"[SQS_SUCCESS] Sent transform request for skipped tweet {tweet_id}")
+                if message_id:
+                    logger.info(f"[SQS_SUCCESS] Sent transform request for skipped tweet {tweet_id}")
+                else:
+                    logger.error(f"[DLQ_CAUSE:SQS_SEND_FAILED] tweet_id={tweet_id} queue=post-transform-queue")
+                    raise Exception(f"Failed to send transform request for skipped tweet {tweet_id}")
+            else:
+                logger.warning("[CONFIG_WARNING] POST_TRANSFORM_QUEUE_URL not configured, skipping transform enqueue")
+
+            # ポーリングで取得したメッセージを削除
+            if receipt_handle and tweet_lookup_queue_url:
+                sqs_handler.delete_message(tweet_lookup_queue_url, receipt_handle)
+
             return {"statusCode": 200, "body": json.dumps({"skipped": True, "tweet_id": tweet_id})}
 
         if tweet_id:
@@ -196,55 +256,13 @@ def lambda_handler(event: dict, context: Any) -> dict:
             if "status" in post:
                 status = post["status"]
 
-                # レート制限の場合は遅延付きで再キューイング
+                # レート制限の場合: メッセージを削除せず、visibility timeout後にキューに戻す
                 if status == "rate_limited":
-                    wait_time = post.get("wait_time", 65)
-                    # 最小65秒（レート制限回避）、最大900秒（SQS制限）
-                    delay_seconds = max(65, min(wait_time, 900))
-
-                    # 元のメッセージを遅延付きで再送信
-                    tweet_lookup_queue_url = os.environ.get("TWEET_LOOKUP_QUEUE_URL")
-                    if tweet_lookup_queue_url:
-                        requeue_message = {
-                            "tweet_id": tweet_id,
-                            "note_id": event.get("Records", [{}])[0].get("body", "{}"),
-                            "processing_type": "tweet_lookup",
-                        }
-                        # note_idをパースして取得
-                        try:
-                            original_body = json.loads(event["Records"][0]["body"])
-                            requeue_message["note_id"] = original_body.get("note_id")
-                        except (KeyError, json.JSONDecodeError):
-                            pass
-
-                        logger.info(f"[REQUEUE] Rate limited. Requeuing with {delay_seconds}s delay...")
-                        message_id = sqs_handler.send_message(
-                            queue_url=tweet_lookup_queue_url,
-                            message_body=requeue_message,
-                            delay_seconds=delay_seconds,
-                        )
-                        if message_id:
-                            logger.info(f"[REQUEUE_SUCCESS] Message requeued with delay, messageId={message_id}")
-                        else:
-                            logger.error("[REQUEUE_FAILED] Failed to requeue message")
-                            raise Exception("Failed to requeue rate-limited message")
-                    else:
-                        logger.error("[CONFIG_ERROR] TWEET_LOOKUP_QUEUE_URL not configured")
-                        raise Exception("TWEET_LOOKUP_QUEUE_URL not configured")
-
-                    # レート制限時も60秒スリープして、連鎖的なレート制限ヒットを防ぐ
-                    logger.info("[WAIT] Sleeping 60 seconds to prevent rate limit cascade...")
-                    time.sleep(60)
-
+                    logger.info("[RATE_LIMITED] Message not deleted. Will return to queue via visibility timeout.")
+                    # receipt_handle があればメッセージは削除しない → 自動的にキューに戻る
                     return {
                         "statusCode": 200,
-                        "body": json.dumps(
-                            {
-                                "rate_limited": True,
-                                "tweet_id": tweet_id,
-                                "delay_seconds": delay_seconds,
-                            }
-                        ),
+                        "body": json.dumps({"rate_limited": True, "tweet_id": tweet_id}),
                     }
 
                 # 削除/非公開/その他エラーの場合はスキップ
@@ -256,22 +274,20 @@ def lambda_handler(event: dict, context: Any) -> dict:
                 else:
                     logger.warning(f"[SKIP] Tweet {tweet_id} has error: {post.get('title')} - {detail}")
 
-                # 正常終了として返す（DLQに送らない）
+                # ポーリングで取得したメッセージを削除
+                if receipt_handle and tweet_lookup_queue_url:
+                    sqs_handler.delete_message(tweet_lookup_queue_url, receipt_handle)
+
                 return {
                     "statusCode": 200,
                     "body": json.dumps(
-                        {
-                            "skipped": True,
-                            "tweet_id": tweet_id,
-                            "reason": status,
-                            "detail": detail,
-                        }
+                        {"skipped": True, "tweet_id": tweet_id, "reason": status, "detail": detail}
                     ),
                 }
 
             # dataがない場合は予期しないエラー
             if "data" not in post:
-                logger.error(f"[ERROR] Unexpected response for tweet {tweet_id}: {json.dumps(post)}")
+                logger.error(f"[DLQ_CAUSE:UNEXPECTED_RESPONSE] tweet_id={tweet_id} response={json.dumps(post)}")
                 raise Exception(f"Unexpected API response for tweet: {tweet_id}")
 
             created_at = datetime.strptime(post["data"]["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ").replace(
@@ -365,14 +381,11 @@ def lambda_handler(event: dict, context: Any) -> dict:
                 if message_id:
                     logger.info(f"[SQS_SUCCESS] Sent post data to db-write queue, messageId={message_id}")
                 else:
-                    logger.error("[SQS_FAILED] Failed to send post data to db-write queue")
-                    return {
-                        "statusCode": 500,
-                        "body": json.dumps({"error": "Failed to send post data to db-write queue"}),
-                    }
+                    logger.error(f"[DLQ_CAUSE:SQS_SEND_FAILED] tweet_id={tweet_id} queue=db-write-queue")
+                    raise Exception(f"Failed to send post data to db-write queue for tweet {tweet_id}")
             else:
-                logger.error("[CONFIG_ERROR] DB_WRITE_QUEUE_URL not configured")
-                return {"statusCode": 500, "body": json.dumps({"error": "DB_WRITE_QUEUE_URL not configured"})}
+                logger.error(f"[DLQ_CAUSE:CONFIG_ERROR] tweet_id={tweet_id} DB_WRITE_QUEUE_URL not configured")
+                raise Exception(f"DB_WRITE_QUEUE_URL not configured, tweet_id={tweet_id}")
 
             # Post Transform Queueにメッセージを送信（遅延付き）
             post_transform_queue_url = os.environ.get("POST_TRANSFORM_QUEUE_URL")
@@ -386,7 +399,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
                 message_id = sqs_handler.send_message(
                     queue_url=post_transform_queue_url,
                     message_body=transform_message,
-                    delay_seconds=60,  # db_writer完了を待つため60秒遅延
+                    delay_seconds=60,
                 )
                 if message_id:
                     logger.info(f"[SQS_SUCCESS] Sent transform request, messageId={message_id}")
@@ -395,14 +408,13 @@ def lambda_handler(event: dict, context: Any) -> dict:
             else:
                 logger.warning("[CONFIG_WARNING] POST_TRANSFORM_QUEUE_URL not configured, skipping post-transform")
 
+            # ポーリングで取得したメッセージを削除
+            if receipt_handle and tweet_lookup_queue_url:
+                sqs_handler.delete_message(tweet_lookup_queue_url, receipt_handle)
+
             logger.info("=" * 80)
             logger.info("[COMPLETED] Postlookup Lambda completed successfully")
             logger.info("=" * 80)
-
-            # レート制限回避のため65秒待機（X API: 15分で15リクエスト = 60秒/件 + バッファ5秒）
-            # 新規メッセージはtopic_detectでSQS delay設定済みだが、既存メッセージ対応のため残す
-            logger.info("[WAIT] Sleeping 65 seconds to avoid rate limit...")
-            time.sleep(65)
 
             return {"statusCode": 200, "body": json.dumps({"tweet_id": tweet_id, "data": post})}
         else:
