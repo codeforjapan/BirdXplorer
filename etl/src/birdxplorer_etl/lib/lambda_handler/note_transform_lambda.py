@@ -5,11 +5,12 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Union
 
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 
 from birdxplorer_common.storage import (
     NoteRecord,
     NoteTopicAssociation,
+    RowNoteRatingRecord,
     RowNoteRecord,
     RowNoteStatusRecord,
     RowPostRecord,
@@ -192,6 +193,7 @@ def process_single_message(message: dict, postgresql, sqs_handler, topics_cache:
             RowNoteRecord.language,
             RowNoteRecord.created_at_millis,
             RowNoteStatusRecord.current_status,
+            RowNoteStatusRecord.locked_status,
         )
         .outerjoin(RowNoteStatusRecord, RowNoteRecord.note_id == RowNoteStatusRecord.note_id)
         .filter(RowNoteRecord.note_id == note_id)
@@ -264,6 +266,22 @@ def process_single_message(message: dict, postgresql, sqs_handler, topics_cache:
         else:
             raise Exception(f"Failed to requeue note {note_id}")
 
+    # 評価データの集計
+    rating_query = postgresql.execute(
+        select(
+            func.count(RowNoteRatingRecord.note_id).label("rate_count"),
+            func.sum(case((RowNoteRatingRecord.helpfulness_level == "HELPFUL", 1), else_=0)).label("helpful_count"),
+            func.sum(case((RowNoteRatingRecord.helpfulness_level == "SOMEWHAT_HELPFUL", 1), else_=0)).label(
+                "somewhat_helpful_count"
+            ),
+            func.sum(case((RowNoteRatingRecord.helpfulness_level == "NOT_HELPFUL", 1), else_=0)).label(
+                "not_helpful_count"
+            ),
+        ).filter(RowNoteRatingRecord.note_id == note_id)
+    )
+
+    rating_agg = rating_query.first()
+
     # notesテーブルに新しいレコードを作成
     new_note = NoteRecord(
         note_id=note_row.note_id,
@@ -273,6 +291,13 @@ def process_single_message(message: dict, postgresql, sqs_handler, topics_cache:
         summary=note_row.summary,
         current_status=note_row.current_status,
         created_at=note_row.created_at_millis,
+        rate_count=int(rating_agg.rate_count) if rating_agg and rating_agg.rate_count else 0,
+        helpful_count=int(rating_agg.helpful_count) if rating_agg and rating_agg.helpful_count else 0,
+        not_helpful_count=int(rating_agg.not_helpful_count) if rating_agg and rating_agg.not_helpful_count else 0,
+        somewhat_helpful_count=(
+            int(rating_agg.somewhat_helpful_count) if rating_agg and rating_agg.somewhat_helpful_count else 0
+        ),
+        locked_status=note_row.locked_status,
     )
 
     postgresql.add(new_note)
