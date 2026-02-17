@@ -29,16 +29,14 @@ def extract_data(postgresql: Session):
     logging.info(f"Loaded {len(existing_row_note_ids)} existing note IDs from row_notes")
 
     # Noteデータを取得してPostgreSQLに保存
-    # 古い日から新しい日に向かって処理（新しいデータで上書きするため）
-    start_date = datetime.now() - timedelta(days=2)  # 2日前から開始
-    end_date = datetime.now()  # 当日まで
-    date = start_date
-
-    while date <= end_date:
+    # 今日から遡って最新データがある日を1日分処理する
+    for days_ago in range(3):  # 今日、昨日、一昨日
+        date = datetime.now() - timedelta(days=days_ago)
         dateString = date.strftime("%Y/%m/%d")
 
         # notes-00000.zip から順に404が返るまでダウンロード
         file_index = 0
+        date_has_notes = False  # この日のnotesデータが存在するか
         while True:
             if settings.USE_DUMMY_DATA:
                 note_url = "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/notes_sample.tsv"
@@ -49,7 +47,10 @@ def extract_data(postgresql: Session):
             res = requests.get(note_url)
 
             if res.status_code == 404:
-                logging.info(f"Notes file {file_index:05d} not found (404), stopping notes download for {dateString}")
+                if file_index == 0:
+                    logging.info(f"No notes data available for {dateString}, trying previous day")
+                else:
+                    logging.info(f"Notes file {file_index:05d} not found (404), stopping notes download for {dateString}")
                 break
 
             if res.status_code != 200:
@@ -58,6 +59,7 @@ def extract_data(postgresql: Session):
                 continue
 
             # TSVを読み込む
+            date_has_notes = True  # この日のデータが存在する
             if settings.USE_DUMMY_DATA:
                 # ダミーデータの場合はTSVファイルを直接処理
                 tsv_data = res.content.decode("utf-8").splitlines()
@@ -223,6 +225,10 @@ def extract_data(postgresql: Session):
 
             file_index += 1
 
+        # この日のnotesデータがなければ前の日を試す
+        if not date_has_notes:
+            continue
+
         # 評価データを取得して保存（noteStatus処理より先に実行することで集計タイミングを保証）
         extract_ratings(postgresql, dateString, existing_row_note_ids)
 
@@ -321,8 +327,7 @@ def extract_data(postgresql: Session):
 
             file_index += 1
 
-        # 次の日に進む（古い日→新しい日の順で処理）
-        date = date + timedelta(days=1)
+        break  # データを処理したので終了
 
     postgresql.commit()
 
@@ -393,7 +398,7 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
             ratings_url = "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/notesRating_sample.tsv"
         else:
             ratings_url = (
-                f"https://ton.twimg.com/birdwatch-public-data/{dateString}/ratings/ratings-{file_index:05d}.zip"
+                f"https://ton.twimg.com/birdwatch-public-data/{dateString}/noteRatings/ratings-{file_index:05d}.zip"
             )
         logging.info(f"Fetching ratings from: {ratings_url}")
 
