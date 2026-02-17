@@ -272,19 +272,14 @@ def extract_data(postgresql: Session):
                     )
                     continue
 
-                status = (
-                    postgresql.query(RowNoteStatusRecord).filter(RowNoteStatusRecord.note_id == row["note_id"]).first()
-                )
-                if status is None or status.created_at_millis > int(datetime.now().timestamp() * 1000):
-                    postgresql.query(RowNoteStatusRecord).filter(RowNoteStatusRecord.note_id == row["note_id"]).delete()
-                    rows_to_add.append(RowNoteStatusRecord(**row))
+                # 既存のステータスレコードを削除して最新データで置き換え
+                postgresql.query(RowNoteStatusRecord).filter(RowNoteStatusRecord.note_id == row["note_id"]).delete()
+                rows_to_add.append(RowNoteStatusRecord(**row))
 
-                    # NoteRecordが既に存在する場合、ステータス更新キューに追加
-                    existing_note_record = (
-                        postgresql.query(NoteRecord).filter(NoteRecord.note_id == row["note_id"]).first()
-                    )
-                    if existing_note_record:
-                        notes_to_update_status.append(row["note_id"])
+                # NoteRecordが既に存在する場合、ステータス更新キューに追加
+                existing_note_record = postgresql.query(NoteRecord).filter(NoteRecord.note_id == row["note_id"]).first()
+                if existing_note_record:
+                    notes_to_update_status.append(row["note_id"])
 
                 if index % 1000 == 0:
                     postgresql.bulk_save_objects(rows_to_add)

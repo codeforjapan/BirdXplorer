@@ -193,10 +193,6 @@ def process_single_message(message: dict, postgresql, sqs_handler, topics_cache:
             RowNoteRecord.language,
             RowNoteRecord.created_at_millis,
             RowNoteStatusRecord.current_status,
-            RowNoteStatusRecord.timestamp_millis_of_first_non_n_m_r_status,
-            RowNoteStatusRecord.first_non_n_m_r_status,
-            RowNoteStatusRecord.timestamp_millis_of_current_status,
-            RowNoteStatusRecord.timestamp_millis_of_status_lock,
             RowNoteStatusRecord.locked_status,
         )
         .outerjoin(RowNoteStatusRecord, RowNoteRecord.note_id == RowNoteStatusRecord.note_id)
@@ -286,43 +282,6 @@ def process_single_message(message: dict, postgresql, sqs_handler, topics_cache:
 
     rating_agg = rating_query.first()
 
-    # ステータス履歴を構築
-    status_history = []
-
-    # locked_statusがある場合は何もしない（空のステータス履歴）
-    if not note_row.locked_status:
-        # 初期ステータス（ノート作成時は常にNEEDS_MORE_RATINGS）
-        if note_row.created_at_millis:
-            status_history.append({"status": "NEEDS_MORE_RATINGS", "date": int(note_row.created_at_millis)})
-
-        # 最初の非NMRステータス
-        if note_row.timestamp_millis_of_first_non_n_m_r_status and note_row.first_non_n_m_r_status:
-            status_history.append(
-                {
-                    "status": note_row.first_non_n_m_r_status,
-                    "date": int(note_row.timestamp_millis_of_first_non_n_m_r_status),
-                }
-            )
-
-        # 現在のステータス（最初の非NMRステータスと異なる場合のみ）
-        if (
-            note_row.current_status
-            and note_row.timestamp_millis_of_current_status
-            and note_row.current_status != note_row.first_non_n_m_r_status
-        ):
-            status_history.append(
-                {
-                    "status": note_row.current_status,
-                    "date": int(note_row.timestamp_millis_of_current_status),
-                }
-            )
-
-    # has_been_helpfuledフラグを計算（過去にCURRENTLY_RATED_HELPFULになったことがあるか）
-    has_been_helpfuled = any(entry["status"] == "CURRENTLY_RATED_HELPFUL" for entry in status_history)
-
-    # JSONにシリアライズ
-    current_status_history_json = json.dumps(status_history)
-
     # notesテーブルに新しいレコードを作成
     new_note = NoteRecord(
         note_id=note_row.note_id,
@@ -338,8 +297,6 @@ def process_single_message(message: dict, postgresql, sqs_handler, topics_cache:
         somewhat_helpful_count=(
             int(rating_agg.somewhat_helpful_count) if rating_agg and rating_agg.somewhat_helpful_count else 0
         ),
-        has_been_helpfuled=has_been_helpfuled,
-        current_status_history=current_status_history_json,
         locked_status=note_row.locked_status,
     )
 
