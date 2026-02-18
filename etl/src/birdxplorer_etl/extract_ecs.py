@@ -79,6 +79,7 @@ def extract_data(postgresql: Session):
 
             rows_to_add = {}  # note_idをキーにして重複を防ぐ
             rows_to_update = []
+            notes_missing_language = []  # languageがNULLの既存ノート（lang-detect再enqueue用）
             for index, row in enumerate(reader):
                 note_id = row["note_id"]
                 # 既にrows_to_addに追加済みの場合はスキップ
@@ -184,6 +185,9 @@ def extract_data(postgresql: Session):
                         if hasattr(existing_note, key):
                             setattr(existing_note, key, value)
                     rows_to_update.append(existing_note)
+                    # languageがNULLの既存ノートはlang-detectに再enqueue
+                    if not existing_note.language:
+                        notes_missing_language.append(existing_note)
                 else:
                     note_record = RowNoteRecord(**row)
                     rows_to_add[note_id] = note_record
@@ -202,8 +206,17 @@ def extract_data(postgresql: Session):
                     for note in rows_to_add.values():
                         enqueue_notes(note.note_id, note.summary, note.tweet_id, note.language)
 
+                    # languageがNULLの既存ノートをlang-detectに再enqueue
+                    if notes_missing_language:
+                        for note in notes_missing_language:
+                            enqueue_notes(note.note_id, note.summary, note.tweet_id, note.language)
+                        logging.info(
+                            f"Enqueued {len(notes_missing_language)} existing notes with missing language"
+                        )
+
                     rows_to_add = {}
                     rows_to_update = []
+                    notes_missing_language = []
 
             # 最後のバッチを処理
             postgresql.bulk_save_objects(list(rows_to_add.values()))
@@ -216,6 +229,14 @@ def extract_data(postgresql: Session):
             # 最後のバッチのSQSキューイング（新規追加のみ）
             for note in rows_to_add.values():
                 enqueue_notes(note.note_id, note.summary, note.tweet_id, note.language)
+
+            # languageがNULLの既存ノートをlang-detectに再enqueue
+            for note in notes_missing_language:
+                enqueue_notes(note.note_id, note.summary, note.tweet_id, note.language)
+            if notes_missing_language:
+                logging.info(
+                    f"Enqueued {len(notes_missing_language)} existing notes with missing language"
+                )
 
             logging.info(f"Successfully processed notes file {file_index:05d} for {dateString}")
 
