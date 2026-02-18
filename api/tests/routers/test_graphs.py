@@ -341,15 +341,15 @@ def test_notes_evaluation_get_success(client: TestClient, note_samples: List[Not
         assert "status" in item
 
 
-def test_notes_evaluation_limit_200_enforcement(client: TestClient, note_samples: List[Note]) -> None:
-    """Test TOP 200 limit enforcement."""
+def test_notes_evaluation_limit_5000_enforcement(client: TestClient, note_samples: List[Note]) -> None:
+    """Test TOP 5000 limit enforcement."""
     start_ts, end_ts = get_timestamp_range(30)
     # Request with limit parameter
     response = client.get(f"/api/v1/graphs/notes-evaluation?start_date={start_ts}&end_date={end_ts}&limit=50")
     assert response.status_code == 200
 
-    # Max limit should be 200 - FastAPI returns 422 for validation errors
-    response = client.get(f"/api/v1/graphs/notes-evaluation?start_date={start_ts}&end_date={end_ts}&limit=300")
+    # Max limit should be 5000 - FastAPI returns 422 for validation errors
+    response = client.get(f"/api/v1/graphs/notes-evaluation?start_date={start_ts}&end_date={end_ts}&limit=5001")
     assert response.status_code == 422
 
 
@@ -450,15 +450,15 @@ def test_post_influence_get_success(client: TestClient, note_samples: List[Note]
         assert "status" in item
 
 
-def test_post_influence_limit_200_enforcement(client: TestClient, note_samples: List[Note]) -> None:
-    """Test TOP 200 limit enforcement."""
+def test_post_influence_limit_5000_enforcement(client: TestClient, note_samples: List[Note]) -> None:
+    """Test TOP 5000 limit enforcement."""
     start_ts, end_ts = get_timestamp_range(30)
     # Request with limit parameter
     response = client.get(f"/api/v1/graphs/post-influence?start_date={start_ts}&end_date={end_ts}&limit=50")
     assert response.status_code == 200
 
-    # Max limit should be 200 - FastAPI returns 422 for validation errors
-    response = client.get(f"/api/v1/graphs/post-influence?start_date={start_ts}&end_date={end_ts}&limit=300")
+    # Max limit should be 5000 - FastAPI returns 422 for validation errors
+    response = client.get(f"/api/v1/graphs/post-influence?start_date={start_ts}&end_date={end_ts}&limit=5001")
     assert response.status_code == 422
 
 
