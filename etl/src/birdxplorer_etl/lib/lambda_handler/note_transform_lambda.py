@@ -344,6 +344,7 @@ def lambda_handler(event, context):
                 message = {"body": message_body, "message_id": message_id}
 
                 result = process_single_message(message, postgresql, sqs_handler, lambda_handler._topics_cache)
+                result["message_id"] = message_id
                 results.append(result)
 
             except Exception as e:
@@ -415,6 +416,7 @@ def lambda_handler(event, context):
                 topic_detect_queued += 1
             else:
                 logger.error(f"Failed to enqueue note {note_id} to topic-detect queue")
+                batch_item_failures.append({"itemIdentifier": result["message_id"]})
 
         logger.info(
             f"Batch complete: {len(results)} processed, "
