@@ -109,7 +109,7 @@ def lambda_handler(event, context):
                 if message_id:
                     logger.info(f"[SQS_SUCCESS] Sent language update to db-write queue, messageId={message_id}")
                 else:
-                    logger.error(f"[SQS_FAILED] Failed to send language update to db-write queue")
+                    raise Exception(f"Failed to send language update to db-write queue for note {note_id}")
             else:
                 logger.error("[CONFIG_ERROR] DB_WRITE_QUEUE_URL not configured")
 
@@ -131,7 +131,7 @@ def lambda_handler(event, context):
                         f"[SQS_SUCCESS] Enqueued note {note_id} to note-transform queue, messageId={message_id}"
                     )
                 else:
-                    logger.error(f"[SQS_FAILED] Failed to enqueue note {note_id} to note-transform queue")
+                    raise Exception(f"Failed to enqueue note {note_id} to note-transform queue")
             else:
                 logger.warning("[CONFIG_WARNING] NOTE_TRANSFORM_QUEUE_URL not configured, skipping SQS enqueue")
 
