@@ -3,7 +3,7 @@
 Provides time-series aggregations and evaluation metrics for community notes and posts.
 """
 
-from typing import Literal
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -14,6 +14,7 @@ from birdxplorer_common.models import (
     MonthlyNoteDataItem,
     NoteEvaluationDataItem,
     PostInfluenceDataItem,
+    TopNoteAccountDataItem,
     TwitterTimestamp,
 )
 from birdxplorer_common.storage import Storage
@@ -87,6 +88,8 @@ def gen_router(storage: Storage) -> APIRouter:
         start_date: TwitterTimestamp = Query(..., description="Start timestamp in milliseconds (Unix epoch, UTC)"),
         end_date: TwitterTimestamp = Query(..., description="End timestamp in milliseconds (Unix epoch, UTC)"),
         status: StatusType = Query("all", description="Filter by note publication status"),
+        language: Optional[str] = Query(None, description="Comma-separated language codes to filter by (e.g., ja,en)"),
+        keywords: Optional[str] = Query(None, description="Comma-separated keywords for AND search in note summaries"),
     ) -> GraphListResponse[DailyNotesCreationDataItem]:
         """Get daily community note creation trends.
 
@@ -122,6 +125,10 @@ def gen_router(storage: Storage) -> APIRouter:
             # Validate timestamp range
             validate_timestamp_range(start_date, end_date, max_days=30)
 
+            # Parse comma-separated filters
+            language_list: Optional[List[str]] = [lang.strip() for lang in language.split(",")] if language else None
+            keywords_list: Optional[List[str]] = [kw.strip() for kw in keywords.split(",")] if keywords else None
+
             # Convert timestamps to ISO date strings
             start_date_str = twitter_timestamp_to_iso_date(start_date)
             end_date_str = twitter_timestamp_to_iso_date(end_date)
@@ -131,6 +138,8 @@ def gen_router(storage: Storage) -> APIRouter:
                 start_date=start_date_str,
                 end_date=end_date_str,
                 status_filter=status,
+                language_filter=language_list,
+                keywords=keywords_list,
             )
 
             # Fill gaps for continuous time series
@@ -160,6 +169,8 @@ def gen_router(storage: Storage) -> APIRouter:
         start_date: TwitterTimestamp = Query(..., description="Start timestamp in milliseconds (Unix epoch, UTC)"),
         end_date: TwitterTimestamp = Query(..., description="End timestamp in milliseconds (Unix epoch, UTC)"),
         status: StatusType = Query("all", description="Filter by note publication status"),
+        language: Optional[str] = Query(None, description="Comma-separated language codes to filter by (e.g., ja,en)"),
+        keywords: Optional[str] = Query(None, description="Comma-separated keywords for AND search in note summaries"),
     ) -> GraphListResponse[DailyPostCountDataItem]:
         """Get daily post volume trends.
 
@@ -196,6 +207,10 @@ def gen_router(storage: Storage) -> APIRouter:
             # Validate timestamp range
             validate_timestamp_range(start_date, end_date, max_days=30)
 
+            # Parse comma-separated filters
+            language_list = [lang.strip() for lang in language.split(",")] if language else None
+            keywords_list = [kw.strip() for kw in keywords.split(",")] if keywords else None
+
             # Convert timestamps to ISO date strings
             start_date_str = twitter_timestamp_to_iso_date(start_date)
             end_date_str = twitter_timestamp_to_iso_date(end_date)
@@ -205,6 +220,8 @@ def gen_router(storage: Storage) -> APIRouter:
                 start_date=start_date_str,
                 end_date=end_date_str,
                 status_filter=status,
+                language_filter=language_list,
+                keywords=keywords_list,
             )
 
             # Fill gaps for continuous time series
@@ -241,6 +258,8 @@ def gen_router(storage: Storage) -> APIRouter:
         start_date: TwitterTimestamp = Query(..., description="Start timestamp in milliseconds (Unix epoch, UTC)"),
         end_date: TwitterTimestamp = Query(..., description="End timestamp in milliseconds (Unix epoch, UTC)"),
         status: StatusType = Query("all", description="Filter by note publication status"),
+        language: Optional[str] = Query(None, description="Comma-separated language codes to filter by (e.g., ja,en)"),
+        keywords: Optional[str] = Query(None, description="Comma-separated keywords for AND search in note summaries"),
     ) -> GraphListResponse[MonthlyNoteDataItem]:
         """Get monthly note publication rates.
 
@@ -280,6 +299,10 @@ def gen_router(storage: Storage) -> APIRouter:
             # Validate timestamp range (max 365 days for ~12 months)
             validate_timestamp_range(start_date, end_date, max_days=365)
 
+            # Parse comma-separated filters
+            language_list = [lang.strip() for lang in language.split(",")] if language else None
+            keywords_list = [kw.strip() for kw in keywords.split(",")] if keywords else None
+
             # Convert timestamps to datetime objects for month extraction
             from datetime import datetime, timezone
 
@@ -295,6 +318,8 @@ def gen_router(storage: Storage) -> APIRouter:
                 start_month=start_month,
                 end_month=end_month,
                 status_filter=status,
+                language_filter=language_list,
+                keywords=keywords_list,
             )
 
             # Fill gaps for continuous time series
@@ -337,6 +362,8 @@ def gen_router(storage: Storage) -> APIRouter:
         end_date: TwitterTimestamp = Query(..., description="End timestamp in milliseconds (Unix epoch, UTC)"),
         status: StatusType = Query("all", description="Filter by note publication status"),
         limit: int = Query(200, ge=1, le=5000, description="Maximum number of results (max 5000)"),
+        language: Optional[str] = Query(None, description="Comma-separated language codes to filter by (e.g., ja,en)"),
+        keywords: Optional[str] = Query(None, description="Comma-separated keywords for AND search in note summaries"),
     ) -> GraphListResponse[NoteEvaluationDataItem]:
         """Get individual note evaluation metrics.
 
@@ -385,6 +412,10 @@ def gen_router(storage: Storage) -> APIRouter:
             if limit > 5000:
                 raise ValueError("Limit cannot exceed 5000")
 
+            # Parse comma-separated filters
+            language_list = [lang.strip() for lang in language.split(",")] if language else None
+            keywords_list = [kw.strip() for kw in keywords.split(",")] if keywords else None
+
             # Convert timestamps to ISO date strings
             start_date_str = twitter_timestamp_to_iso_date(start_date)
             end_date_str = twitter_timestamp_to_iso_date(end_date)
@@ -395,6 +426,8 @@ def gen_router(storage: Storage) -> APIRouter:
                 end_date=end_date_str,
                 status_filter=status,
                 limit=limit,
+                language_filter=language_list,
+                keywords=keywords_list,
             )
 
             # Convert to Pydantic models
@@ -418,6 +451,8 @@ def gen_router(storage: Storage) -> APIRouter:
         end_date: TwitterTimestamp = Query(..., description="End timestamp in milliseconds (Unix epoch, UTC)"),
         status: StatusType = Query("all", description="Filter by note publication status"),
         limit: int = Query(200, ge=1, le=5000, description="Maximum number of results (max 5000)"),
+        language: Optional[str] = Query(None, description="Comma-separated language codes to filter by (e.g., ja,en)"),
+        keywords: Optional[str] = Query(None, description="Comma-separated keywords for AND search in note summaries"),
     ) -> GraphListResponse[NoteEvaluationDataItem]:
         """Get individual note evaluation metrics ordered by helpful count.
 
@@ -466,6 +501,10 @@ def gen_router(storage: Storage) -> APIRouter:
             if limit > 5000:
                 raise ValueError("Limit cannot exceed 5000")
 
+            # Parse comma-separated filters
+            language_list = [lang.strip() for lang in language.split(",")] if language else None
+            keywords_list = [kw.strip() for kw in keywords.split(",")] if keywords else None
+
             # Convert timestamps to ISO date strings
             start_date_str = twitter_timestamp_to_iso_date(start_date)
             end_date_str = twitter_timestamp_to_iso_date(end_date)
@@ -477,6 +516,8 @@ def gen_router(storage: Storage) -> APIRouter:
                 status_filter=status,
                 limit=limit,
                 order_by="helpful_count",
+                language_filter=language_list,
+                keywords=keywords_list,
             )
 
             # Convert to Pydantic models
@@ -500,6 +541,8 @@ def gen_router(storage: Storage) -> APIRouter:
         end_date: TwitterTimestamp = Query(..., description="End timestamp in milliseconds (Unix epoch, UTC)"),
         status: StatusType = Query("all", description="Filter by note publication status"),
         limit: int = Query(200, ge=1, le=5000, description="Maximum number of results (max 5000)"),
+        language: Optional[str] = Query(None, description="Comma-separated language codes to filter by (e.g., ja,en)"),
+        keywords: Optional[str] = Query(None, description="Comma-separated keywords for AND search in note summaries"),
     ) -> GraphListResponse[PostInfluenceDataItem]:
         """Get individual post influence metrics.
 
@@ -548,6 +591,10 @@ def gen_router(storage: Storage) -> APIRouter:
             if limit > 5000:
                 raise ValueError("Limit cannot exceed 5000")
 
+            # Parse comma-separated filters
+            language_list = [lang.strip() for lang in language.split(",")] if language else None
+            keywords_list = [kw.strip() for kw in keywords.split(",")] if keywords else None
+
             # Convert timestamps to ISO date strings
             start_date_str = twitter_timestamp_to_iso_date(start_date)
             end_date_str = twitter_timestamp_to_iso_date(end_date)
@@ -558,6 +605,8 @@ def gen_router(storage: Storage) -> APIRouter:
                 end_date=end_date_str,
                 status_filter=status,
                 limit=limit,
+                language_filter=language_list,
+                keywords=keywords_list,
             )
 
             # Convert to Pydantic models
@@ -565,6 +614,85 @@ def gen_router(storage: Storage) -> APIRouter:
 
             # Get metadata timestamp
             updated_at = storage.get_graph_updated_at("posts")
+
+            return GraphListResponse(data=items, updated_at=updated_at)
+
+        except HTTPException:
+            raise
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+    @router.get("/top-note-accounts", response_model=GraphListResponse[TopNoteAccountDataItem])
+    def get_top_note_accounts(
+        start_date: TwitterTimestamp = Query(..., description="Start timestamp in milliseconds (Unix epoch, UTC)"),
+        end_date: TwitterTimestamp = Query(..., description="End timestamp in milliseconds (Unix epoch, UTC)"),
+        status: StatusType = Query("all", description="Filter by note publication status"),
+        language: Optional[str] = Query(None, description="Comma-separated language codes to filter by (e.g., ja,en)"),
+        keywords: Optional[str] = Query(None, description="Comma-separated keywords for AND search in note summaries"),
+    ) -> GraphListResponse[TopNoteAccountDataItem]:
+        """Get top accounts by note count with period-over-period comparison.
+
+        Returns the top 10 accounts ranked by number of notes created in the specified
+        date range (maximum 30 days), together with the change from the equivalent
+        previous period of the same length.
+
+        **Previous Period Calculation:**
+        - Current period: [start_date, end_date]
+        - Duration: end_date - start_date (in milliseconds)
+        - Previous period: [start_date - duration, start_date - 1ms]
+        - note_count_change = current_count - previous_count (0 if no previous data)
+
+        **Date Range:**
+        - Timestamps must be in milliseconds (Unix epoch, UTC)
+        - Maximum range: 30 days
+        - start_date must be <= end_date
+
+        Args:
+            start_date: Start timestamp in milliseconds (required)
+            end_date: End timestamp in milliseconds (required)
+            status: Filter by specific note status or "all" (default: "all")
+
+        Returns:
+            GraphListResponse containing:
+            - data: List of top 10 accounts with rank, username, note_count, note_count_change
+            - updatedAt: Last data update timestamp (YYYY-MM-DD format)
+
+        Raises:
+            HTTPException: 400 if validation fails, 422 if timestamp format invalid
+        """
+        try:
+            validate_timestamp_range(start_date, end_date, max_days=30)
+
+            # Parse comma-separated filters
+            language_list = [lang.strip() for lang in language.split(",")] if language else None
+            keywords_list = [kw.strip() for kw in keywords.split(",")] if keywords else None
+
+            # Current period
+            start_date_str = twitter_timestamp_to_iso_date(start_date)
+            end_date_str = twitter_timestamp_to_iso_date(end_date)
+
+            # Previous period: same duration, ending just before start_date
+            duration_ms = int(end_date) - int(start_date)
+            prev_start_ms = int(start_date) - duration_ms
+            prev_end_ms = int(start_date) - 1
+            prev_start_date_str = twitter_timestamp_to_iso_date(prev_start_ms)
+            prev_end_date_str = twitter_timestamp_to_iso_date(prev_end_ms)
+
+            raw_data = storage.get_top_note_accounts(
+                start_date=start_date_str,
+                end_date=end_date_str,
+                prev_start_date=prev_start_date_str,
+                prev_end_date=prev_end_date_str,
+                status_filter=status,
+                limit=10,
+                language_filter=language_list,
+                keywords=keywords_list,
+            )
+
+            items = [TopNoteAccountDataItem(**item) for item in raw_data]
+            updated_at = storage.get_graph_updated_at("notes")
 
             return GraphListResponse(data=items, updated_at=updated_at)
 

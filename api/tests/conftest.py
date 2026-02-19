@@ -491,6 +491,8 @@ def mock_storage(
         start_date: str,
         end_date: str,
         status_filter: Union[str, None] = None,
+        language_filter: Union[List[str], None] = None,
+        keywords: Union[List[str], None] = None,
     ) -> List[dict[str, Union[str, int]]]:
         # Return empty list for mock - tests can override if needed
         return []
@@ -501,6 +503,8 @@ def mock_storage(
         start_date: str,
         end_date: str,
         status_filter: Union[str, None] = None,
+        language_filter: Union[List[str], None] = None,
+        keywords: Union[List[str], None] = None,
     ) -> List[dict[str, Union[str, int]]]:
         # Return empty list for mock - tests can override if needed
         return []
@@ -511,6 +515,8 @@ def mock_storage(
         start_month: str,
         end_month: str,
         status_filter: Union[str, None] = None,
+        language_filter: Union[List[str], None] = None,
+        keywords: Union[List[str], None] = None,
     ) -> List[dict[str, Union[str, int, float]]]:
         # Return empty list for mock - tests can override if needed
         return []
@@ -543,6 +549,8 @@ def mock_storage(
         status_filter: Union[str, None] = None,
         limit: int = 200,
         order_by: str = "impression_count",
+        language_filter: Union[List[str], None] = None,
+        keywords: Union[List[str], None] = None,
     ) -> List[dict[str, Union[str, int]]]:
         # Return empty list for mock - tests can override if needed
         return []
@@ -554,11 +562,28 @@ def mock_storage(
         end_date: Union[str, None] = None,
         status_filter: Union[str, None] = None,
         limit: int = 200,
+        language_filter: Union[List[str], None] = None,
+        keywords: Union[List[str], None] = None,
     ) -> List[dict[str, Union[str, int]]]:
         # Return empty list for mock - tests can override if needed
         return []
 
     mock.get_post_influence_points.side_effect = _get_post_influence_points
+
+    def _get_top_note_accounts(
+        start_date: str,
+        end_date: str,
+        prev_start_date: str,
+        prev_end_date: str,
+        status_filter: str = "all",
+        limit: int = 10,
+        language_filter: Union[List[str], None] = None,
+        keywords: Union[List[str], None] = None,
+    ) -> List[dict[str, Union[str, int]]]:
+        # Return empty list for mock - tests can override if needed
+        return []
+
+    mock.get_top_note_accounts.side_effect = _get_top_note_accounts
 
     def _get_graph_updated_at(table: str) -> str:
         # Return a fixed date for testing
