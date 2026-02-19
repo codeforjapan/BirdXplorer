@@ -485,3 +485,163 @@ def test_post_influence_status_filtering(client: TestClient, note_samples: List[
 
     res_json = response.json()
     assert "data" in res_json
+
+
+# User Story 7: Top Note Accounts Tests
+def test_top_note_accounts_get_success(client: TestClient, note_samples: List[Note]) -> None:
+    """Test GET /api/v1/graphs/top-note-accounts returns valid response."""
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/top-note-accounts?start_date={start_ts}&end_date={end_ts}")
+
+    if response.status_code != 200:
+        print(f"\nError response: {response.json()}")
+
+    assert response.status_code == 200
+
+    res_json = response.json()
+    assert "data" in res_json
+    assert "updatedAt" in res_json
+    assert isinstance(res_json["data"], list)
+    assert isinstance(res_json["updatedAt"], str)
+
+
+def test_top_note_accounts_data_structure(client: TestClient, note_samples: List[Note]) -> None:
+    """Test GET /api/v1/graphs/top-note-accounts returns correct field names."""
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/top-note-accounts?start_date={start_ts}&end_date={end_ts}")
+    assert response.status_code == 200
+
+    res_json = response.json()
+    if res_json["data"]:
+        item = res_json["data"][0]
+        assert "rank" in item
+        assert "username" in item
+        assert "noteCount" in item
+        assert "noteCountChange" in item
+
+
+def test_top_note_accounts_with_status_filter(client: TestClient, note_samples: List[Note]) -> None:
+    """Test GET /api/v1/graphs/top-note-accounts with status filter."""
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/top-note-accounts?start_date={start_ts}&end_date={end_ts}&status=published")
+    assert response.status_code == 200
+
+    res_json = response.json()
+    assert "data" in res_json
+    assert isinstance(res_json["data"], list)
+
+
+def test_top_note_accounts_invalid_range(client: TestClient) -> None:
+    """Test GET /api/v1/graphs/top-note-accounts rejects range exceeding 30 days."""
+    # Need 32 days since get_timestamp_range uses days-1, giving 31-day range that exceeds max 30
+    start_ts, end_ts = get_timestamp_range(32)
+    response = client.get(f"/api/v1/graphs/top-note-accounts?start_date={start_ts}&end_date={end_ts}")
+    assert response.status_code == 400
+
+
+def test_top_note_accounts_missing_params(client: TestClient) -> None:
+    """Test GET /api/v1/graphs/top-note-accounts requires both timestamps."""
+    response = client.get("/api/v1/graphs/top-note-accounts")
+    assert response.status_code == 422
+
+
+def test_top_note_accounts_start_after_end(client: TestClient) -> None:
+    """Test GET /api/v1/graphs/top-note-accounts rejects start_date after end_date."""
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/top-note-accounts?start_date={end_ts}&end_date={start_ts}")
+    assert response.status_code == 400
+
+
+# Language and keywords filter tests
+def test_daily_notes_language_filter(client: TestClient) -> None:
+    """Test GET /api/v1/graphs/daily-notes with language filter."""
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/daily-notes?start_date={start_ts}&end_date={end_ts}&language=ja")
+    assert response.status_code == 200
+    assert "data" in response.json()
+
+
+def test_daily_notes_multiple_languages(client: TestClient) -> None:
+    """Test GET /api/v1/graphs/daily-notes with comma-separated language filter."""
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/daily-notes?start_date={start_ts}&end_date={end_ts}&language=ja,en")
+    assert response.status_code == 200
+    assert "data" in response.json()
+
+
+def test_daily_notes_keywords_filter(client: TestClient) -> None:
+    """Test GET /api/v1/graphs/daily-notes with keywords filter."""
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/daily-notes?start_date={start_ts}&end_date={end_ts}&keywords=apple")
+    assert response.status_code == 200
+    assert "data" in response.json()
+
+
+def test_daily_notes_multiple_keywords(client: TestClient) -> None:
+    """Test GET /api/v1/graphs/daily-notes with multiple keywords (AND search)."""
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/daily-notes?start_date={start_ts}&end_date={end_ts}&keywords=apple,banana")
+    assert response.status_code == 200
+    assert "data" in response.json()
+
+
+def test_daily_notes_language_and_keywords(client: TestClient) -> None:
+    """Test GET /api/v1/graphs/daily-notes with both language and keywords filter."""
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(
+        f"/api/v1/graphs/daily-notes?start_date={start_ts}&end_date={end_ts}&language=ja,en&keywords=apple,banana"
+    )
+    assert response.status_code == 200
+    assert "data" in response.json()
+
+
+def test_daily_posts_language_filter(client: TestClient) -> None:
+    """Test GET /api/v1/graphs/daily-posts with language filter."""
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/daily-posts?start_date={start_ts}&end_date={end_ts}&language=ja")
+    assert response.status_code == 200
+    assert "data" in response.json()
+
+
+def test_daily_posts_keywords_filter(client: TestClient) -> None:
+    """Test GET /api/v1/graphs/daily-posts with keywords filter."""
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(f"/api/v1/graphs/daily-posts?start_date={start_ts}&end_date={end_ts}&keywords=apple")
+    assert response.status_code == 200
+    assert "data" in response.json()
+
+
+def test_notes_annual_language_filter(client: TestClient) -> None:
+    """Test GET /api/v1/graphs/notes-annual with language filter."""
+    start_ts, end_ts = get_timestamp_range(365)
+    response = client.get(f"/api/v1/graphs/notes-annual?start_date={start_ts}&end_date={end_ts}&language=ja,en")
+    assert response.status_code == 200
+    assert "data" in response.json()
+
+
+def test_notes_evaluation_language_and_keywords(client: TestClient) -> None:
+    """Test GET /api/v1/graphs/notes-evaluation with language and keywords filter."""
+    start_ts, end_ts = get_timestamp_range(30)
+    response = client.get(
+        f"/api/v1/graphs/notes-evaluation?start_date={start_ts}&end_date={end_ts}&language=ja&keywords=test"
+    )
+    assert response.status_code == 200
+    assert "data" in response.json()
+
+
+def test_post_influence_language_filter(client: TestClient) -> None:
+    """Test GET /api/v1/graphs/post-influence with language filter."""
+    start_ts, end_ts = get_timestamp_range(30)
+    response = client.get(f"/api/v1/graphs/post-influence?start_date={start_ts}&end_date={end_ts}&language=ja")
+    assert response.status_code == 200
+    assert "data" in response.json()
+
+
+def test_top_note_accounts_language_and_keywords(client: TestClient) -> None:
+    """Test GET /api/v1/graphs/top-note-accounts with language and keywords filter."""
+    start_ts, end_ts = get_timestamp_range(7)
+    response = client.get(
+        f"/api/v1/graphs/top-note-accounts?start_date={start_ts}&end_date={end_ts}&language=ja&keywords=test"
+    )
+    assert response.status_code == 200
+    assert "data" in response.json()

@@ -579,6 +579,8 @@ class Storage:
         start_date: str,
         end_date: str,
         status_filter: Optional[str] = None,
+        language_filter: Optional[List[str]] = None,
+        keywords: Optional[List[str]] = None,
     ) -> List[dict[str, Any]]:
         """Get daily aggregated note creation counts by publication status.
 
@@ -625,6 +627,15 @@ class Storage:
         if status_filter and status_filter != "all":
             query = query.where(status_expr == status_filter)
 
+        # Add language filter (OR across specified languages)
+        if language_filter:
+            query = query.where(NoteRecord.language.in_(language_filter))
+
+        # Add keywords filter (AND across all keywords, ILIKE search in note summary)
+        if keywords:
+            for kw in keywords:
+                query = query.where(NoteRecord.summary.ilike(f"%{kw}%"))
+
         query = query.group_by("day").order_by("day")
 
         # Execute query
@@ -654,6 +665,8 @@ class Storage:
         start_date: str,
         end_date: str,
         status_filter: Optional[str] = None,
+        language_filter: Optional[List[str]] = None,
+        keywords: Optional[List[str]] = None,
     ) -> List[dict[str, Any]]:
         """Get daily aggregated post counts with optional note status filter.
 
@@ -684,8 +697,10 @@ class Storage:
         # Get publication status CASE expression
         status_expr = self._get_publication_status_case()
 
-        # Build query - posts LEFT JOIN notes to include posts without notes
-        if status_filter == "all" or status_filter is None:
+        # Build query - join with notes when status/language/keywords filter is needed
+        needs_note_join = (status_filter and status_filter != "all") or language_filter or keywords
+
+        if not needs_note_join:
             # When no filter, just count all posts
             query = (
                 select(
@@ -700,7 +715,7 @@ class Storage:
                 .order_by("day")
             )
         else:
-            # When filtering by status, join with notes and filter
+            # Join with notes for status/language/keywords filtering
             query = (
                 select(
                     func.date_trunc("day", func.to_timestamp(PostRecord.created_at / 1000)).label("day"),
@@ -716,10 +731,20 @@ class Storage:
 
             # Apply status filter
             # Posts without notes are considered "unpublished"
-            if status_filter == "unpublished":
-                query = query.where(or_(NoteRecord.note_id.is_(None), status_expr == "unpublished"))
-            else:
-                query = query.where(status_expr == status_filter)
+            if status_filter and status_filter != "all":
+                if status_filter == "unpublished":
+                    query = query.where(or_(NoteRecord.note_id.is_(None), status_expr == "unpublished"))
+                else:
+                    query = query.where(status_expr == status_filter)
+
+            # Apply language filter (OR across specified languages)
+            if language_filter:
+                query = query.where(NoteRecord.language.in_(language_filter))
+
+            # Apply keywords filter (AND across all keywords, ILIKE search in note summary)
+            if keywords:
+                for kw in keywords:
+                    query = query.where(NoteRecord.summary.ilike(f"%{kw}%"))
 
             query = query.group_by("day").order_by("day")
 
@@ -751,6 +776,8 @@ class Storage:
         start_month: str,
         end_month: str,
         status_filter: Optional[str] = None,
+        language_filter: Optional[List[str]] = None,
+        keywords: Optional[List[str]] = None,
     ) -> List[dict[str, Any]]:
         """Get monthly aggregated note creation counts with publication rate.
 
@@ -813,6 +840,15 @@ class Storage:
         if status_filter and status_filter != "all":
             query = query.where(status_expr == status_filter)
 
+        # Add language filter (OR across specified languages)
+        if language_filter:
+            query = query.where(NoteRecord.language.in_(language_filter))
+
+        # Add keywords filter (AND across all keywords, ILIKE search in note summary)
+        if keywords:
+            for kw in keywords:
+                query = query.where(NoteRecord.summary.ilike(f"%{kw}%"))
+
         query = query.group_by("month").order_by("month")
 
         # Execute query
@@ -855,6 +891,8 @@ class Storage:
         status_filter: Optional[str] = None,
         limit: int = 200,
         order_by: str = "impression_count",
+        language_filter: Optional[List[str]] = None,
+        keywords: Optional[List[str]] = None,
     ) -> List[dict[str, Any]]:
         """Get individual note evaluation metrics with configurable ordering.
 
@@ -923,6 +961,15 @@ class Storage:
         if status_filter and status_filter != "all":
             query = query.where(status_expr == status_filter)
 
+        # Add language filter (OR across specified languages)
+        if language_filter:
+            query = query.where(NoteRecord.language.in_(language_filter))
+
+        # Add keywords filter (AND across all keywords, ILIKE search in note summary)
+        if keywords:
+            for kw in keywords:
+                query = query.where(NoteRecord.summary.ilike(f"%{kw}%"))
+
         # Order by specified field descending and apply limit
         if order_by == "helpful_count":
             query = query.order_by(NoteRecord.helpful_count.desc()).limit(limit)
@@ -956,6 +1003,8 @@ class Storage:
         end_date: Optional[str] = None,
         status_filter: Optional[str] = None,
         limit: int = 200,
+        language_filter: Optional[List[str]] = None,
+        keywords: Optional[List[str]] = None,
     ) -> List[dict[str, Any]]:
         """Get individual post influence metrics ordered by impression count.
 
@@ -992,9 +1041,11 @@ class Storage:
         # Get publication status CASE expression
         status_expr = self._get_publication_status_case()
 
-        # Build query - posts LEFT JOIN notes for status filtering
-        if status_filter == "all" or status_filter is None:
-            # No status filter - just get posts
+        # Build query - join with notes when status/language/keywords filter is needed
+        needs_note_join = (status_filter and status_filter != "all") or language_filter or keywords
+
+        if not needs_note_join:
+            # No filter requiring note join - just get posts
             query = select(
                 PostRecord.post_id,
                 PostRecord.text.label("name"),
@@ -1003,7 +1054,7 @@ class Storage:
                 PostRecord.impression_count,
             ).select_from(PostRecord)
         else:
-            # With status filter - LEFT JOIN notes
+            # Join with notes for status/language/keywords filtering
             query = (
                 select(
                     PostRecord.post_id,
@@ -1038,6 +1089,15 @@ class Storage:
             else:
                 query = query.where(status_expr == status_filter)
 
+        # Add language filter (OR across specified languages)
+        if language_filter:
+            query = query.where(NoteRecord.language.in_(language_filter))
+
+        # Add keywords filter (AND across all keywords, ILIKE search in note summary)
+        if keywords:
+            for kw in keywords:
+                query = query.where(NoteRecord.summary.ilike(f"%{kw}%"))
+
         # Order by impression count descending and apply limit
         query = query.order_by(PostRecord.impression_count.desc()).limit(limit)
 
@@ -1064,6 +1124,101 @@ class Storage:
                 data.append(item)
 
             return data
+
+    def get_top_note_accounts(
+        self,
+        start_date: str,
+        end_date: str,
+        prev_start_date: str,
+        prev_end_date: str,
+        status_filter: str = "all",
+        limit: int = 10,
+        language_filter: Optional[List[str]] = None,
+        keywords: Optional[List[str]] = None,
+    ) -> List[dict[str, Any]]:
+        """Get top accounts by note count for a period with period-over-period comparison.
+
+        Args:
+            start_date: Current period start date in YYYY-MM-DD format (inclusive)
+            end_date: Current period end date in YYYY-MM-DD format (inclusive)
+            prev_start_date: Previous period start date in YYYY-MM-DD format (inclusive)
+            prev_end_date: Previous period end date in YYYY-MM-DD format (inclusive)
+            status_filter: Optional status filter
+                ("all", "published", "evaluating", "unpublished", "temporarilyPublished")
+            limit: Maximum number of top accounts to return (default: 10)
+
+        Returns:
+            List of dictionaries with keys: rank, username, note_count, note_count_change.
+            Ordered by note_count descending.
+
+        Example response format:
+            [
+                {"rank": 1, "username": "User1", "note_count": 42, "note_count_change": 10},
+                {"rank": 2, "username": "User2", "note_count": 35, "note_count_change": -3},
+                ...
+            ]
+        """
+        from datetime import datetime, timezone
+
+        def _to_ts_range(s: str, e: str) -> Tuple[int, int]:
+            s_dt = datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
+            e_dt = datetime.fromisoformat(e).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+            return int(s_dt.timestamp() * 1000), int(e_dt.timestamp() * 1000)
+
+        cur_start_ts, cur_end_ts = _to_ts_range(start_date, end_date)
+        prev_start_ts, prev_end_ts = _to_ts_range(prev_start_date, prev_end_date)
+
+        status_expr = self._get_publication_status_case()
+
+        def _build_count_query(start_ts: int, end_ts: int) -> Any:
+            q = (
+                select(
+                    XUserRecord.user_id,
+                    XUserRecord.name,
+                    func.count(NoteRecord.note_id).label("note_count"),
+                )
+                .select_from(NoteRecord)
+                .join(PostRecord, NoteRecord.post_id == PostRecord.post_id)
+                .join(XUserRecord, PostRecord.user_id == XUserRecord.user_id)
+                .where(
+                    NoteRecord.created_at >= start_ts,
+                    NoteRecord.created_at <= end_ts,
+                )
+            )
+            if status_filter and status_filter != "all":
+                q = q.where(status_expr == status_filter)
+            if language_filter:
+                q = q.where(NoteRecord.language.in_(language_filter))
+            if keywords:
+                for kw in keywords:
+                    q = q.where(NoteRecord.summary.ilike(f"%{kw}%"))
+            return q.group_by(XUserRecord.user_id, XUserRecord.name)
+
+        with Session(self._engine) as session:
+            cur_rows = session.execute(_build_count_query(cur_start_ts, cur_end_ts)).fetchall()
+            prev_rows = session.execute(_build_count_query(prev_start_ts, prev_end_ts)).fetchall()
+
+        # Build prev lookup: user_id → note_count
+        prev_counts: dict[str, int] = {str(row.user_id): int(row.note_count) for row in prev_rows}
+
+        # Sort current by note_count descending and take top limit
+        sorted_cur = sorted(cur_rows, key=lambda r: int(r.note_count), reverse=True)[:limit]
+
+        data = []
+        for rank_idx, row in enumerate(sorted_cur, start=1):
+            user_id_str = str(row.user_id)
+            cur_count = int(row.note_count)
+            prev_count = prev_counts.get(user_id_str, 0)
+            data.append(
+                {
+                    "rank": rank_idx,
+                    "username": str(row.name),
+                    "note_count": cur_count,
+                    "note_count_change": cur_count - prev_count,
+                }
+            )
+
+        return data
 
     @classmethod
     def _media_record_to_model(cls, media_record: MediaRecord) -> Media:
