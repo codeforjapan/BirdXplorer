@@ -117,8 +117,7 @@ async def fetch_and_save_notes_async() -> Dict[str, Any]:
                             f"(post_id: {note.post_id}, created_at: {note.created_at}, summary length: {len(note.summary)})"
                         )
                     else:
-                        logger.error(f"Failed to enqueue note {note.note_id} to db-write queue")
-                        continue
+                        raise Exception(f"Failed to enqueue note {note.note_id} to db-write queue")
                 else:
                     logger.error("DB_WRITE_QUEUE_URL not configured, cannot save note")
                     continue
@@ -139,7 +138,7 @@ async def fetch_and_save_notes_async() -> Dict[str, Any]:
                         queued_for_lang_detect += 1
                         logger.info(f"Enqueued note {note.note_id} to language-detect queue, messageId={message_id}")
                     else:
-                        logger.error(f"Failed to enqueue note {note.note_id} to language-detect queue")
+                        raise Exception(f"Failed to enqueue note {note.note_id} to language-detect queue")
                 else:
                     logger.warning("LANG_DETECT_QUEUE_URL not configured, skipping language detection enqueue")
 
