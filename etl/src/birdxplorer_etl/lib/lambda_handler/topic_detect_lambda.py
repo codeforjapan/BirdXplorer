@@ -114,7 +114,7 @@ def lambda_handler(event, context):
                     if message_id:
                         logger.info(f"[SQS_SUCCESS] Sent topics update to db-write queue, messageId={message_id}")
                     else:
-                        logger.error(f"[SQS_FAILED] Failed to send topics update to db-write queue")
+                        raise Exception(f"Failed to send topics update to db-write queue for note {note_id}")
                 else:
                     logger.error("[CONFIG_ERROR] DB_WRITE_QUEUE_URL not configured")
 
@@ -137,10 +137,13 @@ def lambda_handler(event, context):
                             f"[SQS_SUCCESS] Sent tweet lookup message for tweet {post_id}, messageId={message_id}"
                         )
                     else:
-                        logger.error(f"[SQS_FAILED] Failed to send tweet lookup message for tweet {post_id}")
+                        raise Exception(
+                            f"Failed to send tweet lookup message for tweet {post_id} (note {note_id})"
+                        )
 
                 except Exception as e:
                     logger.error(f"[EXCEPTION] Error sending SQS message for tweet lookup: {e}")
+                    raise
             elif not post_id:
                 logger.warning(f"[WARNING] Note {note_id} has no post_id, skipping tweet lookup")
             elif not TWEET_LOOKUP_QUEUE_URL:

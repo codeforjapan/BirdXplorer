@@ -79,6 +79,7 @@ def extract_data(postgresql: Session):
 
             rows_to_add = {}  # note_idをキーにして重複を防ぐ
             rows_to_update = []
+            notes_missing_language = []  # languageがNULLの既存ノート（lang-detect再enqueue用）
             for index, row in enumerate(reader):
                 note_id = row["note_id"]
                 # 既にrows_to_addに追加済みの場合はスキップ
@@ -184,6 +185,9 @@ def extract_data(postgresql: Session):
                         if hasattr(existing_note, key):
                             setattr(existing_note, key, value)
                     rows_to_update.append(existing_note)
+                    # languageがNULLの既存ノートはlang-detectに再enqueue
+                    if not existing_note.language:
+                        notes_missing_language.append(existing_note)
                 else:
                     note_record = RowNoteRecord(**row)
                     rows_to_add[note_id] = note_record
@@ -202,8 +206,17 @@ def extract_data(postgresql: Session):
                     for note in rows_to_add.values():
                         enqueue_notes(note.note_id, note.summary, note.tweet_id, note.language)
 
+                    # languageがNULLの既存ノートをlang-detectに再enqueue
+                    if notes_missing_language:
+                        for note in notes_missing_language:
+                            enqueue_notes(note.note_id, note.summary, note.tweet_id, note.language)
+                        logging.info(
+                            f"Enqueued {len(notes_missing_language)} existing notes with missing language"
+                        )
+
                     rows_to_add = {}
                     rows_to_update = []
+                    notes_missing_language = []
 
             # 最後のバッチを処理
             postgresql.bulk_save_objects(list(rows_to_add.values()))
@@ -216,6 +229,14 @@ def extract_data(postgresql: Session):
             # 最後のバッチのSQSキューイング（新規追加のみ）
             for note in rows_to_add.values():
                 enqueue_notes(note.note_id, note.summary, note.tweet_id, note.language)
+
+            # languageがNULLの既存ノートをlang-detectに再enqueue
+            for note in notes_missing_language:
+                enqueue_notes(note.note_id, note.summary, note.tweet_id, note.language)
+            if notes_missing_language:
+                logging.info(
+                    f"Enqueued {len(notes_missing_language)} existing notes with missing language"
+                )
 
             logging.info(f"Successfully processed notes file {file_index:05d} for {dateString}")
 
@@ -381,6 +402,92 @@ def enqueue_note_status_update(note_id: str):
         logging.error(f"Failed to enqueue note {note_id} to note-status-update queue: {e}")
 
 
+def _process_rating_rows(reader, postgresql: Session, existing_row_note_ids: set, file_index: int):
+    """ratingsのTSV行をストリーミング処理してDBに保存"""
+    binary_bool_fields = [
+        "agree",
+        "disagree",
+        "helpful",
+        "not_helpful",
+        "helpful_other",
+        "helpful_informative",
+        "helpful_clear",
+        "helpful_empathetic",
+        "helpful_good_sources",
+        "helpful_unique_context",
+        "helpful_addresses_claim",
+        "helpful_important_context",
+        "helpful_unbiased_language",
+        "not_helpful_other",
+        "not_helpful_incorrect",
+        "not_helpful_sources_missing_or_unreliable",
+        "not_helpful_opinion_speculation_or_bias",
+        "not_helpful_missing_key_points",
+        "not_helpful_outdated",
+        "not_helpful_hard_to_understand",
+        "not_helpful_argumentative_or_biased",
+        "not_helpful_off_topic",
+        "not_helpful_spam_harassment_or_abuse",
+        "not_helpful_irrelevant_sources",
+        "not_helpful_opinion_speculation",
+        "not_helpful_note_not_needed",
+    ]
+
+    rows_to_add = []
+    for index, row in enumerate(reader):
+        note_id = row.get("note_id")
+        rater_participant_id = row.get("rater_participant_id")
+
+        if not note_id or not rater_participant_id:
+            logging.warning("Missing note_id or rater_participant_id in rating record, skipping")
+            continue
+
+        # 対応するnote_idがrow_notesテーブルに存在するかをセットで確認
+        if note_id not in existing_row_note_ids:
+            continue
+
+        # BinaryBoolフィールドの正規化
+        for field in binary_bool_fields:
+            if field in row:
+                value = row[field]
+                if value == "" or value is None or value == "empty":
+                    row[field] = "0"
+                elif value not in ["0", "1"]:
+                    logging.warning(
+                        f"Unexpected value '{value}' for field '{field}' in rating "
+                        f"(note_id={note_id}). Setting to '0'."
+                    )
+                    row[field] = "0"
+
+        # helpfulness_levelフィールドのバリデーション
+        if "helpfulness_level" in row:
+            value = row["helpfulness_level"]
+            if value not in ["HELPFUL", "SOMEWHAT_HELPFUL", "NOT_HELPFUL"]:
+                row["helpfulness_level"] = None
+
+        # 空文字列フィールドをNoneに変換
+        for key, value in row.items():
+            if value == "" and key not in ["helpfulness_level"]:
+                row[key] = None
+
+        rows_to_add.append(dict(row))
+
+        # 1000件ごとにバッチ処理
+        if len(rows_to_add) >= 1000:
+            postgresql.execute(insert(RowNoteRatingRecord).on_conflict_do_nothing(), rows_to_add)
+            postgresql.commit()
+            logging.info(
+                f"Saved {len(rows_to_add)} rating records (batch at index {index}, file {file_index:05d})"
+            )
+            rows_to_add = []
+
+    # 最後のバッチを処理
+    if rows_to_add:
+        postgresql.execute(insert(RowNoteRatingRecord).on_conflict_do_nothing(), rows_to_add)
+        postgresql.commit()
+        logging.info(f"Saved final batch of {len(rows_to_add)} rating records (file {file_index:05d})")
+
+
 def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids: set):
     """
     指定日付の評価データをダウンロードしてrow_note_ratingsテーブルに保存
@@ -425,6 +532,7 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
                 tsv_data = res.content.decode("utf-8").splitlines()
                 reader = csv.DictReader(tsv_data, delimiter="\t")
                 reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
+                _process_rating_rows(reader, postgresql, existing_row_note_ids, file_index)
             else:
                 with zipfile.ZipFile(io.BytesIO(res.content)) as zip_file:
                     tsv_filename = f"ratings-{file_index:05d}.tsv"
@@ -434,93 +542,11 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
                         continue
 
                     with zip_file.open(tsv_filename) as tsv_file:
-                        tsv_data = tsv_file.read().decode("utf-8").splitlines()
-                        reader = csv.DictReader(tsv_data, delimiter="\t")
+                        # ストリーミング読み込み（メモリ節約: splitlines()で全量展開しない）
+                        text_file = io.TextIOWrapper(tsv_file, encoding="utf-8")
+                        reader = csv.DictReader(text_file, delimiter="\t")
                         reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
-
-            # BinaryBoolフィールドのリスト（評価データ用）
-            binary_bool_fields = [
-                "agree",
-                "disagree",
-                "helpful",
-                "not_helpful",
-                "helpful_other",
-                "helpful_informative",
-                "helpful_clear",
-                "helpful_empathetic",
-                "helpful_good_sources",
-                "helpful_unique_context",
-                "helpful_addresses_claim",
-                "helpful_important_context",
-                "helpful_unbiased_language",
-                "not_helpful_other",
-                "not_helpful_incorrect",
-                "not_helpful_sources_missing_or_unreliable",
-                "not_helpful_opinion_speculation_or_bias",
-                "not_helpful_missing_key_points",
-                "not_helpful_outdated",
-                "not_helpful_hard_to_understand",
-                "not_helpful_argumentative_or_biased",
-                "not_helpful_off_topic",
-                "not_helpful_spam_harassment_or_abuse",
-                "not_helpful_irrelevant_sources",
-                "not_helpful_opinion_speculation",
-                "not_helpful_note_not_needed",
-            ]
-
-            rows_to_add = []
-            for index, row in enumerate(reader):
-                note_id = row.get("note_id")
-                rater_participant_id = row.get("rater_participant_id")
-
-                if not note_id or not rater_participant_id:
-                    logging.warning("Missing note_id or rater_participant_id in rating record, skipping")
-                    continue
-
-                # 対応するnote_idがrow_notesテーブルに存在するかをセットで確認
-                if note_id not in existing_row_note_ids:
-                    continue
-
-                # BinaryBoolフィールドの正規化
-                for field in binary_bool_fields:
-                    if field in row:
-                        value = row[field]
-                        if value == "" or value is None or value == "empty":
-                            row[field] = "0"
-                        elif value not in ["0", "1"]:
-                            logging.warning(
-                                f"Unexpected value '{value}' for field '{field}' in rating "
-                                f"(note_id={note_id}). Setting to '0'."
-                            )
-                            row[field] = "0"
-
-                # helpfulness_levelフィールドのバリデーション
-                if "helpfulness_level" in row:
-                    value = row["helpfulness_level"]
-                    if value not in ["HELPFUL", "SOMEWHAT_HELPFUL", "NOT_HELPFUL"]:
-                        row["helpfulness_level"] = None
-
-                # 空文字列フィールドをNoneに変換
-                for key, value in row.items():
-                    if value == "" and key not in ["helpfulness_level"]:
-                        row[key] = None
-
-                rows_to_add.append(dict(row))
-
-                # 1000件ごとにバッチ処理
-                if index % 1000 == 0 and rows_to_add:
-                    postgresql.execute(insert(RowNoteRatingRecord).on_conflict_do_nothing(), rows_to_add)
-                    postgresql.commit()
-                    logging.info(
-                        f"Saved {len(rows_to_add)} rating records (batch at index {index}, file {file_index:05d})"
-                    )
-                    rows_to_add = []
-
-            # 最後のバッチを処理
-            if rows_to_add:
-                postgresql.execute(insert(RowNoteRatingRecord).on_conflict_do_nothing(), rows_to_add)
-                postgresql.commit()
-                logging.info(f"Saved final batch of {len(rows_to_add)} rating records (file {file_index:05d})")
+                        _process_rating_rows(reader, postgresql, existing_row_note_ids, file_index)
 
             logging.info(f"Successfully processed ratings file {file_index:05d} for {dateString}")
 
