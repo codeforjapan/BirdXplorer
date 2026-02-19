@@ -1152,3 +1152,38 @@ class PostInfluenceDataItem(BaseModel):
         None,
         description="Publication status of associated note (if status filter applied)",
     )
+
+
+class TopNoteAccountDataItem(BaseModel):
+    """Top accounts by note count with period-over-period comparison.
+
+    Represents an account's note creation activity for a given period,
+    ranked by note count descending with change from the previous equivalent period.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel,
+    )
+
+    rank: int = PydanticField(
+        ...,
+        ge=1,
+        description="Rank position (1-based, ordered by note_count descending)",
+    )
+
+    username: str = PydanticField(
+        ...,
+        description="Display name of the account (x_users.name)",
+    )
+
+    note_count: int = PydanticField(
+        ...,
+        ge=0,
+        description="Number of notes created by this account in the current period",
+    )
+
+    note_count_change: int = PydanticField(
+        ...,
+        description="Change in note count compared to previous equivalent period (can be negative)",
+    )

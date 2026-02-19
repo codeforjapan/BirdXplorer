@@ -364,3 +364,123 @@ def test_get_note_evaluation_points(
         assert item["helpful_count"] >= 0
         assert item["not_helpful_count"] >= 0
         assert item["impression_count"] >= 0
+
+
+# User Story 7: Top Note Accounts Tests
+def test_get_top_note_accounts_returns_list(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """Test get_top_note_accounts returns a list with correct structure."""
+    storage = Storage(engine=engine_for_test)
+
+    # Notes are at 2006-07-15; use a range that covers them
+    result = storage.get_top_note_accounts(
+        start_date="2006-07-14",
+        end_date="2006-07-16",
+        prev_start_date="2006-07-12",
+        prev_end_date="2006-07-13",
+        status_filter="all",
+        limit=10,
+    )
+
+    assert isinstance(result, list)
+    for item in result:
+        assert "rank" in item
+        assert "username" in item
+        assert "note_count" in item
+        assert "note_count_change" in item
+        assert item["rank"] >= 1
+        assert item["note_count"] >= 0
+        assert isinstance(item["note_count_change"], int)
+        assert isinstance(item["username"], str)
+
+
+def test_get_top_note_accounts_rank_order(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """Test get_top_note_accounts ranks are sequential starting from 1."""
+    storage = Storage(engine=engine_for_test)
+
+    result = storage.get_top_note_accounts(
+        start_date="2006-07-14",
+        end_date="2006-07-16",
+        prev_start_date="2006-07-12",
+        prev_end_date="2006-07-13",
+        status_filter="all",
+        limit=10,
+    )
+
+    if result:
+        ranks = [item["rank"] for item in result]
+        assert ranks == list(range(1, len(ranks) + 1))
+        # Verify note_count is non-increasing
+        counts = [item["note_count"] for item in result]
+        assert counts == sorted(counts, reverse=True)
+
+
+def test_get_top_note_accounts_empty_range(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """Test get_top_note_accounts returns empty list for date range with no notes."""
+    storage = Storage(engine=engine_for_test)
+
+    result = storage.get_top_note_accounts(
+        start_date="2000-01-01",
+        end_date="2000-01-31",
+        prev_start_date="1999-12-01",
+        prev_end_date="1999-12-31",
+        status_filter="all",
+        limit=10,
+    )
+
+    assert isinstance(result, list)
+    assert len(result) == 0
+
+
+def test_get_top_note_accounts_note_count_change_no_prev(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """Test note_count_change equals note_count when prev period has no data."""
+    storage = Storage(engine=engine_for_test)
+
+    result = storage.get_top_note_accounts(
+        start_date="2006-07-14",
+        end_date="2006-07-16",
+        # Prev period with no notes
+        prev_start_date="2000-01-01",
+        prev_end_date="2000-01-31",
+        status_filter="all",
+        limit=10,
+    )
+
+    for item in result:
+        # When prev_count = 0, change should equal current count
+        assert item["note_count_change"] == item["note_count"]
+
+
+def test_get_top_note_accounts_limit(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """Test get_top_note_accounts respects the limit parameter."""
+    storage = Storage(engine=engine_for_test)
+
+    result = storage.get_top_note_accounts(
+        start_date="2006-07-14",
+        end_date="2006-07-16",
+        prev_start_date="2006-07-12",
+        prev_end_date="2006-07-13",
+        status_filter="all",
+        limit=1,
+    )
+
+    assert len(result) <= 1
