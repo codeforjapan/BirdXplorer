@@ -399,7 +399,7 @@ def gen_router(storage: Storage) -> APIRouter:
         Returns:
             GraphListResponse containing:
             - data: List of individual note evaluation metrics
-            - updatedAt: Last data update timestamp (YYYY-MM-DD format)
+            - updatedAt: Last data update timestamp (YYYY-MM-DDformat)
 
         Raises:
             HTTPException: 400 if validation fails, 422 if timestamp format invalid
