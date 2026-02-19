@@ -631,10 +631,9 @@ class Storage:
         if language_filter:
             query = query.where(NoteRecord.language.in_(language_filter))
 
-        # Add keywords filter (AND across all keywords, ILIKE search in note summary)
+        # Add keywords filter (OR across all keywords, ILIKE search in note summary)
         if keywords:
-            for kw in keywords:
-                query = query.where(NoteRecord.summary.ilike(f"%{kw}%"))
+            query = query.where(or_(*[NoteRecord.summary.ilike(f"%{kw}%") for kw in keywords]))
 
         query = query.group_by("day").order_by("day")
 
@@ -741,10 +740,9 @@ class Storage:
             if language_filter:
                 query = query.where(NoteRecord.language.in_(language_filter))
 
-            # Apply keywords filter (AND across all keywords, ILIKE search in note summary)
+            # Apply keywords filter (OR across all keywords, ILIKE search in note summary)
             if keywords:
-                for kw in keywords:
-                    query = query.where(NoteRecord.summary.ilike(f"%{kw}%"))
+                query = query.where(or_(*[NoteRecord.summary.ilike(f"%{kw}%") for kw in keywords]))
 
             query = query.group_by("day").order_by("day")
 
@@ -844,10 +842,9 @@ class Storage:
         if language_filter:
             query = query.where(NoteRecord.language.in_(language_filter))
 
-        # Add keywords filter (AND across all keywords, ILIKE search in note summary)
+        # Add keywords filter (OR across all keywords, ILIKE search in note summary)
         if keywords:
-            for kw in keywords:
-                query = query.where(NoteRecord.summary.ilike(f"%{kw}%"))
+            query = query.where(or_(*[NoteRecord.summary.ilike(f"%{kw}%") for kw in keywords]))
 
         query = query.group_by("month").order_by("month")
 
@@ -965,10 +962,9 @@ class Storage:
         if language_filter:
             query = query.where(NoteRecord.language.in_(language_filter))
 
-        # Add keywords filter (AND across all keywords, ILIKE search in note summary)
+        # Add keywords filter (OR across all keywords, ILIKE search in note summary)
         if keywords:
-            for kw in keywords:
-                query = query.where(NoteRecord.summary.ilike(f"%{kw}%"))
+            query = query.where(or_(*[NoteRecord.summary.ilike(f"%{kw}%") for kw in keywords]))
 
         # Order by specified field descending and apply limit
         if order_by == "helpful_count":
@@ -1093,10 +1089,9 @@ class Storage:
         if language_filter:
             query = query.where(NoteRecord.language.in_(language_filter))
 
-        # Add keywords filter (AND across all keywords, ILIKE search in note summary)
+        # Add keywords filter (OR across all keywords, ILIKE search in note summary)
         if keywords:
-            for kw in keywords:
-                query = query.where(NoteRecord.summary.ilike(f"%{kw}%"))
+            query = query.where(or_(*[NoteRecord.summary.ilike(f"%{kw}%") for kw in keywords]))
 
         # Order by impression count descending and apply limit
         query = query.order_by(PostRecord.impression_count.desc()).limit(limit)
@@ -1190,8 +1185,7 @@ class Storage:
             if language_filter:
                 q = q.where(NoteRecord.language.in_(language_filter))
             if keywords:
-                for kw in keywords:
-                    q = q.where(NoteRecord.summary.ilike(f"%{kw}%"))
+                q = q.where(or_(*[NoteRecord.summary.ilike(f"%{kw}%") for kw in keywords]))
             return q.group_by(XUserRecord.user_id, XUserRecord.name)
 
         with Session(self._engine) as session:
