@@ -578,7 +578,7 @@ def test_daily_notes_keywords_filter(client: TestClient) -> None:
 
 
 def test_daily_notes_multiple_keywords(client: TestClient) -> None:
-    """Test GET /api/v1/graphs/daily-notes with multiple keywords (AND search)."""
+    """Test GET /api/v1/graphs/daily-notes with multiple keywords (OR search)."""
     start_ts, end_ts = get_timestamp_range(7)
     response = client.get(f"/api/v1/graphs/daily-notes?start_date={start_ts}&end_date={end_ts}&keywords=apple,banana")
     assert response.status_code == 200
