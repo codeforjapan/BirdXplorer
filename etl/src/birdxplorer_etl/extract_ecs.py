@@ -3,6 +3,7 @@ import io
 import json
 import logging
 import os
+import time
 import zipfile
 from datetime import datetime, timedelta
 
@@ -352,13 +353,49 @@ def extract_data(postgresql: Session):
 
     postgresql.commit()
 
+    # row_notesにあるがnotesにないレコードをバックフィル
+    backfill_missing_notes(postgresql)
+
     return
+
+
+def backfill_missing_notes(postgresql: Session, batch_limit: int = 10000):
+    """
+    row_notesに存在するがnotesテーブルに存在しないレコードをlang-detect-queueに再投入する。
+    毎日のextractジョブの最後に呼ばれ、batch_limit件ずつ処理する。
+    """
+    missing_notes = (
+        postgresql.query(RowNoteRecord)
+        .outerjoin(NoteRecord, RowNoteRecord.note_id == NoteRecord.note_id)
+        .filter(NoteRecord.note_id.is_(None))
+        .limit(batch_limit)
+        .all()
+    )
+
+    if not missing_notes:
+        logging.info("Backfill: no missing notes found")
+        return
+
+    logging.info(f"Backfill: found {len(missing_notes)} notes in row_notes missing from notes, re-enqueuing")
+
+    enqueued = 0
+    failed = 0
+    for note in missing_notes:
+        try:
+            enqueue_notes(note.note_id, note.summary or "", note.tweet_id, note.language)
+            enqueued += 1
+        except Exception as e:
+            failed += 1
+            logging.error(f"Backfill: failed to re-enqueue note {note.note_id}: {e}")
+
+    logging.info(f"Backfill complete: enqueued {enqueued}, failed {failed}, total missing {len(missing_notes)}")
 
 
 def enqueue_notes(note_id: str, summary: str, post_id: str = None, language: str = None):
     """
     ノート処理用のSQSキューにメッセージを送信
     lang-detect-queueに送信（summaryとpost_idも含める）
+    3回までリトライし、全て失敗した場合は例外を送出
     """
     sqs_client = boto3.client("sqs", region_name=os.environ.get("AWS_REGION", "ap-northeast-1"))
 
@@ -368,21 +405,34 @@ def enqueue_notes(note_id: str, summary: str, post_id: str = None, language: str
         message["language"] = language
     lang_detect_message = json.dumps(message)
 
-    # lang-detect-queueに送信
-    try:
-        response = sqs_client.send_message(
-            QueueUrl=settings.LANG_DETECT_QUEUE_URL,
-            MessageBody=lang_detect_message,
-        )
-        logging.info(f"Enqueued note {note_id} to lang-detect queue, messageId={response.get('MessageId')}")
-    except Exception as e:
-        logging.error(f"Failed to enqueue note {note_id} to lang-detect queue: {e}")
+    # lang-detect-queueに送信（リトライ付き）
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = sqs_client.send_message(
+                QueueUrl=settings.LANG_DETECT_QUEUE_URL,
+                MessageBody=lang_detect_message,
+            )
+            logging.info(f"Enqueued note {note_id} to lang-detect queue, messageId={response.get('MessageId')}")
+            return
+        except Exception as e:
+            if attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 1.0
+                logging.warning(
+                    f"Failed to enqueue note {note_id} (attempt {attempt + 1}/{max_retries}), "
+                    f"retrying in {wait_time}s: {e}"
+                )
+                time.sleep(wait_time)
+            else:
+                logging.error(f"Failed to enqueue note {note_id} after {max_retries} attempts: {e}")
+                raise
 
 
 def enqueue_note_status_update(note_id: str):
     """
     ノートステータス更新用のSQSキューにメッセージを送信
     既存のNoteRecordに対してステータス情報を更新
+    3回までリトライし、全て失敗した場合は例外を送出
     """
     if not settings.NOTE_STATUS_UPDATE_QUEUE_URL:
         logging.warning("NOTE_STATUS_UPDATE_QUEUE_URL not configured, skipping status update enqueue")
@@ -392,14 +442,28 @@ def enqueue_note_status_update(note_id: str):
 
     status_update_message = json.dumps({"note_id": note_id, "processing_type": "note_status_update"})
 
-    try:
-        response = sqs_client.send_message(
-            QueueUrl=settings.NOTE_STATUS_UPDATE_QUEUE_URL,
-            MessageBody=status_update_message,
-        )
-        logging.info(f"Enqueued note {note_id} to note-status-update queue, messageId={response.get('MessageId')}")
-    except Exception as e:
-        logging.error(f"Failed to enqueue note {note_id} to note-status-update queue: {e}")
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = sqs_client.send_message(
+                QueueUrl=settings.NOTE_STATUS_UPDATE_QUEUE_URL,
+                MessageBody=status_update_message,
+            )
+            logging.info(
+                f"Enqueued note {note_id} to note-status-update queue, messageId={response.get('MessageId')}"
+            )
+            return
+        except Exception as e:
+            if attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 1.0
+                logging.warning(
+                    f"Failed to enqueue note status {note_id} (attempt {attempt + 1}/{max_retries}), "
+                    f"retrying in {wait_time}s: {e}"
+                )
+                time.sleep(wait_time)
+            else:
+                logging.error(f"Failed to enqueue note status {note_id} after {max_retries} attempts: {e}")
+                raise
 
 
 def _process_rating_rows(reader, postgresql: Session, existing_row_note_ids: set, file_index: int):
