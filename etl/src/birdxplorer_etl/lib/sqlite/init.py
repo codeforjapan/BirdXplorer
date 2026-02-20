@@ -108,7 +108,7 @@ def close_sqlite(session):
         upload_sqlite(db_cfg["tmp_path"], db_cfg["s3_key"], db_cfg["s3_bucket"])
 
 
-def init_postgresql():
+def init_postgresql(use_pool: bool = False):
     db_host = os.getenv("DB_HOST", "localhost")
     db_port = os.getenv("DB_PORT", "5432")
     db_user = os.getenv("DB_USER", "postgres")
@@ -116,9 +116,19 @@ def init_postgresql():
     db_name = os.getenv("DB_NAME", "postgres")
 
     logging.info(f"Initializing database at {db_host}:{db_port}/{db_name}")
+    engine_kwargs = {}
+    if not use_pool:
+        engine_kwargs["poolclass"] = NullPool  # Lambda向け: コネクションをプールせず毎回接続・切断
+    else:
+        engine_kwargs.update({
+            "pool_size": 5,
+            "max_overflow": 10,
+            "pool_timeout": 30,
+            "pool_recycle": 3600,
+        })
     engine = create_engine(
         f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}",
-        poolclass=NullPool,  # Lambda向け: コネクションをプールせず毎回接続・切断
+        **engine_kwargs,
     )
 
     if not inspect(engine).has_table("row_notes"):
