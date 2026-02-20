@@ -85,6 +85,17 @@ def enqueue_notes_batch(notes: list):
     logging.info(f"Batch enqueued {len(notes)} notes to lang-detect queue")
 
 
+def enqueue_note_status_batch(note_ids: list):
+    """note_ids: [note_id, ...]"""
+    if not note_ids or not settings.NOTE_STATUS_UPDATE_QUEUE_URL:
+        return
+    messages = [
+        {"MessageBody": json.dumps({"note_id": nid, "processing_type": "note_status_update"})} for nid in note_ids
+    ]
+    _send_sqs_batch(settings.NOTE_STATUS_UPDATE_QUEUE_URL, messages)
+    logging.info(f"Batch enqueued {len(note_ids)} notes to status-update queue")
+
+
 def extract_data(postgresql: Session):
     logging.info("Downloading community notes data")
 
@@ -272,6 +283,7 @@ def extract_data(postgresql: Session):
         extract_ratings(postgresql, dateString, existing_row_note_ids)
 
         # noteStatusHistory-00000.zip から順に404が返るまでダウンロード
+        phase_start = time.time()
         file_index = 0
         while True:
             if settings.USE_DUMMY_DATA:
@@ -325,6 +337,7 @@ def extract_data(postgresql: Session):
 
             rows_to_add = []
             notes_to_update_status = []
+            rows_to_process = []
             for index, row in enumerate(reader):
                 for key, value in list(row.items()):
                     if value == "":
@@ -334,29 +347,45 @@ def extract_data(postgresql: Session):
                 if row["note_id"] not in existing_row_note_ids:
                     continue
 
-                # 既存のステータスレコードを削除して最新データで置き換え
-                postgresql.query(RowNoteStatusRecord).filter(RowNoteStatusRecord.note_id == row["note_id"]).delete()
-                rows_to_add.append(RowNoteStatusRecord(**row))
+                rows_to_process.append(row)
 
-                # NoteRecordが既に存在する場合、ステータス更新キューに追加
-                if row["note_id"] in existing_note_record_ids:
-                    notes_to_update_status.append(row["note_id"])
+                if len(rows_to_process) >= 1000:
+                    # バッチ DELETE: 1000件分のnote_idをまとめて削除
+                    note_ids_to_delete = [r["note_id"] for r in rows_to_process]
+                    postgresql.query(RowNoteStatusRecord).filter(
+                        RowNoteStatusRecord.note_id.in_(note_ids_to_delete)
+                    ).delete(synchronize_session=False)
 
-                if index % 1000 == 0:
+                    for r in rows_to_process:
+                        rows_to_add.append(RowNoteStatusRecord(**r))
+                        if r["note_id"] in existing_note_record_ids:
+                            notes_to_update_status.append(r["note_id"])
+
                     postgresql.bulk_save_objects(rows_to_add)
                     postgresql.commit()
 
-                    for note_id in notes_to_update_status:
-                        enqueue_note_status_update(note_id)
+                    enqueue_note_status_batch(notes_to_update_status)
 
                     rows_to_add = []
                     notes_to_update_status = []
+                    rows_to_process = []
 
-            postgresql.bulk_save_objects(rows_to_add)
-            postgresql.commit()
+            # 最後のバッチを処理
+            if rows_to_process:
+                note_ids_to_delete = [r["note_id"] for r in rows_to_process]
+                postgresql.query(RowNoteStatusRecord).filter(
+                    RowNoteStatusRecord.note_id.in_(note_ids_to_delete)
+                ).delete(synchronize_session=False)
 
-            for note_id in notes_to_update_status:
-                enqueue_note_status_update(note_id)
+                for r in rows_to_process:
+                    rows_to_add.append(RowNoteStatusRecord(**r))
+                    if r["note_id"] in existing_note_record_ids:
+                        notes_to_update_status.append(r["note_id"])
+
+                postgresql.bulk_save_objects(rows_to_add)
+                postgresql.commit()
+
+                enqueue_note_status_batch(notes_to_update_status)
 
             logging.info(f"Successfully processed note status file {file_index:05d} for {dateString}")
 
@@ -365,6 +394,8 @@ def extract_data(postgresql: Session):
                 break
 
             file_index += 1
+
+        logging.info(f"[PHASE_COMPLETE] Status: {time.time() - phase_start:.1f}s")
 
         break  # データを処理したので終了
 
@@ -474,44 +505,6 @@ def enqueue_notes(note_id: str, summary: str, post_id: str = None, language: str
                 time.sleep(wait_time)
             else:
                 logging.error(f"Failed to enqueue note {note_id} after {max_retries} attempts: {e}")
-                raise
-
-
-def enqueue_note_status_update(note_id: str):
-    """
-    ノートステータス更新用のSQSキューにメッセージを送信
-    既存のNoteRecordに対してステータス情報を更新
-    3回までリトライし、全て失敗した場合は例外を送出
-    """
-    if not settings.NOTE_STATUS_UPDATE_QUEUE_URL:
-        logging.warning("NOTE_STATUS_UPDATE_QUEUE_URL not configured, skipping status update enqueue")
-        return
-
-    sqs_client = boto3.client("sqs", region_name=os.environ.get("AWS_REGION", "ap-northeast-1"))
-
-    status_update_message = json.dumps({"note_id": note_id, "processing_type": "note_status_update"})
-
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            response = sqs_client.send_message(
-                QueueUrl=settings.NOTE_STATUS_UPDATE_QUEUE_URL,
-                MessageBody=status_update_message,
-            )
-            logging.info(
-                f"Enqueued note {note_id} to note-status-update queue, messageId={response.get('MessageId')}"
-            )
-            return
-        except Exception as e:
-            if attempt < max_retries - 1:
-                wait_time = (attempt + 1) * 1.0
-                logging.warning(
-                    f"Failed to enqueue note status {note_id} (attempt {attempt + 1}/{max_retries}), "
-                    f"retrying in {wait_time}s: {e}"
-                )
-                time.sleep(wait_time)
-            else:
-                logging.error(f"Failed to enqueue note status {note_id} after {max_retries} attempts: {e}")
                 raise
 
 
