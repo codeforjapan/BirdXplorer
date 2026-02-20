@@ -11,6 +11,7 @@ import boto3
 import requests
 import settings
 import stringcase
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -94,6 +95,48 @@ def enqueue_note_status_batch(note_ids: list):
     ]
     _send_sqs_batch(settings.NOTE_STATUS_UPDATE_QUEUE_URL, messages)
     logging.info(f"Batch enqueued {len(note_ids)} notes to status-update queue")
+
+
+def _upsert_note_status_batch(postgresql: Session, rows: list[dict]):
+    """row_note_status を UPSERT（DELETE→INSERT による dead tuples を回避）"""
+    if not rows:
+        return
+    stmt = insert(RowNoteStatusRecord).on_conflict_do_update(
+        index_elements=["note_id"],
+        set_={col: insert(RowNoteStatusRecord).excluded[col] for col in rows[0].keys() if col != "note_id"},
+    )
+    postgresql.execute(stmt, rows)
+
+
+def _detect_status_changes(postgresql: Session, rows: list[dict]) -> list[str]:
+    """ステータスが実際に変更された note_id のリストを返す（新規も含む）"""
+    note_ids = [r["note_id"] for r in rows]
+    if not note_ids:
+        return []
+
+    results = postgresql.execute(
+        select(
+            RowNoteStatusRecord.note_id,
+            RowNoteStatusRecord.current_status,
+            RowNoteStatusRecord.locked_status,
+            RowNoteStatusRecord.timestamp_millis_of_current_status,
+        ).filter(RowNoteStatusRecord.note_id.in_(note_ids))
+    ).all()
+    existing = {
+        r.note_id: (r.current_status, r.locked_status, r.timestamp_millis_of_current_status) for r in results
+    }
+
+    changed = []
+    for row in rows:
+        nid = row["note_id"]
+        old = existing.get(nid)
+        if old is None:
+            changed.append(nid)
+        else:
+            new = (row.get("current_status"), row.get("locked_status"), row.get("timestamp_millis_of_current_status"))
+            if old != new:
+                changed.append(nid)
+    return changed
 
 
 def extract_data(postgresql: Session):
@@ -337,8 +380,6 @@ def extract_data(postgresql: Session):
             existing_note_record_ids = set(r[0] for r in postgresql.query(NoteRecord.note_id).all())
             logging.info(f"Loaded {len(existing_note_record_ids)} existing note IDs from notes table")
 
-            rows_to_add = []
-            notes_to_update_status = []
             rows_to_process = []
             for index, row in enumerate(reader):
                 for key, value in list(row.items()):
@@ -352,41 +393,27 @@ def extract_data(postgresql: Session):
                 rows_to_process.append(row)
 
                 if len(rows_to_process) >= 1000:
-                    # バッチ DELETE: 1000件分のnote_idをまとめて削除
-                    note_ids_to_delete = [r["note_id"] for r in rows_to_process]
-                    postgresql.query(RowNoteStatusRecord).filter(
-                        RowNoteStatusRecord.note_id.in_(note_ids_to_delete)
-                    ).delete(synchronize_session=False)
-
-                    for r in rows_to_process:
-                        rows_to_add.append(RowNoteStatusRecord(**r))
-                        if r["note_id"] in existing_note_record_ids:
-                            notes_to_update_status.append(r["note_id"])
-
-                    postgresql.bulk_save_objects(rows_to_add)
+                    # 差分検出 → UPSERT → 変更分のみ enqueue
+                    changed_note_ids = _detect_status_changes(postgresql, rows_to_process)
+                    _upsert_note_status_batch(postgresql, [dict(r) for r in rows_to_process])
                     postgresql.commit()
 
+                    notes_to_update_status = [
+                        nid for nid in changed_note_ids if nid in existing_note_record_ids
+                    ]
                     enqueue_note_status_batch(notes_to_update_status)
 
-                    rows_to_add = []
-                    notes_to_update_status = []
                     rows_to_process = []
 
             # 最後のバッチを処理
             if rows_to_process:
-                note_ids_to_delete = [r["note_id"] for r in rows_to_process]
-                postgresql.query(RowNoteStatusRecord).filter(
-                    RowNoteStatusRecord.note_id.in_(note_ids_to_delete)
-                ).delete(synchronize_session=False)
-
-                for r in rows_to_process:
-                    rows_to_add.append(RowNoteStatusRecord(**r))
-                    if r["note_id"] in existing_note_record_ids:
-                        notes_to_update_status.append(r["note_id"])
-
-                postgresql.bulk_save_objects(rows_to_add)
+                changed_note_ids = _detect_status_changes(postgresql, rows_to_process)
+                _upsert_note_status_batch(postgresql, [dict(r) for r in rows_to_process])
                 postgresql.commit()
 
+                notes_to_update_status = [
+                    nid for nid in changed_note_ids if nid in existing_note_record_ids
+                ]
                 enqueue_note_status_batch(notes_to_update_status)
 
             logging.info(f"Successfully processed note status file {file_index:05d} for {dateString}")
