@@ -1621,7 +1621,11 @@ class Storage:
                             )
                             for topic in note_record.topics
                         ],
-                        language=note_record.language,
+                        language=(
+                            LanguageIdentifier.normalize(note_record.language)
+                            if note_record.language
+                            else LanguageIdentifier.OTHER
+                        ),
                         summary=note_record.summary,
                         current_status=note_record.current_status,
                         created_at=note_record.created_at,
