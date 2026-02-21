@@ -1,9 +1,17 @@
 from typing import List
 
 from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session
+from sqlalchemy.sql import text
 
 from birdxplorer_common.models import LanguageIdentifier, Note, Post, TopicId
-from birdxplorer_common.storage import NoteRecord, PostRecord, Storage, TopicRecord
+from birdxplorer_common.storage import (
+    NoteRecord,
+    PostRecord,
+    Storage,
+    TopicRecord,
+    XUserRecord,
+)
 
 
 def test_basic_search(
@@ -178,3 +186,101 @@ def test_count_search_results(
     # Verify count matches actual results
     results = list(storage.search_notes_with_posts(note_includes_text="summary", language=LanguageIdentifier("en")))
     assert len(results) == filtered_count
+
+
+def test_search_notes_with_non_enum_language(
+    engine_for_test: Engine,
+    note_samples: List[Note],
+    post_samples: List[Post],
+    note_records_sample: List[NoteRecord],
+    x_user_records_sample: List[XUserRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """Test that notes with non-enum language codes (e.g. 'ko') are returned with language='other' instead of skipped"""
+    with Session(engine_for_test) as sess:
+        # Insert a note with Korean language (not in LanguageIdentifier enum)
+        sess.execute(
+            text(
+                "INSERT INTO notes (note_id, post_id, summary, language, created_at) "
+                "VALUES (:note_id, :post_id, :summary, :language, :created_at)"
+            ),
+            {
+                "note_id": "9999999999999999901",
+                "post_id": "2234567890123456781",
+                "summary": "Korean language note summary",
+                "language": "ko",
+                "created_at": 1152921600000,
+            },
+        )
+        sess.commit()
+
+    storage = Storage(engine=engine_for_test)
+    results = list(storage.search_notes_with_posts(note_includes_text="Korean language note"))
+    assert len(results) == 1
+    note, _ = results[0]
+    assert note.language == "other"
+
+
+def test_search_notes_with_null_language(
+    engine_for_test: Engine,
+    note_samples: List[Note],
+    post_samples: List[Post],
+    note_records_sample: List[NoteRecord],
+    x_user_records_sample: List[XUserRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """Test that notes with NULL language are returned with language='other' instead of skipped"""
+    with Session(engine_for_test) as sess:
+        # Insert a note with NULL language
+        sess.execute(
+            text(
+                "INSERT INTO notes (note_id, post_id, summary, language, created_at) "
+                "VALUES (:note_id, :post_id, :summary, :language, :created_at)"
+            ),
+            {
+                "note_id": "9999999999999999902",
+                "post_id": "2234567890123456781",
+                "summary": "Null language note summary",
+                "language": None,
+                "created_at": 1152921600000,
+            },
+        )
+        sess.commit()
+
+    storage = Storage(engine=engine_for_test)
+    results = list(storage.search_notes_with_posts(note_includes_text="Null language note"))
+    assert len(results) == 1
+    note, _ = results[0]
+    assert note.language == "other"
+
+
+def test_search_notes_with_invalid_post_id(
+    engine_for_test: Engine,
+    note_samples: List[Note],
+    post_samples: List[Post],
+    note_records_sample: List[NoteRecord],
+    x_user_records_sample: List[XUserRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """Test that notes with invalid post_id (e.g. '-1') are returned with post_id='' instead of skipped"""
+    with Session(engine_for_test) as sess:
+        sess.execute(
+            text(
+                "INSERT INTO notes (note_id, post_id, summary, language, created_at) "
+                "VALUES (:note_id, :post_id, :summary, :language, :created_at)"
+            ),
+            {
+                "note_id": "9999999999999999903",
+                "post_id": "-1",
+                "summary": "Invalid post id note summary",
+                "language": "en",
+                "created_at": 1152921600000,
+            },
+        )
+        sess.commit()
+
+    storage = Storage(engine=engine_for_test)
+    results = list(storage.search_notes_with_posts(note_includes_text="Invalid post id note"))
+    assert len(results) == 1
+    note, _ = results[0]
+    assert note.post_id == ""
