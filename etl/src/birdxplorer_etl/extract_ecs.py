@@ -11,6 +11,7 @@ import boto3
 import requests
 import settings
 import stringcase
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -20,6 +21,122 @@ from birdxplorer_common.storage import (
     RowNoteRecord,
     RowNoteStatusRecord,
 )
+
+# モジュールレベル SQS クライアント（再生成コスト排除）
+_sqs_client = None
+
+
+def _get_sqs_client():
+    global _sqs_client
+    if _sqs_client is None:
+        _sqs_client = boto3.client("sqs", region_name=os.environ.get("AWS_REGION", "ap-northeast-1"))
+    return _sqs_client
+
+
+def _send_sqs_batch(queue_url: str, messages: list, max_retries: int = 3):
+    """
+    SQS send_message_batch で最大10件ずつ送信。
+    messages: [{"MessageBody": "..."}, ...] — Idは内部で振り直す。
+    """
+    client = _get_sqs_client()
+    for i in range(0, len(messages), 10):
+        chunk = messages[i : i + 10]
+        # 各チャンクに一意のIdを振る（SQS batch APIの要件）
+        batch = [{"Id": str(j), "MessageBody": e["MessageBody"]} for j, e in enumerate(chunk)]
+        for attempt in range(max_retries):
+            try:
+                response = client.send_message_batch(QueueUrl=queue_url, Entries=batch)
+                failed = response.get("Failed", [])
+                if failed:
+                    if attempt < max_retries - 1:
+                        logging.warning(
+                            f"SQS batch: {len(failed)} failed messages "
+                            f"(attempt {attempt + 1}/{max_retries}), retrying"
+                        )
+                        failed_ids = {f["Id"] for f in failed}
+                        batch = [e for e in batch if e["Id"] in failed_ids]
+                        time.sleep((attempt + 1) * 0.5)
+                        continue
+                    else:
+                        logging.error(f"SQS batch: {len(failed)} messages failed after {max_retries} attempts")
+                        raise RuntimeError(
+                            f"SQS send_message_batch failed for {len(failed)} messages after {max_retries} attempts"
+                        )
+                break
+            except RuntimeError:
+                raise
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep((attempt + 1) * 1.0)
+                else:
+                    raise
+
+
+def enqueue_notes_batch(notes: list):
+    """notes: [(note_id, summary, post_id, language), ...]"""
+    if not notes:
+        return
+    messages = []
+    for note_id, summary, post_id, language in notes:
+        body = {"note_id": note_id, "summary": summary, "post_id": post_id, "processing_type": "language_detect"}
+        if language:
+            body["language"] = language
+        messages.append({"MessageBody": json.dumps(body)})
+    _send_sqs_batch(settings.LANG_DETECT_QUEUE_URL, messages)
+    logging.info(f"Batch enqueued {len(notes)} notes to lang-detect queue")
+
+
+def enqueue_note_status_batch(note_ids: list):
+    """note_ids: [note_id, ...]"""
+    if not note_ids or not settings.NOTE_STATUS_UPDATE_QUEUE_URL:
+        return
+    messages = [
+        {"MessageBody": json.dumps({"note_id": nid, "processing_type": "note_status_update"})} for nid in note_ids
+    ]
+    _send_sqs_batch(settings.NOTE_STATUS_UPDATE_QUEUE_URL, messages)
+    logging.info(f"Batch enqueued {len(note_ids)} notes to status-update queue")
+
+
+def _upsert_note_status_batch(postgresql: Session, rows: list[dict]):
+    """row_note_status を UPSERT（DELETE→INSERT による dead tuples を回避）"""
+    if not rows:
+        return
+    stmt = insert(RowNoteStatusRecord).on_conflict_do_update(
+        index_elements=["note_id"],
+        set_={col: insert(RowNoteStatusRecord).excluded[col] for col in rows[0].keys() if col != "note_id"},
+    )
+    postgresql.execute(stmt, rows)
+
+
+def _detect_status_changes(postgresql: Session, rows: list[dict]) -> list[str]:
+    """ステータスが実際に変更された note_id のリストを返す（新規も含む）"""
+    note_ids = [r["note_id"] for r in rows]
+    if not note_ids:
+        return []
+
+    results = postgresql.execute(
+        select(
+            RowNoteStatusRecord.note_id,
+            RowNoteStatusRecord.current_status,
+            RowNoteStatusRecord.locked_status,
+            RowNoteStatusRecord.timestamp_millis_of_current_status,
+        ).filter(RowNoteStatusRecord.note_id.in_(note_ids))
+    ).all()
+    existing = {
+        r.note_id: (r.current_status, r.locked_status, r.timestamp_millis_of_current_status) for r in results
+    }
+
+    changed = []
+    for row in rows:
+        nid = row["note_id"]
+        old = existing.get(nid)
+        if old is None:
+            changed.append(nid)
+        else:
+            new = (row.get("current_status"), row.get("locked_status"), row.get("timestamp_millis_of_current_status"))
+            if old != new:
+                changed.append(nid)
+    return changed
 
 
 def extract_data(postgresql: Session):
@@ -38,6 +155,9 @@ def extract_data(postgresql: Session):
         # notes-00000.zip から順に404が返るまでダウンロード
         file_index = 0
         date_has_notes = False  # この日のnotesデータが存在するか
+
+        phase_start = time.time()
+
         while True:
             if settings.USE_DUMMY_DATA:
                 note_url = "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/notes_sample.tsv"
@@ -79,18 +199,12 @@ def extract_data(postgresql: Session):
                         reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
 
             rows_to_add = {}  # note_idをキーにして重複を防ぐ
-            rows_to_update = []
-            notes_missing_language = []  # languageがNULLの既存ノート（lang-detect再enqueue用）
+            pending_rows = {}  # 既存ノートの更新候補（バッチ取得用）
             for index, row in enumerate(reader):
                 note_id = row["note_id"]
-                # 既にrows_to_addに追加済みの場合はスキップ
-                if note_id in rows_to_add:
+                # 既にrows_to_addまたはpending_rowsに追加済みの場合はスキップ
+                if note_id in rows_to_add or note_id in pending_rows:
                     continue
-                # セットで存在チェックし、既存の場合のみDBクエリで実レコードを取得
-                if note_id in existing_row_note_ids:
-                    existing_note = postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id == note_id).first()
-                else:
-                    existing_note = None
 
                 # BinaryBoolフィールドの値を正規化
                 binary_bool_fields = [
@@ -180,64 +294,19 @@ def extract_data(postgresql: Session):
                     if value == "" and key not in ["harmful", "validation_difficulty"]:
                         row[key] = None
 
-                if existing_note:
-                    # 既存レコードの更新（セッションにattachされているのでcommit時に自動更新）
-                    for key, value in row.items():
-                        if hasattr(existing_note, key):
-                            setattr(existing_note, key, value)
-                    rows_to_update.append(existing_note)
-                    # languageがNULLの既存ノートはlang-detectに再enqueue
-                    if not existing_note.language:
-                        notes_missing_language.append(existing_note)
+                if note_id in existing_row_note_ids:
+                    pending_rows[note_id] = dict(row)  # バッチ取得用に蓄積
                 else:
                     note_record = RowNoteRecord(**row)
                     rows_to_add[note_id] = note_record
 
-                if index % 1000 == 0:
-                    # 新規レコードの挿入
-                    postgresql.bulk_save_objects(list(rows_to_add.values()))
-                    # 更新レコードはセッションにattachされているのでflush/commitで反映
-                    postgresql.flush()
-                    postgresql.commit()
-
-                    # 新規追加したnote_idをセットに追加
-                    existing_row_note_ids.update(rows_to_add.keys())
-
-                    # バッチ処理後にSQSキューイング（新規追加のみ）
-                    for note in rows_to_add.values():
-                        enqueue_notes(note.note_id, note.summary, note.tweet_id, note.language)
-
-                    # languageがNULLの既存ノートをlang-detectに再enqueue
-                    if notes_missing_language:
-                        for note in notes_missing_language:
-                            enqueue_notes(note.note_id, note.summary, note.tweet_id, note.language)
-                        logging.info(
-                            f"Enqueued {len(notes_missing_language)} existing notes with missing language"
-                        )
-
+                if (index + 1) % 1000 == 0:
+                    _flush_notes_batch(postgresql, rows_to_add, pending_rows, existing_row_note_ids)
                     rows_to_add = {}
-                    rows_to_update = []
-                    notes_missing_language = []
+                    pending_rows = {}
 
             # 最後のバッチを処理
-            postgresql.bulk_save_objects(list(rows_to_add.values()))
-            postgresql.flush()
-            postgresql.commit()
-
-            # 新規追加したnote_idをセットに追加
-            existing_row_note_ids.update(rows_to_add.keys())
-
-            # 最後のバッチのSQSキューイング（新規追加のみ）
-            for note in rows_to_add.values():
-                enqueue_notes(note.note_id, note.summary, note.tweet_id, note.language)
-
-            # languageがNULLの既存ノートをlang-detectに再enqueue
-            for note in notes_missing_language:
-                enqueue_notes(note.note_id, note.summary, note.tweet_id, note.language)
-            if notes_missing_language:
-                logging.info(
-                    f"Enqueued {len(notes_missing_language)} existing notes with missing language"
-                )
+            _flush_notes_batch(postgresql, rows_to_add, pending_rows, existing_row_note_ids)
 
             logging.info(f"Successfully processed notes file {file_index:05d} for {dateString}")
 
@@ -247,14 +316,19 @@ def extract_data(postgresql: Session):
 
             file_index += 1
 
+        logging.info(f"[PHASE_COMPLETE] Notes: {time.time() - phase_start:.1f}s")
+
         # この日のnotesデータがなければ前の日を試す
         if not date_has_notes:
             continue
 
         # 評価データを取得して保存（noteStatus処理より先に実行することで集計タイミングを保証）
+        phase_start = time.time()
         extract_ratings(postgresql, dateString, existing_row_note_ids)
+        logging.info(f"[PHASE_COMPLETE] Ratings: {time.time() - phase_start:.1f}s")
 
         # noteStatusHistory-00000.zip から順に404が返るまでダウンロード
+        phase_start = time.time()
         file_index = 0
         while True:
             if settings.USE_DUMMY_DATA:
@@ -306,8 +380,7 @@ def extract_data(postgresql: Session):
             existing_note_record_ids = set(r[0] for r in postgresql.query(NoteRecord.note_id).all())
             logging.info(f"Loaded {len(existing_note_record_ids)} existing note IDs from notes table")
 
-            rows_to_add = []
-            notes_to_update_status = []
+            rows_to_process = []
             for index, row in enumerate(reader):
                 for key, value in list(row.items()):
                     if value == "":
@@ -317,29 +390,31 @@ def extract_data(postgresql: Session):
                 if row["note_id"] not in existing_row_note_ids:
                     continue
 
-                # 既存のステータスレコードを削除して最新データで置き換え
-                postgresql.query(RowNoteStatusRecord).filter(RowNoteStatusRecord.note_id == row["note_id"]).delete()
-                rows_to_add.append(RowNoteStatusRecord(**row))
+                rows_to_process.append(row)
 
-                # NoteRecordが既に存在する場合、ステータス更新キューに追加
-                if row["note_id"] in existing_note_record_ids:
-                    notes_to_update_status.append(row["note_id"])
-
-                if index % 1000 == 0:
-                    postgresql.bulk_save_objects(rows_to_add)
+                if len(rows_to_process) >= 1000:
+                    # 差分検出 → UPSERT → 変更分のみ enqueue
+                    changed_note_ids = _detect_status_changes(postgresql, rows_to_process)
+                    _upsert_note_status_batch(postgresql, [dict(r) for r in rows_to_process])
                     postgresql.commit()
 
-                    for note_id in notes_to_update_status:
-                        enqueue_note_status_update(note_id)
+                    notes_to_update_status = [
+                        nid for nid in changed_note_ids if nid in existing_note_record_ids
+                    ]
+                    enqueue_note_status_batch(notes_to_update_status)
 
-                    rows_to_add = []
-                    notes_to_update_status = []
+                    rows_to_process = []
 
-            postgresql.bulk_save_objects(rows_to_add)
-            postgresql.commit()
+            # 最後のバッチを処理
+            if rows_to_process:
+                changed_note_ids = _detect_status_changes(postgresql, rows_to_process)
+                _upsert_note_status_batch(postgresql, [dict(r) for r in rows_to_process])
+                postgresql.commit()
 
-            for note_id in notes_to_update_status:
-                enqueue_note_status_update(note_id)
+                notes_to_update_status = [
+                    nid for nid in changed_note_ids if nid in existing_note_record_ids
+                ]
+                enqueue_note_status_batch(notes_to_update_status)
 
             logging.info(f"Successfully processed note status file {file_index:05d} for {dateString}")
 
@@ -349,17 +424,53 @@ def extract_data(postgresql: Session):
 
             file_index += 1
 
+        logging.info(f"[PHASE_COMPLETE] Status: {time.time() - phase_start:.1f}s")
+
         break  # データを処理したので終了
 
     postgresql.commit()
 
     # row_notesにあるがnotesにないレコードをバックフィル
+    phase_start = time.time()
     backfill_missing_notes(postgresql)
+    logging.info(f"[PHASE_COMPLETE] Backfill: {time.time() - phase_start:.1f}s")
 
     return
 
 
-def backfill_missing_notes(postgresql: Session, batch_limit: int = 10000):
+def _flush_notes_batch(postgresql: Session, rows_to_add: dict, pending_rows: dict, existing_row_note_ids: set):
+    """ノート処理の1バッチ分をDB保存+SQS送信する。"""
+    if not rows_to_add and not pending_rows:
+        return
+
+    # 新規レコードの挿入
+    if rows_to_add:
+        postgresql.bulk_save_objects(list(rows_to_add.values()))
+
+    # 既存レコードのバッチ取得+差分更新
+    if pending_rows:
+        existing_notes = (
+            postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id.in_(list(pending_rows.keys()))).all()
+        )
+        for existing_note in existing_notes:
+            row_data = pending_rows[existing_note.note_id]
+            for key, value in row_data.items():
+                if hasattr(existing_note, key) and getattr(existing_note, key) != value:
+                    setattr(existing_note, key, value)
+
+    postgresql.flush()
+    postgresql.commit()
+
+    # 新規追加したnote_idをセットに追加
+    existing_row_note_ids.update(rows_to_add.keys())
+
+    # SQSバッチ送信（新規追加のみ）
+    if rows_to_add:
+        batch = [(n.note_id, n.summary or "", n.tweet_id, n.language) for n in rows_to_add.values()]
+        enqueue_notes_batch(batch)
+
+
+def backfill_missing_notes(postgresql: Session, batch_limit: int = 50000):
     """
     row_notesに存在するがnotesテーブルに存在しないレコードをlang-detect-queueに再投入する。
     毎日のextractジョブの最後に呼ばれ、batch_limit件ずつ処理する。
@@ -378,92 +489,10 @@ def backfill_missing_notes(postgresql: Session, batch_limit: int = 10000):
 
     logging.info(f"Backfill: found {len(missing_notes)} notes in row_notes missing from notes, re-enqueuing")
 
-    enqueued = 0
-    failed = 0
-    for note in missing_notes:
-        try:
-            enqueue_notes(note.note_id, note.summary or "", note.tweet_id, note.language)
-            enqueued += 1
-        except Exception as e:
-            failed += 1
-            logging.error(f"Backfill: failed to re-enqueue note {note.note_id}: {e}")
+    batch = [(n.note_id, n.summary or "", n.tweet_id, n.language) for n in missing_notes]
+    enqueue_notes_batch(batch)
 
-    logging.info(f"Backfill complete: enqueued {enqueued}, failed {failed}, total missing {len(missing_notes)}")
-
-
-def enqueue_notes(note_id: str, summary: str, post_id: str = None, language: str = None):
-    """
-    ノート処理用のSQSキューにメッセージを送信
-    lang-detect-queueに送信（summaryとpost_idも含める）
-    3回までリトライし、全て失敗した場合は例外を送出
-    """
-    sqs_client = boto3.client("sqs", region_name=os.environ.get("AWS_REGION", "ap-northeast-1"))
-
-    # lang-detect-queue用のメッセージ（summaryとpost_idを含める）
-    message = {"note_id": note_id, "summary": summary, "post_id": post_id, "processing_type": "language_detect"}
-    if language:
-        message["language"] = language
-    lang_detect_message = json.dumps(message)
-
-    # lang-detect-queueに送信（リトライ付き）
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            response = sqs_client.send_message(
-                QueueUrl=settings.LANG_DETECT_QUEUE_URL,
-                MessageBody=lang_detect_message,
-            )
-            logging.info(f"Enqueued note {note_id} to lang-detect queue, messageId={response.get('MessageId')}")
-            return
-        except Exception as e:
-            if attempt < max_retries - 1:
-                wait_time = (attempt + 1) * 1.0
-                logging.warning(
-                    f"Failed to enqueue note {note_id} (attempt {attempt + 1}/{max_retries}), "
-                    f"retrying in {wait_time}s: {e}"
-                )
-                time.sleep(wait_time)
-            else:
-                logging.error(f"Failed to enqueue note {note_id} after {max_retries} attempts: {e}")
-                raise
-
-
-def enqueue_note_status_update(note_id: str):
-    """
-    ノートステータス更新用のSQSキューにメッセージを送信
-    既存のNoteRecordに対してステータス情報を更新
-    3回までリトライし、全て失敗した場合は例外を送出
-    """
-    if not settings.NOTE_STATUS_UPDATE_QUEUE_URL:
-        logging.warning("NOTE_STATUS_UPDATE_QUEUE_URL not configured, skipping status update enqueue")
-        return
-
-    sqs_client = boto3.client("sqs", region_name=os.environ.get("AWS_REGION", "ap-northeast-1"))
-
-    status_update_message = json.dumps({"note_id": note_id, "processing_type": "note_status_update"})
-
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            response = sqs_client.send_message(
-                QueueUrl=settings.NOTE_STATUS_UPDATE_QUEUE_URL,
-                MessageBody=status_update_message,
-            )
-            logging.info(
-                f"Enqueued note {note_id} to note-status-update queue, messageId={response.get('MessageId')}"
-            )
-            return
-        except Exception as e:
-            if attempt < max_retries - 1:
-                wait_time = (attempt + 1) * 1.0
-                logging.warning(
-                    f"Failed to enqueue note status {note_id} (attempt {attempt + 1}/{max_retries}), "
-                    f"retrying in {wait_time}s: {e}"
-                )
-                time.sleep(wait_time)
-            else:
-                logging.error(f"Failed to enqueue note status {note_id} after {max_retries} attempts: {e}")
-                raise
+    logging.info(f"Backfill complete: enqueued {len(batch)} notes")
 
 
 def _process_rating_rows(reader, postgresql: Session, existing_row_note_ids: set, file_index: int):
@@ -536,8 +565,8 @@ def _process_rating_rows(reader, postgresql: Session, existing_row_note_ids: set
 
         rows_to_add.append(dict(row))
 
-        # 1000件ごとにバッチ処理
-        if len(rows_to_add) >= 1000:
+        # 5000件ごとにバッチ処理（1000 → 5000に拡大）
+        if len(rows_to_add) >= 5000:
             postgresql.execute(insert(RowNoteRatingRecord).on_conflict_do_nothing(), rows_to_add)
             postgresql.commit()
             logging.info(
