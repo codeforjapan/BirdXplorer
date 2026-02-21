@@ -91,6 +91,7 @@ def test_search_pagination(client: TestClient, mock_storage: MagicMock) -> None:
     data = response.json()
     assert data["meta"]["next"] is not None  # Should have next page
     assert data["meta"]["prev"] is None  # Should not have prev page
+    assert data["meta"]["total"] == 150  # Should have total count
 
     # Test middle page
     response = client.get("/api/v1/data/search?limit=50&offset=50")
@@ -98,6 +99,7 @@ def test_search_pagination(client: TestClient, mock_storage: MagicMock) -> None:
     data = response.json()
     assert data["meta"]["next"] is not None  # Should have next page
     assert data["meta"]["prev"] is not None  # Should have prev page
+    assert data["meta"]["total"] == 150  # Should have total count
 
     # Test last page
     response = client.get("/api/v1/data/search?limit=50&offset=100")
@@ -105,6 +107,7 @@ def test_search_pagination(client: TestClient, mock_storage: MagicMock) -> None:
     data = response.json()
     assert data["meta"]["next"] is None  # Should not have next page
     assert data["meta"]["prev"] is not None  # Should have prev page
+    assert data["meta"]["total"] == 150  # Should have total count
 
 
 def test_search_empty_parameters(client: TestClient, mock_storage: MagicMock) -> None:
