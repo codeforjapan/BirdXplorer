@@ -190,6 +190,8 @@ def test_count_search_results(
 
 def test_search_notes_with_non_enum_language(
     engine_for_test: Engine,
+    note_samples: List[Note],
+    post_samples: List[Post],
     note_records_sample: List[NoteRecord],
     x_user_records_sample: List[XUserRecord],
     post_records_sample: List[PostRecord],
@@ -204,10 +206,10 @@ def test_search_notes_with_non_enum_language(
             ),
             {
                 "note_id": "9999999999999999901",
-                "post_id": post_records_sample[0].post_id,
+                "post_id": "2234567890123456781",
                 "summary": "Korean language note summary",
                 "language": "ko",
-                "created_at": note_records_sample[0].created_at,
+                "created_at": 1152921600000,
             },
         )
         sess.commit()
@@ -221,6 +223,8 @@ def test_search_notes_with_non_enum_language(
 
 def test_search_notes_with_null_language(
     engine_for_test: Engine,
+    note_samples: List[Note],
+    post_samples: List[Post],
     note_records_sample: List[NoteRecord],
     x_user_records_sample: List[XUserRecord],
     post_records_sample: List[PostRecord],
@@ -235,10 +239,10 @@ def test_search_notes_with_null_language(
             ),
             {
                 "note_id": "9999999999999999902",
-                "post_id": post_records_sample[0].post_id,
+                "post_id": "2234567890123456781",
                 "summary": "Null language note summary",
                 "language": None,
-                "created_at": note_records_sample[0].created_at,
+                "created_at": 1152921600000,
             },
         )
         sess.commit()
