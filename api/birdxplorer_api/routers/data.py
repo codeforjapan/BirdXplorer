@@ -40,7 +40,11 @@ PostsPaginationMetaWithExamples: TypeAlias = Annotated[
         description="ページネーション用情報。 リクエスト時に指定した offset / limit の値に応じて、次のページや前のページのリクエスト用 URL が設定される。",
         json_schema_extra={
             "examples": [
-                {"next": "http://birdxplorer.onrender.com/api/v1/data/posts?offset=100&limit=100", "prev": "null"}
+                {
+                    "next": "http://birdxplorer.onrender.com/api/v1/data/posts?offset=100&limit=100",
+                    "prev": "null",
+                    "total": 500,
+                }
             ]
         },
     ),
@@ -52,7 +56,11 @@ NotesPaginationMetaWithExamples: TypeAlias = Annotated[
         description="ページネーション用情報。 リクエスト時に指定した offset / limit の値に応じて、次のページや前のページのリクエスト用 URL が設定される。",
         json_schema_extra={
             "examples": [
-                {"next": "http://birdxplorer.onrender.com/api/v1/data/notes?offset=100&limit=100", "prev": "null"}
+                {
+                    "next": "http://birdxplorer.onrender.com/api/v1/data/notes?offset=100&limit=100",
+                    "prev": "null",
+                    "total": 500,
+                }
             ]
         },
     ),
@@ -64,7 +72,11 @@ SearchPaginationMetaWithExamples: TypeAlias = Annotated[
         description="ページネーション用情報。 リクエスト時に指定した offset / limit の値に応じて、次のページや前のページのリクエスト用 URL が設定される。",
         json_schema_extra={
             "examples": [
-                {"next": "http://birdxplorer.onrender.com/api/v1/data/search?offset=100&limit=100", "prev": "null"}
+                {
+                    "next": "http://birdxplorer.onrender.com/api/v1/data/search?offset=100&limit=100",
+                    "prev": "null",
+                    "total": 500,
+                }
             ]
         },
     ),
@@ -389,7 +401,7 @@ def gen_router(storage: Storage) -> APIRouter:
         if offset > 0:
             prev_url = f"{baseurl}?offset={prev_offset}&limit={limit}"
 
-        return NoteListResponse(data=notes, meta=PaginationMeta(next=next_url, prev=prev_url))
+        return NoteListResponse(data=notes, meta=PaginationMeta(next=next_url, prev=prev_url, total=total_count))
 
     @router.get("/posts", description=V1DataPostsDocs.description, response_model=PostListResponse)
     def get_posts(
@@ -452,7 +464,7 @@ def gen_router(storage: Storage) -> APIRouter:
         if offset > 0:
             prev_url = f"{base_url}?offset={prev_offset}&limit={limit}"
 
-        return PostListResponse(data=posts, meta=PaginationMeta(next=next_url, prev=prev_url))
+        return PostListResponse(data=posts, meta=PaginationMeta(next=next_url, prev=prev_url, total=total_count))
 
     @router.get("/search", description=V1DataSearchDocs.description, response_model=SearchResponse)
     def search(
@@ -579,6 +591,6 @@ def gen_router(storage: Storage) -> APIRouter:
             query_params["limit"] = [str(limit)]
             prev_url = f"{base_url}?{urlencode(query_params, doseq=True)}"
 
-        return SearchResponse(data=results, meta=PaginationMeta(next=next_url, prev=prev_url))
+        return SearchResponse(data=results, meta=PaginationMeta(next=next_url, prev=prev_url, total=total_count))
 
     return router

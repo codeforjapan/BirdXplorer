@@ -26,7 +26,7 @@ def test_posts_get(client: TestClient, post_samples: List[Post]) -> None:
     res_json = response.json()
     assert res_json == {
         "data": [json.loads(d.model_dump_json()) for d in post_samples],
-        "meta": {"next": None, "prev": None},
+        "meta": {"next": None, "prev": None, "total": 5},
     }
 
 
@@ -39,6 +39,7 @@ def test_posts_get_limit_and_offset(client: TestClient, post_samples: List[Post]
         "meta": {
             "next": "http://testserver/api/v1/data/posts?offset=3&limit=2",
             "prev": "http://testserver/api/v1/data/posts?offset=0&limit=2",
+            "total": 5,
         },
     }
 
@@ -52,7 +53,7 @@ def test_posts_get_has_post_id_filter(client: TestClient, post_samples: List[Pos
             json.loads(post_samples[0].model_dump_json()),
             json.loads(post_samples[2].model_dump_json()),
         ],
-        "meta": {"next": None, "prev": None},
+        "meta": {"next": None, "prev": None, "total": 2},
     }
 
 
@@ -60,14 +61,20 @@ def test_posts_get_has_note_id_filter(client: TestClient, post_samples: List[Pos
     response = client.get(f"/api/v1/data/posts/?noteIds={','.join([n.note_id for n in note_samples])}")
     assert response.status_code == 200
     res_json = response.json()
-    assert res_json == {"data": [json.loads(post_samples[0].model_dump_json())], "meta": {"next": None, "prev": None}}
+    assert res_json == {
+        "data": [json.loads(post_samples[0].model_dump_json())],
+        "meta": {"next": None, "prev": None, "total": 1},
+    }
 
 
 def test_posts_get_has_created_at_filter_start_and_end(client: TestClient, post_samples: List[Post]) -> None:
     response = client.get("/api/v1/data/posts/?createdAtFrom=2006-7-25 00:00:00&createdAtTo=2006-7-30 23:59:59")
     assert response.status_code == 200
     res_json = response.json()
-    assert res_json == {"data": [json.loads(post_samples[1].model_dump_json())], "meta": {"next": None, "prev": None}}
+    assert res_json == {
+        "data": [json.loads(post_samples[1].model_dump_json())],
+        "meta": {"next": None, "prev": None, "total": 1},
+    }
 
 
 def test_posts_get_has_created_at_filter_start(client: TestClient, post_samples: List[Post]) -> None:
@@ -76,7 +83,7 @@ def test_posts_get_has_created_at_filter_start(client: TestClient, post_samples:
     res_json = response.json()
     assert res_json == {
         "data": [json.loads(post_samples[i].model_dump_json()) for i in (1, 2, 3, 4)],
-        "meta": {"next": None, "prev": None},
+        "meta": {"next": None, "prev": None, "total": 4},
     }
 
 
@@ -86,7 +93,7 @@ def test_posts_get_has_created_at_filter_end(client: TestClient, post_samples: L
     res_json = response.json()
     assert res_json == {
         "data": [json.loads(post_samples[i].model_dump_json()) for i in (0, 1)],
-        "meta": {"next": None, "prev": None},
+        "meta": {"next": None, "prev": None, "total": 2},
     }
 
 
@@ -94,7 +101,10 @@ def test_posts_get_created_at_range_filter_accepts_integer(client: TestClient, p
     response = client.get("/api/v1/data/posts/?createdAtFrom=1153921700000&createdAtTo=1154921800000")
     assert response.status_code == 200
     res_json = response.json()
-    assert res_json == {"data": [json.loads(post_samples[1].model_dump_json())], "meta": {"next": None, "prev": None}}
+    assert res_json == {
+        "data": [json.loads(post_samples[1].model_dump_json())],
+        "meta": {"next": None, "prev": None, "total": 1},
+    }
 
 
 def test_posts_get_created_at_start_filter_accepts_integer(client: TestClient, post_samples: List[Post]) -> None:
@@ -103,7 +113,7 @@ def test_posts_get_created_at_start_filter_accepts_integer(client: TestClient, p
     res_json = response.json()
     assert res_json == {
         "data": [json.loads(post_samples[i].model_dump_json()) for i in (1, 2, 3, 4)],
-        "meta": {"next": None, "prev": None},
+        "meta": {"next": None, "prev": None, "total": 4},
     }
 
 
@@ -113,7 +123,7 @@ def test_posts_get_created_at_end_filter_accepts_integer(client: TestClient, pos
     res_json = response.json()
     assert res_json == {
         "data": [json.loads(post_samples[i].model_dump_json()) for i in (0, 1)],
-        "meta": {"next": None, "prev": None},
+        "meta": {"next": None, "prev": None, "total": 2},
     }
 
 
@@ -129,7 +139,7 @@ def test_posts_get_with_media_by_default(client: TestClient, post_samples: List[
     res_json_default = response.json()
     assert res_json_default == {
         "data": [json.loads(post_samples[1].model_dump_json())],
-        "meta": {"next": None, "prev": None},
+        "meta": {"next": None, "prev": None, "total": 1},
     }
 
 
@@ -140,7 +150,7 @@ def test_posts_get_with_media_true(client: TestClient, post_samples: List[Post])
     res_json_default = response.json()
     assert res_json_default == {
         "data": [json.loads(post_samples[1].model_dump_json())],
-        "meta": {"next": None, "prev": None},
+        "meta": {"next": None, "prev": None, "total": 1},
     }
 
 
@@ -152,7 +162,7 @@ def test_posts_get_with_media_false(client: TestClient, post_samples: List[Post]
     res_json_default = response.json()
     assert res_json_default == {
         "data": [json.loads(expected_post.model_dump_json())],
-        "meta": {"next": None, "prev": None},
+        "meta": {"next": None, "prev": None, "total": 1},
     }
 
 
@@ -162,7 +172,7 @@ def test_posts_search_by_text(client: TestClient, post_samples: List[Post]) -> N
     res_json = response.json()
     assert res_json == {
         "data": [json.loads(post_samples[i].model_dump_json()) for i in (0, 2)],
-        "meta": {"next": None, "prev": None},
+        "meta": {"next": None, "prev": None, "total": 2},
     }
 
 
@@ -172,7 +182,7 @@ def test_posts_search_by_url(client: TestClient, post_samples: List[Post]) -> No
     res_json = response.json()
     assert res_json == {
         "data": [json.loads(post_samples[i].model_dump_json()) for i in (2, 3)],
-        "meta": {"next": None, "prev": None},
+        "meta": {"next": None, "prev": None, "total": 2},
     }
 
 
@@ -182,7 +192,7 @@ def test_notes_get(client: TestClient, note_samples: List[Note]) -> None:
     res_json = response.json()
     assert res_json == {
         "data": [json.loads(d.model_dump_json()) for d in note_samples],
-        "meta": {"next": None, "prev": None},
+        "meta": {"next": None, "prev": None, "total": 5},
     }
 
 
@@ -195,7 +205,7 @@ def test_notes_get_has_note_id_filter(client: TestClient, note_samples: List[Not
             json.loads(note_samples[0].model_dump_json()),
             json.loads(note_samples[2].model_dump_json()),
         ],
-        "meta": {"next": None, "prev": None},
+        "meta": {"next": None, "prev": None, "total": 2},
     }
 
 
@@ -205,7 +215,7 @@ def test_notes_get_has_created_at_filter_from_and_to(client: TestClient, note_sa
     res_json = response.json()
     assert res_json == {
         "data": [json.loads(note_samples[i].model_dump_json()) for i in (1, 2, 3)],
-        "meta": {"next": None, "prev": None},
+        "meta": {"next": None, "prev": None, "total": 3},
     }
 
 
@@ -215,7 +225,7 @@ def test_notes_get_has_created_at_filter_from(client: TestClient, note_samples: 
     res_json = response.json()
     assert res_json == {
         "data": [json.loads(note_samples[i].model_dump_json()) for i in (1, 2, 3, 4)],
-        "meta": {"next": None, "prev": None},
+        "meta": {"next": None, "prev": None, "total": 4},
     }
 
 
@@ -225,7 +235,7 @@ def test_notes_get_has_created_at_filter_to(client: TestClient, note_samples: Li
     res_json = response.json()
     assert res_json == {
         "data": [json.loads(note_samples[i].model_dump_json()) for i in (0, 1, 2, 3)],
-        "meta": {"next": None, "prev": None},
+        "meta": {"next": None, "prev": None, "total": 4},
     }
 
 
@@ -236,5 +246,5 @@ def test_notes_get_has_topic_id_filter(client: TestClient, note_samples: List[No
     res_json = response.json()
     assert res_json == {
         "data": [json.loads(correct_notes[i].model_dump_json()) for i in range(correct_notes.__len__())],
-        "meta": {"next": None, "prev": None},
+        "meta": {"next": None, "prev": None, "total": len(correct_notes)},
     }
