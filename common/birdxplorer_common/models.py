@@ -337,7 +337,7 @@ class BaseBoundedInt(BaseLowerBoundedInt):
         return dict(super().__get_extra_constraint_dict__(), le=cls.max_value())
 
 
-class TwitterTimestamp(BaseBoundedInt):
+class TwitterTimestamp(BaseLowerBoundedInt):
     """
     >>> TwitterTimestamp.from_int(1)
     Traceback (most recent call last):
@@ -347,16 +347,7 @@ class TwitterTimestamp(BaseBoundedInt):
      ...
     >>> TwitterTimestamp.from_int(1288834974657)
     TwitterTimestamp(1288834974657)
-    >>> TwitterTimestamp.from_int(int(datetime.now().timestamp() * 1000 + 24 * 60 * 60 * 1000))
-    Traceback (most recent call last):
-     ...
-    pydantic_core._pydantic_core.ValidationError: 1 validation error for function-after[validate(), constrained-int]
-     ...
     """
-
-    @classmethod
-    def max_value(cls) -> int:
-        return int(datetime.utcnow().replace(tzinfo=timezone.utc).timestamp() * 1000)
 
     @classmethod
     def min_value(cls) -> int:
