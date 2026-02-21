@@ -252,3 +252,35 @@ def test_search_notes_with_null_language(
     assert len(results) == 1
     note, _ = results[0]
     assert note.language == "other"
+
+
+def test_search_notes_with_invalid_post_id(
+    engine_for_test: Engine,
+    note_samples: List[Note],
+    post_samples: List[Post],
+    note_records_sample: List[NoteRecord],
+    x_user_records_sample: List[XUserRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """Test that notes with invalid post_id (e.g. '-1') are returned with post_id='' instead of skipped"""
+    with Session(engine_for_test) as sess:
+        sess.execute(
+            text(
+                "INSERT INTO notes (note_id, post_id, summary, language, created_at) "
+                "VALUES (:note_id, :post_id, :summary, :language, :created_at)"
+            ),
+            {
+                "note_id": "9999999999999999903",
+                "post_id": "-1",
+                "summary": "Invalid post id note summary",
+                "language": "en",
+                "created_at": 1152921600000,
+            },
+        )
+        sess.commit()
+
+    storage = Storage(engine=engine_for_test)
+    results = list(storage.search_notes_with_posts(note_includes_text="Invalid post id note"))
+    assert len(results) == 1
+    note, _ = results[0]
+    assert note.post_id == ""

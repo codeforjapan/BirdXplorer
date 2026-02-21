@@ -1,3 +1,4 @@
+import re
 from typing import Any, Generator, List, Optional, Tuple, Union
 
 from psycopg2.extensions import AsIs, register_adapter
@@ -61,6 +62,14 @@ def adapt_pydantic_http_url(url: AnyUrl) -> AsIs:
 
 
 register_adapter(AnyUrl, adapt_pydantic_http_url)
+
+_POST_ID_PATTERN = re.compile(r"^([0-9]{1,19}|)$")
+
+
+def _normalize_post_id(value: Optional[str]) -> str:
+    if value is None or not _POST_ID_PATTERN.match(value):
+        return ""
+    return value
 
 
 class Base(DeclarativeBase):
@@ -1329,7 +1338,7 @@ class Storage:
                     yield NoteModel(
                         note_id=note_record.note_id,
                         note_author_participant_id=note_record.note_author_participant_id,
-                        post_id=note_record.post_id,
+                        post_id=_normalize_post_id(note_record.post_id),
                         topics=[
                             TopicModel(
                                 topic_id=topic.topic_id,
@@ -1612,7 +1621,7 @@ class Storage:
                     note = NoteModel(
                         note_id=note_record.note_id,
                         note_author_participant_id=note_record.note_author_participant_id,
-                        post_id=note_record.post_id,
+                        post_id=_normalize_post_id(note_record.post_id),
                         topics=[
                             TopicModel(
                                 topic_id=topic.topic_id,
