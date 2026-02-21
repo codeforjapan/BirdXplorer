@@ -1,6 +1,7 @@
 import os
 import random
 from collections.abc import Generator
+from datetime import datetime, timezone
 from typing import List, Type, Union
 from unittest.mock import MagicMock, patch
 
@@ -38,7 +39,8 @@ from birdxplorer_common.storage import Storage
 
 
 def gen_random_twitter_timestamp() -> int:
-    return random.randint(TwitterTimestamp.min_value(), TwitterTimestamp.max_value())
+    now_millis = int(datetime.now(timezone.utc).timestamp() * 1000)
+    return random.randint(TwitterTimestamp.min_value(), now_millis)
 
 
 @register_fixture(name="user_enrollment_factory")

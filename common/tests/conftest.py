@@ -1,6 +1,7 @@
 import os
 import random
 from collections.abc import Generator
+from datetime import datetime, timezone
 from typing import List, Type
 
 from dotenv import load_dotenv
@@ -40,7 +41,8 @@ from birdxplorer_common.storage import (
 
 
 def gen_random_twitter_timestamp() -> int:
-    return random.randint(TwitterTimestamp.min_value(), TwitterTimestamp.max_value())
+    now_millis = int(datetime.now(timezone.utc).timestamp() * 1000)
+    return random.randint(TwitterTimestamp.min_value(), now_millis)
 
 
 @fixture
