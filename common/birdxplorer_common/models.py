@@ -900,6 +900,12 @@ class PaginationMeta(BaseModel):
             description="前のページのリクエスト用 URL",
         ),
     ] = None
+    total: Annotated[
+        int,
+        PydanticField(
+            description="検索結果の総件数",
+        ),
+    ] = 0
 
 
 T = TypeVar("T")
