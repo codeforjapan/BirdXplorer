@@ -170,3 +170,6 @@ cython_debug/
 # accounts db for BirdXplorer
 accounts.db
 .claude/settings.local.json
+*/**/CLAUDE.md
+.env.*
+*/**/.env.*
