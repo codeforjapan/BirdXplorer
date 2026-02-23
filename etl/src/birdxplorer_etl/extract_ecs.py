@@ -567,18 +567,28 @@ def _process_rating_rows(reader, postgresql: Session, existing_row_note_ids: set
 
         # 5000件ごとにバッチ処理（1000 → 5000に拡大）
         if len(rows_to_add) >= 5000:
-            postgresql.execute(insert(RowNoteRatingRecord).on_conflict_do_nothing(), rows_to_add)
-            postgresql.commit()
-            logging.info(
-                f"Saved {len(rows_to_add)} rating records (batch at index {index}, file {file_index:05d})"
-            )
+            try:
+                postgresql.execute(insert(RowNoteRatingRecord).on_conflict_do_nothing(), rows_to_add)
+                postgresql.commit()
+                logging.info(
+                    f"Saved {len(rows_to_add)} rating records (batch at index {index}, file {file_index:05d})"
+                )
+            except Exception as e:
+                logging.error(
+                    f"Failed to save rating batch at index {index}, file {file_index:05d}: {e}"
+                )
+                postgresql.rollback()
             rows_to_add = []
 
     # 最後のバッチを処理
     if rows_to_add:
-        postgresql.execute(insert(RowNoteRatingRecord).on_conflict_do_nothing(), rows_to_add)
-        postgresql.commit()
-        logging.info(f"Saved final batch of {len(rows_to_add)} rating records (file {file_index:05d})")
+        try:
+            postgresql.execute(insert(RowNoteRatingRecord).on_conflict_do_nothing(), rows_to_add)
+            postgresql.commit()
+            logging.info(f"Saved final batch of {len(rows_to_add)} rating records (file {file_index:05d})")
+        except Exception as e:
+            logging.error(f"Failed to save final rating batch, file {file_index:05d}: {e}")
+            postgresql.rollback()
 
 
 def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids: set):
