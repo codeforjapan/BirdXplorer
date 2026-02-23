@@ -263,7 +263,7 @@ class RowNoteRatingRecord(Base):
     disagree: Mapped[BinaryBool] = mapped_column(nullable=False)
     helpful: Mapped[BinaryBool] = mapped_column(nullable=False)
     not_helpful: Mapped[BinaryBool] = mapped_column(nullable=False)
-    helpfulness_level: Mapped[String] = mapped_column(nullable=False)
+    helpfulness_level: Mapped[Optional[String]] = mapped_column(nullable=True)
     helpful_other: Mapped[BinaryBool] = mapped_column(nullable=False)
     helpful_informative: Mapped[BinaryBool] = mapped_column(nullable=False)
     helpful_clear: Mapped[BinaryBool] = mapped_column(nullable=False)
