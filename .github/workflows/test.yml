@@ -69,7 +69,7 @@ jobs:
           cache: pip
           cache-dependency-path: etl/pyproject.toml
       - name: dependency install
-        run: pip install -e "./etl[dev]"
+        run: pip install -e "./common" -e "./etl[dev]"
       - name: copy env
         run: cp .env.example etl/.env
       - name: test
