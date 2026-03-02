@@ -11,7 +11,7 @@ import boto3
 import requests
 import settings
 import stringcase
-from sqlalchemy import select
+from sqlalchemy import case, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -122,9 +122,7 @@ def _detect_status_changes(postgresql: Session, rows: list[dict]) -> list[str]:
             RowNoteStatusRecord.timestamp_millis_of_current_status,
         ).filter(RowNoteStatusRecord.note_id.in_(note_ids))
     ).all()
-    existing = {
-        r.note_id: (r.current_status, r.locked_status, r.timestamp_millis_of_current_status) for r in results
-    }
+    existing = {r.note_id: (r.current_status, r.locked_status, r.timestamp_millis_of_current_status) for r in results}
 
     changed = []
     for row in rows:
@@ -171,7 +169,9 @@ def extract_data(postgresql: Session):
                 if file_index == 0:
                     logging.info(f"No notes data available for {dateString}, trying previous day")
                 else:
-                    logging.info(f"Notes file {file_index:05d} not found (404), stopping notes download for {dateString}")
+                    logging.info(
+                        f"Notes file {file_index:05d} not found (404), stopping notes download for {dateString}"
+                    )
                 break
 
             if res.status_code != 200:
@@ -327,6 +327,15 @@ def extract_data(postgresql: Session):
         extract_ratings(postgresql, dateString, existing_row_note_ids)
         logging.info(f"[PHASE_COMPLETE] Ratings: {time.time() - phase_start:.1f}s")
 
+        # notesテーブルの評価集計カラムを再計算
+        phase_start = time.time()
+        try:
+            recalculate_rating_counts(postgresql)
+            logging.info(f"[PHASE_COMPLETE] Rating recalculation: {time.time() - phase_start:.1f}s")
+        except Exception as e:
+            logging.error(f"Rating recalculation failed: {e}")
+            postgresql.rollback()
+
         # noteStatusHistory-00000.zip から順に404が返るまでダウンロード
         phase_start = time.time()
         file_index = 0
@@ -398,9 +407,7 @@ def extract_data(postgresql: Session):
                     _upsert_note_status_batch(postgresql, [dict(r) for r in rows_to_process])
                     postgresql.commit()
 
-                    notes_to_update_status = [
-                        nid for nid in changed_note_ids if nid in existing_note_record_ids
-                    ]
+                    notes_to_update_status = [nid for nid in changed_note_ids if nid in existing_note_record_ids]
                     enqueue_note_status_batch(notes_to_update_status)
 
                     rows_to_process = []
@@ -411,9 +418,7 @@ def extract_data(postgresql: Session):
                 _upsert_note_status_batch(postgresql, [dict(r) for r in rows_to_process])
                 postgresql.commit()
 
-                notes_to_update_status = [
-                    nid for nid in changed_note_ids if nid in existing_note_record_ids
-                ]
+                notes_to_update_status = [nid for nid in changed_note_ids if nid in existing_note_record_ids]
                 enqueue_note_status_batch(notes_to_update_status)
 
             logging.info(f"Successfully processed note status file {file_index:05d} for {dateString}")
@@ -570,13 +575,9 @@ def _process_rating_rows(reader, postgresql: Session, existing_row_note_ids: set
             try:
                 postgresql.execute(insert(RowNoteRatingRecord).on_conflict_do_nothing(), rows_to_add)
                 postgresql.commit()
-                logging.info(
-                    f"Saved {len(rows_to_add)} rating records (batch at index {index}, file {file_index:05d})"
-                )
+                logging.info(f"Saved {len(rows_to_add)} rating records (batch at index {index}, file {file_index:05d})")
             except Exception as e:
-                logging.error(
-                    f"Failed to save rating batch at index {index}, file {file_index:05d}: {e}"
-                )
+                logging.error(f"Failed to save rating batch at index {index}, file {file_index:05d}: {e}")
                 postgresql.rollback()
             rows_to_add = []
 
@@ -662,3 +663,45 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
             break
 
         file_index += 1
+
+
+def recalculate_rating_counts(postgresql: Session) -> int:
+    """
+    row_note_ratingsテーブルからnotesテーブルの評価集計カラムを再計算する。
+    毎日のECS extractタスク内でratings抽出後に呼ばれ、全ノートの集計値を最新化する。
+
+    Returns:
+        更新された行数
+    """
+    subq = (
+        select(
+            RowNoteRatingRecord.note_id,
+            func.count(RowNoteRatingRecord.note_id).label("rate_count"),
+            func.sum(case((RowNoteRatingRecord.helpfulness_level == "HELPFUL", 1), else_=0)).label("helpful_count"),
+            func.sum(case((RowNoteRatingRecord.helpfulness_level == "SOMEWHAT_HELPFUL", 1), else_=0)).label(
+                "somewhat_helpful_count"
+            ),
+            func.sum(case((RowNoteRatingRecord.helpfulness_level == "NOT_HELPFUL", 1), else_=0)).label(
+                "not_helpful_count"
+            ),
+        )
+        .group_by(RowNoteRatingRecord.note_id)
+        .subquery()
+    )
+
+    stmt = (
+        update(NoteRecord)
+        .where(NoteRecord.note_id == subq.c.note_id)
+        .values(
+            rate_count=subq.c.rate_count,
+            helpful_count=subq.c.helpful_count,
+            somewhat_helpful_count=subq.c.somewhat_helpful_count,
+            not_helpful_count=subq.c.not_helpful_count,
+        )
+    )
+
+    result = postgresql.execute(stmt)
+    postgresql.commit()
+    row_count = result.rowcount
+    logging.info(f"Recalculated rating counts for {row_count} notes")
+    return row_count
