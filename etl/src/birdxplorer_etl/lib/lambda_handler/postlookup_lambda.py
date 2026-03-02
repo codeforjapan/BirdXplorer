@@ -243,9 +243,7 @@ def _process_single_tweet(
         logger.error(f"[DLQ_CAUSE:UNEXPECTED_RESPONSE] tweet_id={tweet_id} response={json.dumps(post)}")
         raise Exception(f"Unexpected API response for tweet: {tweet_id}")
 
-    created_at = datetime.strptime(post["data"]["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ").replace(
-        tzinfo=timezone.utc
-    )
+    created_at = datetime.strptime(post["data"]["created_at"], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
     created_at_millis = int(created_at.timestamp() * 1000)
     now_millis = int(datetime.now(timezone.utc).timestamp() * 1000)
 

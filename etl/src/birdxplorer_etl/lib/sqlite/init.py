@@ -120,12 +120,14 @@ def init_postgresql(use_pool: bool = False):
     if not use_pool:
         engine_kwargs["poolclass"] = NullPool  # Lambda向け: コネクションをプールせず毎回接続・切断
     else:
-        engine_kwargs.update({
-            "pool_size": 5,
-            "max_overflow": 10,
-            "pool_timeout": 30,
-            "pool_recycle": 3600,
-        })
+        engine_kwargs.update(
+            {
+                "pool_size": 5,
+                "max_overflow": 10,
+                "pool_timeout": 30,
+                "pool_recycle": 3600,
+            }
+        )
     engine = create_engine(
         f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}",
         **engine_kwargs,
