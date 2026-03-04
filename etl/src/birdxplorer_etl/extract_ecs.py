@@ -11,7 +11,7 @@ import boto3
 import requests
 import settings
 import stringcase
-from sqlalchemy import case, func, select, update
+from sqlalchemy import case, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -500,8 +500,8 @@ def backfill_missing_notes(postgresql: Session, batch_limit: int = 50000):
     logging.info(f"Backfill complete: enqueued {len(batch)} notes")
 
 
-def _process_rating_rows(reader, postgresql: Session, existing_row_note_ids: set, file_index: int):
-    """ratingsのTSV行をストリーミング処理してDBに保存"""
+def _validate_rating_row(row: dict, existing_row_note_ids: set) -> bool:
+    """rating行を検証・正規化する。有効ならTrue、スキップならFalseを返す。rowは破壊的に更新される。"""
     binary_bool_fields = [
         "agree",
         "disagree",
@@ -531,138 +531,207 @@ def _process_rating_rows(reader, postgresql: Session, existing_row_note_ids: set
         "not_helpful_note_not_needed",
     ]
 
-    rows_to_add = []
+    note_id = row.get("note_id")
+    rater_participant_id = row.get("rater_participant_id")
+
+    if not note_id or not rater_participant_id:
+        return False
+
+    if note_id not in existing_row_note_ids:
+        return False
+
+    # BinaryBoolフィールドの正規化
+    for field in binary_bool_fields:
+        if field in row:
+            value = row[field]
+            if value == "" or value is None or value == "empty":
+                row[field] = "0"
+            elif value not in ["0", "1"]:
+                logging.warning(
+                    f"Unexpected value '{value}' for field '{field}' in rating "
+                    f"(note_id={note_id}). Setting to '0'."
+                )
+                row[field] = "0"
+
+    # helpfulness_levelフィールドのバリデーション
+    if "helpfulness_level" in row:
+        value = row["helpfulness_level"]
+        if value not in ["HELPFUL", "SOMEWHAT_HELPFUL", "NOT_HELPFUL"]:
+            row["helpfulness_level"] = None
+
+    # 空文字列フィールドをNoneに変換
+    for key, value in row.items():
+        if value == "" and key not in ["helpfulness_level"]:
+            row[key] = None
+
+    # NOT NULLカラム（BinaryBool以外）が空の行はスキップ
+    for field in ("created_at_millis", "version", "rated_on_tweet_id"):
+        if not row.get(field):
+            return False
+
+    return True
+
+
+def _process_rating_rows(reader, postgresql: Session, existing_row_note_ids: set, file_index: int) -> int:
+    """ratingsのTSV行をバリデーションし、COPYでstaging tableにバルクロードする。"""
+    BATCH_SIZE = 50000
+    buffer = io.StringIO()
+    row_count = 0
+    total_rows = 0
+
+    # SessionバインドのDBAPIコネクションを直接取得（プール外コネクションリーク防止）
+    dbapi_conn = postgresql.connection().connection.dbapi_connection
+    columns_csv = ",".join(_RATING_COLUMNS)
+
     for index, row in enumerate(reader):
-        note_id = row.get("note_id")
-        rater_participant_id = row.get("rater_participant_id")
-
-        if not note_id or not rater_participant_id:
-            logging.warning("Missing note_id or rater_participant_id in rating record, skipping")
+        if not _validate_rating_row(row, existing_row_note_ids):
             continue
 
-        # 対応するnote_idがrow_notesテーブルに存在するかをセットで確認
-        if note_id not in existing_row_note_ids:
-            continue
+        # COPY用のタブ区切り行を書き出し
+        values = []
+        for col in _RATING_COLUMNS:
+            val = row.get(col)
+            if val is None:
+                values.append("\\N")
+            else:
+                values.append(str(val))
+        buffer.write("\t".join(values) + "\n")
+        row_count += 1
 
-        # BinaryBoolフィールドの正規化
-        for field in binary_bool_fields:
-            if field in row:
-                value = row[field]
-                if value == "" or value is None or value == "empty":
-                    row[field] = "0"
-                elif value not in ["0", "1"]:
-                    logging.warning(
-                        f"Unexpected value '{value}' for field '{field}' in rating "
-                        f"(note_id={note_id}). Setting to '0'."
-                    )
-                    row[field] = "0"
-
-        # helpfulness_levelフィールドのバリデーション
-        if "helpfulness_level" in row:
-            value = row["helpfulness_level"]
-            if value not in ["HELPFUL", "SOMEWHAT_HELPFUL", "NOT_HELPFUL"]:
-                row["helpfulness_level"] = None
-
-        # 空文字列フィールドをNoneに変換
-        for key, value in row.items():
-            if value == "" and key not in ["helpfulness_level"]:
-                row[key] = None
-
-        rows_to_add.append(dict(row))
-
-        # 5000件ごとにバッチ処理（1000 → 5000に拡大）
-        if len(rows_to_add) >= 5000:
-            try:
-                postgresql.execute(insert(RowNoteRatingRecord).on_conflict_do_nothing(), rows_to_add)
-                postgresql.commit()
-                logging.info(f"Saved {len(rows_to_add)} rating records (batch at index {index}, file {file_index:05d})")
-            except Exception as e:
-                logging.error(f"Failed to save rating batch at index {index}, file {file_index:05d}: {e}")
-                postgresql.rollback()
-            rows_to_add = []
-
-    # 最後のバッチを処理
-    if rows_to_add:
-        try:
-            postgresql.execute(insert(RowNoteRatingRecord).on_conflict_do_nothing(), rows_to_add)
+        if row_count >= BATCH_SIZE:
+            buffer.seek(0)
+            with dbapi_conn.cursor() as cur:
+                cur.copy_expert(f"COPY {_STAGING_TABLE} ({columns_csv}) FROM STDIN", buffer)
             postgresql.commit()
-            logging.info(f"Saved final batch of {len(rows_to_add)} rating records (file {file_index:05d})")
-        except Exception as e:
-            logging.error(f"Failed to save final rating batch, file {file_index:05d}: {e}")
-            postgresql.rollback()
+            total_rows += row_count
+            logging.info(f"COPY {row_count} rows (total: {total_rows}, file {file_index:05d})")
+            buffer = io.StringIO()
+            row_count = 0
+
+    # 最後のバッチ
+    if row_count > 0:
+        buffer.seek(0)
+        with dbapi_conn.cursor() as cur:
+            cur.copy_expert(f"COPY {_STAGING_TABLE} ({columns_csv}) FROM STDIN", buffer)
+        postgresql.commit()
+        total_rows += row_count
+        logging.info(f"COPY final {row_count} rows (total: {total_rows}, file {file_index:05d})")
+
+    return total_rows
 
 
 def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids: set):
     """
-    指定日付の評価データをダウンロードしてrow_note_ratingsテーブルに保存
-    ratings-00000.tsv から404が返るまで動的に処理
+    指定日付の評価データをダウンロードし、staging table経由でrow_note_ratingsを全置換する。
+
+    Community Notesの日次スナップショット（全期間分）をstaging tableにCOPYで高速ロードし、
+    重複排除・PK構築後にアトミックなRENAME swapで本番テーブルと入れ替える。
 
     Args:
         postgresql: データベースセッション
         dateString: 日付文字列 (YYYY/MM/DD形式)
         existing_row_note_ids: row_notesテーブルに存在するnote_idのセット（存在チェック用）
     """
-    # ratings-00000.zip から順に404が返るまでダウンロード
-    file_index = 0
-    while True:
-        if settings.USE_DUMMY_DATA:
-            ratings_url = "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/notesRating_sample.tsv"
-        else:
-            ratings_url = (
-                f"https://ton.twimg.com/birdwatch-public-data/{dateString}/noteRatings/ratings-{file_index:05d}.zip"
-            )
-        logging.info(f"Fetching ratings from: {ratings_url}")
+    _create_staging_table(postgresql)
+    total_loaded = 0
 
-        try:
-            res = requests.get(ratings_url)
-        except Exception as e:
-            logging.error(f"Failed to download ratings data (file {file_index:05d}): {e}")
-            file_index += 1
-            continue
-
-        if res.status_code == 404:
-            logging.info(f"Ratings file {file_index:05d} not found (404), stopping ratings download for {dateString}")
-            break
-
-        if res.status_code != 200:
-            logging.warning(
-                f"Ratings data not available for {dateString} file {file_index:05d} (status code: {res.status_code})"
-            )
-            file_index += 1
-            continue
-
-        try:
+    try:
+        # ratings-00000.zip から順に404が返るまでダウンロード
+        file_index = 0
+        while True:
             if settings.USE_DUMMY_DATA:
-                tsv_data = res.content.decode("utf-8").splitlines()
-                reader = csv.DictReader(tsv_data, delimiter="\t")
-                reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
-                _process_rating_rows(reader, postgresql, existing_row_note_ids, file_index)
+                ratings_url = "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/notesRating_sample.tsv"
             else:
-                with zipfile.ZipFile(io.BytesIO(res.content)) as zip_file:
-                    tsv_filename = f"ratings-{file_index:05d}.tsv"
-                    if tsv_filename not in zip_file.namelist():
-                        logging.error(f"TSV file {tsv_filename} not found in the zip file.")
-                        file_index += 1
-                        continue
+                ratings_url = (
+                    f"https://ton.twimg.com/birdwatch-public-data/{dateString}/noteRatings/ratings-{file_index:05d}.zip"
+                )
+            logging.info(f"Fetching ratings from: {ratings_url}")
 
-                    with zip_file.open(tsv_filename) as tsv_file:
-                        # ストリーミング読み込み（メモリ節約: splitlines()で全量展開しない）
-                        text_file = io.TextIOWrapper(tsv_file, encoding="utf-8")
-                        reader = csv.DictReader(text_file, delimiter="\t")
-                        reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
-                        _process_rating_rows(reader, postgresql, existing_row_note_ids, file_index)
+            try:
+                res = requests.get(ratings_url)
+            except Exception as e:
+                logging.error(f"Failed to download ratings data (file {file_index:05d}): {e}")
+                file_index += 1
+                continue
 
-            logging.info(f"Successfully processed ratings file {file_index:05d} for {dateString}")
+            if res.status_code == 404:
+                logging.info(
+                    f"Ratings file {file_index:05d} not found (404), stopping ratings download for {dateString}"
+                )
+                break
 
-        except Exception as e:
-            logging.error(f"Error processing ratings data for {dateString} file {file_index:05d}: {e}")
-            postgresql.rollback()
+            if res.status_code != 200:
+                logging.warning(
+                    f"Ratings data not available for {dateString} file {file_index:05d} "
+                    f"(status code: {res.status_code})"
+                )
+                file_index += 1
+                continue
 
-        # ダミーデータの場合は1ファイルのみなのでループを抜ける
-        if settings.USE_DUMMY_DATA:
-            break
+            try:
+                if settings.USE_DUMMY_DATA:
+                    tsv_data = res.content.decode("utf-8").splitlines()
+                    reader = csv.DictReader(tsv_data, delimiter="\t")
+                    reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
+                    total_loaded += _process_rating_rows(reader, postgresql, existing_row_note_ids, file_index)
+                else:
+                    with zipfile.ZipFile(io.BytesIO(res.content)) as zip_file:
+                        tsv_filename = f"ratings-{file_index:05d}.tsv"
+                        if tsv_filename not in zip_file.namelist():
+                            logging.error(f"TSV file {tsv_filename} not found in the zip file.")
+                            file_index += 1
+                            continue
 
-        file_index += 1
+                        with zip_file.open(tsv_filename) as tsv_file:
+                            text_file = io.TextIOWrapper(tsv_file, encoding="utf-8")
+                            reader = csv.DictReader(text_file, delimiter="\t")
+                            reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
+                            total_loaded += _process_rating_rows(reader, postgresql, existing_row_note_ids, file_index)
+
+                logging.info(f"Successfully processed ratings file {file_index:05d} for {dateString}")
+
+            except Exception as e:
+                logging.error(f"Error processing ratings data for {dateString} file {file_index:05d}: {e}")
+                raise
+
+            # ダミーデータの場合は1ファイルのみなのでループを抜ける
+            if settings.USE_DUMMY_DATA:
+                break
+
+            file_index += 1
+
+        if total_loaded == 0:
+            logging.warning("No ratings loaded, skipping table swap")
+            _cleanup_staging_table(postgresql)
+            return
+
+        # 重複排除
+        dedup_start = time.time()
+        dedup_deleted = _deduplicate_staging_table(postgresql)
+        logging.info(f"[PHASE_COMPLETE] Rating dedup: {time.time() - dedup_start:.1f}s")
+
+        # 安全チェック + PK構築 + swap
+        # staging tableの行数はCOPY総数 - 重複排除数（COUNT(*)不要）
+        staging_count = total_loaded - dedup_deleted
+        # 最低行数: 現在テーブルの推定行数の50%（COUNT(*)はタイムアウトするのでreltuples使用）
+        # reltuples はANALYZE未実行時に-1を返すため、その場合はstaging_countの50%をフォールバックとして使用
+        current_count = postgresql.execute(
+            text(
+                "SELECT reltuples::bigint FROM pg_class "
+                "WHERE relname='row_note_ratings' AND relnamespace = current_schema()::regnamespace"
+            )
+        ).scalar() or 0
+        if current_count <= 0:
+            current_count = staging_count
+        min_rows = max(int(current_count * 0.5), 1)
+        _swap_ratings_table(postgresql, min_rows=min_rows, staging_count=staging_count)
+
+        logging.info(f"Rating table swap complete: {total_loaded} rows loaded")
+
+    except Exception as e:
+        logging.error(f"Rating extraction failed, cleaning up staging table: {e}")
+        _cleanup_staging_table(postgresql)
+        raise
 
 
 def recalculate_rating_counts(postgresql: Session) -> int:
@@ -705,3 +774,135 @@ def recalculate_rating_counts(postgresql: Session) -> int:
     row_count = result.rowcount
     logging.info(f"Recalculated rating counts for {row_count} notes")
     return row_count
+
+
+# ---------------------------------------------------------------------------
+# Staging table helpers for ratings bulk reload
+# ---------------------------------------------------------------------------
+
+_STAGING_TABLE = "row_note_ratings_new"
+_OLD_TABLE = "row_note_ratings_old"
+
+# _process_rating_rows_to_staging で COPY に使うカラム順
+_RATING_COLUMNS = [
+    "note_id",
+    "rater_participant_id",
+    "created_at_millis",
+    "version",
+    "agree",
+    "disagree",
+    "helpful",
+    "not_helpful",
+    "helpfulness_level",
+    "helpful_other",
+    "helpful_informative",
+    "helpful_clear",
+    "helpful_empathetic",
+    "helpful_good_sources",
+    "helpful_unique_context",
+    "helpful_addresses_claim",
+    "helpful_important_context",
+    "helpful_unbiased_language",
+    "not_helpful_other",
+    "not_helpful_incorrect",
+    "not_helpful_sources_missing_or_unreliable",
+    "not_helpful_opinion_speculation_or_bias",
+    "not_helpful_missing_key_points",
+    "not_helpful_outdated",
+    "not_helpful_hard_to_understand",
+    "not_helpful_argumentative_or_biased",
+    "not_helpful_off_topic",
+    "not_helpful_spam_harassment_or_abuse",
+    "not_helpful_irrelevant_sources",
+    "not_helpful_opinion_speculation",
+    "not_helpful_note_not_needed",
+    "rated_on_tweet_id",
+]
+
+
+def _create_staging_table(postgresql: Session) -> None:
+    """PKなしのUNLOGGED staging tableを作成する（高速INSERT用）。"""
+    postgresql.execute(text(f"DROP TABLE IF EXISTS {_STAGING_TABLE}"))
+    postgresql.execute(text(f"DROP TABLE IF EXISTS {_OLD_TABLE}"))
+    # INCLUDING ALL でNOT NULL等の制約をコピーし、PKとインデックスだけ除外
+    postgresql.execute(
+        text(
+            f"CREATE UNLOGGED TABLE {_STAGING_TABLE} "
+            f"(LIKE row_note_ratings INCLUDING ALL EXCLUDING INDEXES)"
+        )
+    )
+    postgresql.commit()
+    logging.info("Created staging table for ratings bulk load")
+
+
+def _deduplicate_staging_table(postgresql: Session) -> int:
+    """staging table内の重複PKを除去し、created_at_millisが最新の行を残す。"""
+    result = postgresql.execute(
+        text(f"""
+            DELETE FROM {_STAGING_TABLE} a USING (
+                SELECT ctid, ROW_NUMBER() OVER (
+                    PARTITION BY note_id, rater_participant_id
+                    ORDER BY created_at_millis DESC, ctid DESC
+                ) AS rn
+                FROM {_STAGING_TABLE}
+            ) b
+            WHERE a.ctid = b.ctid AND b.rn > 1
+        """)
+    )
+    deleted = result.rowcount
+    postgresql.commit()
+    logging.info(f"Deduplicated staging table: removed {deleted} duplicate rows")
+    return deleted
+
+
+def _swap_ratings_table(postgresql: Session, min_rows: int, staging_count: int) -> None:
+    """staging tableにPKを構築し、本番テーブルとアトミックにswapする。"""
+    # 最低行数チェック（不完全スナップショット防止）
+    if staging_count < min_rows:
+        raise RuntimeError(
+            f"Staging table has {staging_count} rows, expected at least {min_rows}. "
+            "Aborting swap to prevent data loss from incomplete snapshot."
+        )
+    logging.info(f"Staging table row count: {staging_count} (minimum: {min_rows})")
+
+    # PK構築（シーケンシャルビルド — ランダムI/Oなし）
+    pk_start = time.time()
+    postgresql.execute(
+        text(
+            f"ALTER TABLE {_STAGING_TABLE} ADD CONSTRAINT {_STAGING_TABLE}_pkey "
+            f"PRIMARY KEY (note_id, rater_participant_id)"
+        )
+    )
+    postgresql.commit()
+    logging.info(f"PK index built on staging table in {time.time() - pk_start:.1f}s")
+
+    # UNLOGGED → LOGGED に変換（crash safety確保）
+    logged_start = time.time()
+    postgresql.execute(text(f"ALTER TABLE {_STAGING_TABLE} SET LOGGED"))
+    postgresql.commit()
+    logging.info(f"Staging table SET LOGGED in {time.time() - logged_start:.1f}s")
+
+    # アトミックswap: RENAME + PK制約名の正規化を1トランザクションで実行
+    postgresql.execute(text(f"DROP TABLE IF EXISTS {_OLD_TABLE}"))
+    postgresql.execute(text(f"ALTER TABLE row_note_ratings RENAME TO {_OLD_TABLE}"))
+    postgresql.execute(text(f"ALTER INDEX row_note_ratings_pkey RENAME TO {_OLD_TABLE}_pkey"))
+    postgresql.execute(text(f"ALTER TABLE {_STAGING_TABLE} RENAME TO row_note_ratings"))
+    postgresql.execute(text(f"ALTER INDEX {_STAGING_TABLE}_pkey RENAME TO row_note_ratings_pkey"))
+    postgresql.commit()
+    logging.info("Swapped staging table into production")
+
+    # 旧テーブル削除（ディスク回収）
+    postgresql.execute(text(f"DROP TABLE IF EXISTS {_OLD_TABLE}"))
+    postgresql.commit()
+    logging.info("Dropped old ratings table")
+
+
+def _cleanup_staging_table(postgresql: Session) -> None:
+    """障害時のクリーンアップ: staging/old tableの残骸を削除。"""
+    try:
+        postgresql.execute(text(f"DROP TABLE IF EXISTS {_STAGING_TABLE}"))
+        postgresql.execute(text(f"DROP TABLE IF EXISTS {_OLD_TABLE}"))
+        postgresql.commit()
+    except Exception as e:
+        logging.warning(f"Staging table cleanup failed: {e}")
+        postgresql.rollback()
