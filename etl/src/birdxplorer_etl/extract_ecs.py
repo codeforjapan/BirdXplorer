@@ -883,11 +883,34 @@ def _swap_ratings_table(postgresql: Session, min_rows: int, staging_count: int) 
     logging.info(f"Staging table SET LOGGED in {time.time() - logged_start:.1f}s")
 
     # アトミックswap: RENAME + PK制約名の正規化を1トランザクションで実行
+    # PostgreSQLはテーブルRENAME時にPKインデックスを自動リネームする場合があるため、
+    # カタログから実際のインデックス名を取得して確実にリネームする
     postgresql.execute(text(f"DROP TABLE IF EXISTS {_OLD_TABLE}"))
     postgresql.execute(text(f"ALTER TABLE row_note_ratings RENAME TO {_OLD_TABLE}"))
-    postgresql.execute(text(f"ALTER INDEX row_note_ratings_pkey RENAME TO {_OLD_TABLE}_pkey"))
     postgresql.execute(text(f"ALTER TABLE {_STAGING_TABLE} RENAME TO row_note_ratings"))
-    postgresql.execute(text(f"ALTER INDEX {_STAGING_TABLE}_pkey RENAME TO row_note_ratings_pkey"))
+
+    # 旧テーブルのPKインデックスをリネーム（名前衝突回避）
+    old_pk_name = postgresql.execute(
+        text(
+            "SELECT indexname FROM pg_indexes "
+            f"WHERE tablename = '{_OLD_TABLE}' "
+            "AND indexdef LIKE '%PRIMARY KEY%'"
+        )
+    ).scalar()
+    if old_pk_name and old_pk_name != f"{_OLD_TABLE}_pkey":
+        postgresql.execute(text(f'ALTER INDEX "{old_pk_name}" RENAME TO {_OLD_TABLE}_pkey'))
+
+    # 新テーブルのPKインデックスを正規名にリネーム
+    new_pk_name = postgresql.execute(
+        text(
+            "SELECT indexname FROM pg_indexes "
+            "WHERE tablename = 'row_note_ratings' "
+            "AND indexdef LIKE '%PRIMARY KEY%'"
+        )
+    ).scalar()
+    if new_pk_name and new_pk_name != "row_note_ratings_pkey":
+        postgresql.execute(text(f'ALTER INDEX "{new_pk_name}" RENAME TO row_note_ratings_pkey'))
+
     postgresql.commit()
     logging.info("Swapped staging table into production")
 
