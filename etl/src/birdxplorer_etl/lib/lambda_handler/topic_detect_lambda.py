@@ -137,9 +137,7 @@ def lambda_handler(event, context):
                             f"[SQS_SUCCESS] Sent tweet lookup message for tweet {post_id}, messageId={message_id}"
                         )
                     else:
-                        raise Exception(
-                            f"Failed to send tweet lookup message for tweet {post_id} (note {note_id})"
-                        )
+                        raise Exception(f"Failed to send tweet lookup message for tweet {post_id} (note {note_id})")
 
                 except Exception as e:
                     logger.error(f"[EXCEPTION] Error sending SQS message for tweet lookup: {e}")
