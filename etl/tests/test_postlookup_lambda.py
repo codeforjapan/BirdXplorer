@@ -338,8 +338,7 @@ class TestBatchProcessingLoop:
     def test_processes_multiple_messages(self, mock_sqs_cls, mock_poll, mock_process):
         mock_sqs_cls.return_value = _make_sqs_handler()
         poll_results = [
-            {"tweet_id": f"t{i}", "receipt_handle": f"rh-{i}", "body": {"tweet_id": f"t{i}"}}
-            for i in range(3)
+            {"tweet_id": f"t{i}", "receipt_handle": f"rh-{i}", "body": {"tweet_id": f"t{i}"}} for i in range(3)
         ]
         mock_poll.side_effect = poll_results + [None]
         mock_process.return_value = ({"tweet_id": "t0"}, 25, False)
@@ -421,8 +420,7 @@ class TestBatchProcessingLoop:
     def test_nonfatal_error_continues_loop(self, mock_sqs_cls, mock_poll, mock_process):
         mock_sqs_cls.return_value = _make_sqs_handler()
         poll_results = [
-            {"tweet_id": f"t{i}", "receipt_handle": f"rh-{i}", "body": {"tweet_id": f"t{i}"}}
-            for i in range(3)
+            {"tweet_id": f"t{i}", "receipt_handle": f"rh-{i}", "body": {"tweet_id": f"t{i}"}} for i in range(3)
         ]
         mock_poll.side_effect = poll_results + [None]
 
@@ -447,8 +445,7 @@ class TestBatchProcessingLoop:
     def test_skipped_messages_counted(self, mock_sqs_cls, mock_poll, mock_process):
         mock_sqs_cls.return_value = _make_sqs_handler()
         poll_results = [
-            {"tweet_id": f"t{i}", "receipt_handle": f"rh-{i}", "body": {"tweet_id": f"t{i}"}}
-            for i in range(2)
+            {"tweet_id": f"t{i}", "receipt_handle": f"rh-{i}", "body": {"tweet_id": f"t{i}"}} for i in range(2)
         ]
         mock_poll.side_effect = poll_results + [None]
 
@@ -495,11 +492,7 @@ class TestLegacySQSRecordsPath:
         mock_sqs_cls.return_value = _make_sqs_handler()
         mock_process.return_value = ({"tweet_id": "123"}, 20, False)
 
-        event = {
-            "Records": [
-                {"body": json.dumps({"processing_type": "tweet_lookup", "tweet_id": "123"})}
-            ]
-        }
+        event = {"Records": [{"body": json.dumps({"processing_type": "tweet_lookup", "tweet_id": "123"})}]}
         result = lambda_handler(event, _make_context())
 
         assert result["statusCode"] == 200
@@ -511,11 +504,7 @@ class TestLegacySQSRecordsPath:
     def test_sqs_records_no_valid_message(self, mock_sqs_cls):
         mock_sqs_cls.return_value = _make_sqs_handler()
 
-        event = {
-            "Records": [
-                {"body": json.dumps({"processing_type": "other", "note_id": "abc"})}
-            ]
-        }
+        event = {"Records": [{"body": json.dumps({"processing_type": "other", "note_id": "abc"})}]}
         result = lambda_handler(event, _make_context())
 
         assert result["statusCode"] == 400
@@ -528,11 +517,7 @@ class TestLegacySQSRecordsPath:
 
         event = {
             "Records": [
-                {
-                    "body": json.dumps(
-                        {"processing_type": "tweet_lookup", "tweet_id": "123", "skip_tweet_lookup": True}
-                    )
-                }
+                {"body": json.dumps({"processing_type": "tweet_lookup", "tweet_id": "123", "skip_tweet_lookup": True})}
             ]
         }
         result = lambda_handler(event, _make_context())
@@ -590,9 +575,7 @@ class TestPollMessage:
 
     def test_invalid_json_deletes_message(self):
         sqs = _make_sqs_handler()
-        sqs.receive_message.return_value = [
-            {"ReceiptHandle": "rh-bad", "Body": "not-json"}
-        ]
+        sqs.receive_message.return_value = [{"ReceiptHandle": "rh-bad", "Body": "not-json"}]
 
         result = _poll_message(sqs, "https://sqs/queue")
 

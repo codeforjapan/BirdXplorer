@@ -115,9 +115,7 @@ def lambda_handler(event, context):
         except Exception as e:
             logger.error(f"[ERROR] Commit failed: {str(e)}")
             postgresql.rollback()
-            batch_item_failures = [
-                {"itemIdentifier": r.get("messageId", "unknown")} for r in event["Records"]
-            ]
+            batch_item_failures = [{"itemIdentifier": r.get("messageId", "unknown")} for r in event["Records"]]
 
         return {"batchItemFailures": batch_item_failures}
 
