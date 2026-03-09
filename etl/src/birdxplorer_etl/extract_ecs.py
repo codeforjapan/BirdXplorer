@@ -548,8 +548,7 @@ def _validate_rating_row(row: dict, existing_row_note_ids: set) -> bool:
                 row[field] = "0"
             elif value not in ["0", "1"]:
                 logging.warning(
-                    f"Unexpected value '{value}' for field '{field}' in rating "
-                    f"(note_id={note_id}). Setting to '0'."
+                    f"Unexpected value '{value}' for field '{field}' in rating " f"(note_id={note_id}). Setting to '0'."
                 )
                 row[field] = "0"
 
@@ -715,12 +714,15 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
         staging_count = total_loaded - dedup_deleted
         # 最低行数: 現在テーブルの推定行数の50%（COUNT(*)はタイムアウトするのでreltuples使用）
         # reltuples はANALYZE未実行時に-1を返すため、その場合はstaging_countの50%をフォールバックとして使用
-        current_count = postgresql.execute(
-            text(
-                "SELECT reltuples::bigint FROM pg_class "
-                "WHERE relname='row_note_ratings' AND relnamespace = current_schema()::regnamespace"
-            )
-        ).scalar() or 0
+        current_count = (
+            postgresql.execute(
+                text(
+                    "SELECT reltuples::bigint FROM pg_class "
+                    "WHERE relname='row_note_ratings' AND relnamespace = current_schema()::regnamespace"
+                )
+            ).scalar()
+            or 0
+        )
         if current_count <= 0:
             current_count = staging_count
         min_rows = max(int(current_count * 0.5), 1)
@@ -826,10 +828,7 @@ def _create_staging_table(postgresql: Session) -> None:
     postgresql.execute(text(f"DROP TABLE IF EXISTS {_OLD_TABLE}"))
     # INCLUDING ALL でNOT NULL等の制約をコピーし、PKとインデックスだけ除外
     postgresql.execute(
-        text(
-            f"CREATE UNLOGGED TABLE {_STAGING_TABLE} "
-            f"(LIKE row_note_ratings INCLUDING ALL EXCLUDING INDEXES)"
-        )
+        text(f"CREATE UNLOGGED TABLE {_STAGING_TABLE} " f"(LIKE row_note_ratings INCLUDING ALL EXCLUDING INDEXES)")
     )
     postgresql.commit()
     logging.info("Created staging table for ratings bulk load")
@@ -837,8 +836,7 @@ def _create_staging_table(postgresql: Session) -> None:
 
 def _deduplicate_staging_table(postgresql: Session) -> int:
     """staging table内の重複PKを除去し、created_at_millisが最新の行を残す。"""
-    result = postgresql.execute(
-        text(f"""
+    result = postgresql.execute(text(f"""
             DELETE FROM {_STAGING_TABLE} a USING (
                 SELECT ctid, ROW_NUMBER() OVER (
                     PARTITION BY note_id, rater_participant_id
@@ -847,8 +845,7 @@ def _deduplicate_staging_table(postgresql: Session) -> int:
                 FROM {_STAGING_TABLE}
             ) b
             WHERE a.ctid = b.ctid AND b.rn > 1
-        """)
-    )
+        """))
     deleted = result.rowcount
     postgresql.commit()
     logging.info(f"Deduplicated staging table: removed {deleted} duplicate rows")
@@ -869,19 +866,14 @@ def _swap_ratings_table(postgresql: Session, min_rows: int, staging_count: int) 
     # 過去のswapでPKリネームが失敗した場合、同名の制約が本番テーブルに残っている可能性があるため
     # 事前にインデックスの存在をチェックし、存在すればリネームして名前衝突を回避する
     existing_owner = postgresql.execute(
-        text(
-            "SELECT tablename FROM pg_indexes "
-            f"WHERE indexname = '{_STAGING_TABLE}_pkey'"
-        )
+        text("SELECT tablename FROM pg_indexes " f"WHERE indexname = '{_STAGING_TABLE}_pkey'")
     ).scalar()
     if existing_owner and existing_owner != _STAGING_TABLE:
         logging.warning(
             f"PK index '{_STAGING_TABLE}_pkey' already exists on table '{existing_owner}', "
             "renaming to avoid conflict"
         )
-        postgresql.execute(
-            text(f'ALTER INDEX "{_STAGING_TABLE}_pkey" RENAME TO "{_STAGING_TABLE}_pkey_old"')
-        )
+        postgresql.execute(text(f'ALTER INDEX "{_STAGING_TABLE}_pkey" RENAME TO "{_STAGING_TABLE}_pkey_old"'))
         postgresql.commit()
 
     pk_start = time.time()
@@ -910,9 +902,7 @@ def _swap_ratings_table(postgresql: Session, min_rows: int, staging_count: int) 
     # 旧テーブルのPKインデックスをリネーム（名前衝突回避）
     old_pk_name = postgresql.execute(
         text(
-            "SELECT indexname FROM pg_indexes "
-            f"WHERE tablename = '{_OLD_TABLE}' "
-            "AND indexdef LIKE '%PRIMARY KEY%'"
+            "SELECT indexname FROM pg_indexes " f"WHERE tablename = '{_OLD_TABLE}' " "AND indexdef LIKE '%PRIMARY KEY%'"
         )
     ).scalar()
     if old_pk_name and old_pk_name != f"{_OLD_TABLE}_pkey":
