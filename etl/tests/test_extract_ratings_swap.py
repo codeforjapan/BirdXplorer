@@ -177,8 +177,9 @@ class TestSwapRatingsTable:
 
     def test_succeeds_when_above_min_rows(self) -> None:
         mock_session = MagicMock()
-        # pg_indexesクエリ: scalar()は旧PK名、新PK名の順に呼ばれる
+        # scalar()呼び出し順: PK衝突チェック(None=衝突なし), 旧PK名, 新PK名
         mock_session.execute.return_value.scalar.side_effect = [
+            None,  # PK衝突チェック: 同名インデックスは存在しない
             "row_note_ratings_pkey",  # 旧テーブルのPK名
             "row_note_ratings_new_pkey",  # 新テーブルのPK名
         ]
@@ -190,8 +191,9 @@ class TestSwapRatingsTable:
 
     def test_swap_sql_sequence(self) -> None:
         mock_session = MagicMock()
-        # pg_indexesクエリ: scalar()は旧PK名、新PK名の順に呼ばれる
+        # scalar()呼び出し順: PK衝突チェック(None=衝突なし), 旧PK名, 新PK名
         mock_session.execute.return_value.scalar.side_effect = [
+            None,  # PK衝突チェック: 同名インデックスは存在しない
             "row_note_ratings_pkey",  # 旧テーブルのPK名
             "row_note_ratings_new_pkey",  # 新テーブルのPK名
         ]
@@ -226,7 +228,8 @@ class TestCleanupStagingTable:
 
         # 例外を投げずに正常終了する
         _cleanup_staging_table(mock_session)
-        mock_session.rollback.assert_called_once()
+        # rollback()は2回呼ばれる: 1回目はabortedトランザクション解消用、2回目はexceptブロック内
+        assert mock_session.rollback.call_count == 2
 
 
 class TestProcessRatingRows:
