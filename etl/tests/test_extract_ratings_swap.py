@@ -177,6 +177,11 @@ class TestSwapRatingsTable:
 
     def test_succeeds_when_above_min_rows(self) -> None:
         mock_session = MagicMock()
+        # pg_indexesクエリ: scalar()は旧PK名、新PK名の順に呼ばれる
+        mock_session.execute.return_value.scalar.side_effect = [
+            "row_note_ratings_pkey",  # 旧テーブルのPK名
+            "row_note_ratings_new_pkey",  # 新テーブルのPK名
+        ]
 
         _swap_ratings_table(mock_session, min_rows=500, staging_count=1000)
 
@@ -185,18 +190,21 @@ class TestSwapRatingsTable:
 
     def test_swap_sql_sequence(self) -> None:
         mock_session = MagicMock()
+        # pg_indexesクエリ: scalar()は旧PK名、新PK名の順に呼ばれる
+        mock_session.execute.return_value.scalar.side_effect = [
+            "row_note_ratings_pkey",  # 旧テーブルのPK名
+            "row_note_ratings_new_pkey",  # 新テーブルのPK名
+        ]
 
         _swap_ratings_table(mock_session, min_rows=1, staging_count=1000)
 
         sql_calls = [str(c.args[0].text) for c in mock_session.execute.call_args_list]
-        # ADD CONSTRAINT PK → SET LOGGED → DROP old → RENAME prod → RENAME old PK → RENAME staging → RENAME new PK → DROP old
         assert any("ADD CONSTRAINT" in s and "PRIMARY KEY" in s for s in sql_calls)
         assert any("SET LOGGED" in s for s in sql_calls)
         assert any("RENAME TO row_note_ratings_old" in s for s in sql_calls)
-        # 旧PKインデックスを先にリネームして名前衝突を回避
-        assert any("RENAME TO row_note_ratings_old_pkey" in s for s in sql_calls)
         assert any("RENAME TO row_note_ratings" in s for s in sql_calls)
-        # 新PKインデックスのリネーム
+        # カタログから取得したPK名でリネーム
+        assert any("RENAME TO row_note_ratings_old_pkey" in s for s in sql_calls)
         assert any("RENAME TO row_note_ratings_pkey" in s for s in sql_calls)
 
 
