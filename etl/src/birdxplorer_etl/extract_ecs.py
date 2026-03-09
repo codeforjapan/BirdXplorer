@@ -866,6 +866,24 @@ def _swap_ratings_table(postgresql: Session, min_rows: int, staging_count: int) 
     logging.info(f"Staging table row count: {staging_count} (minimum: {min_rows})")
 
     # PK構築（シーケンシャルビルド — ランダムI/Oなし）
+    # 過去のswapでPKリネームが失敗した場合、同名の制約が本番テーブルに残っている可能性があるため
+    # 事前にインデックスの存在をチェックし、存在すればリネームして名前衝突を回避する
+    existing_owner = postgresql.execute(
+        text(
+            "SELECT tablename FROM pg_indexes "
+            f"WHERE indexname = '{_STAGING_TABLE}_pkey'"
+        )
+    ).scalar()
+    if existing_owner and existing_owner != _STAGING_TABLE:
+        logging.warning(
+            f"PK index '{_STAGING_TABLE}_pkey' already exists on table '{existing_owner}', "
+            "renaming to avoid conflict"
+        )
+        postgresql.execute(
+            text(f'ALTER INDEX "{_STAGING_TABLE}_pkey" RENAME TO "{_STAGING_TABLE}_pkey_old"')
+        )
+        postgresql.commit()
+
     pk_start = time.time()
     postgresql.execute(
         text(
@@ -923,6 +941,8 @@ def _swap_ratings_table(postgresql: Session, min_rows: int, staging_count: int) 
 def _cleanup_staging_table(postgresql: Session) -> None:
     """障害時のクリーンアップ: staging/old tableの残骸を削除。"""
     try:
+        # abortedトランザクション状態の場合に備えてrollbackしてからDROP
+        postgresql.rollback()
         postgresql.execute(text(f"DROP TABLE IF EXISTS {_STAGING_TABLE}"))
         postgresql.execute(text(f"DROP TABLE IF EXISTS {_OLD_TABLE}"))
         postgresql.commit()
