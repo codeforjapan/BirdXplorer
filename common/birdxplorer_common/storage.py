@@ -42,6 +42,8 @@ from .models import (
 from .models import Post as PostModel
 from .models import (
     PostId,
+    SearchSortField,
+    SortOrder,
     SummaryString,
 )
 from .models import Topic as TopicModel
@@ -1564,6 +1566,10 @@ class Storage:
 
         return query
 
+    _SEARCH_SORT_FIELD_MAP = {
+        SearchSortField.NOTE_CREATED_AT: lambda: NoteRecord.created_at,
+    }
+
     def search_notes_with_posts(
         self,
         note_includes_text: Union[str, None] = None,
@@ -1584,6 +1590,8 @@ class Storage:
         post_includes_media: Union[bool, None] = None,
         offset: int = 0,
         limit: int = 100,
+        sort_field: Union[SearchSortField, None] = None,
+        sort_order: SortOrder = SortOrder.DESC,
     ) -> Generator[Tuple[NoteModel, PostModel | None], None, None]:
         with Session(self.engine) as sess:
             query = (
@@ -1611,6 +1619,13 @@ class Storage:
                 post_impression_count_from,
                 post_includes_media,
             )
+
+            if sort_field is not None:
+                column = self._SEARCH_SORT_FIELD_MAP[sort_field]()
+                if sort_order == SortOrder.ASC:
+                    query = query.order_by(column.asc())
+                else:
+                    query = query.order_by(column.desc())
 
             query = query.offset(offset).limit(limit)
 
