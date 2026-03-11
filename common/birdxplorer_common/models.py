@@ -702,6 +702,19 @@ class NoteStatus(str, Enum):
     CURRENTLY_RATED_NOT_HELPFUL = "CURRENTLY_RATED_NOT_HELPFUL"
 
 
+class SortOrder(str, Enum):
+    """Sort direction"""
+
+    ASC = "asc"
+    DESC = "desc"
+
+
+class SearchSortField(str, Enum):
+    """Fields available for sorting search results"""
+
+    NOTE_CREATED_AT = "note_created_at"
+
+
 class NoteStatusHistory(BaseModel):
     """Model for note status history entry"""
 

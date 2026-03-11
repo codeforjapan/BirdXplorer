@@ -567,6 +567,30 @@ v1_data_post_includes_media = FastAPIEndpointParamDocs(
     },
 )
 
+v1_data_search_sort_field = FastAPIEndpointParamDocs(
+    description="ソート対象のフィールド。",
+    openapi_examples={
+        "note_created_at": {
+            "summary": "ノート作成日時でソート",
+            "value": "note_created_at",
+        },
+    },
+)
+
+v1_data_search_sort_order = FastAPIEndpointParamDocs(
+    description="ソート順。asc (昇順) または desc (降順)。デフォルトは desc。",
+    openapi_examples={
+        "asc": {
+            "summary": "昇順",
+            "value": "asc",
+        },
+        "desc": {
+            "summary": "降順",
+            "value": "desc",
+        },
+    },
+)
+
 # Get /api/v1/data/search の OpenAPI ドキュメント
 V1DataSearchDocs = FastAPIEndpointDocs(
     "アドバンスドサーチでデータを取得するエンドポイント",
@@ -587,6 +611,8 @@ V1DataSearchDocs = FastAPIEndpointDocs(
         "post_repost_count_from": v1_data_post_repost_count,
         "post_impression_count_from": v1_data_post_impression_count,
         "post_includes_media": v1_data_post_includes_media,
+        "sort_field": v1_data_search_sort_field,
+        "sort_order": v1_data_search_sort_order,
         "offset": v1_data_posts_offset,
         "limit": v1_data_posts_limit,
     },
