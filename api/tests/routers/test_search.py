@@ -246,3 +246,64 @@ def test_search_duplicate_parameters(client: TestClient, mock_storage: MagicMock
 
     assert "note_status=NEEDS_MORE_RATINGS" in next_url
     assert "note_status=CURRENTLY_RATED_HELPFUL" in next_url
+
+
+def test_search_sort_field_asc(client: TestClient, mock_storage: MagicMock) -> None:
+    """Test that sort_field and sort_order parameters are passed to storage."""
+    mock_storage.search_notes_with_posts.return_value = []
+    mock_storage.count_search_results.return_value = 0
+
+    response = client.get("/api/v1/data/search?sort_field=note_created_at&sort_order=asc")
+    assert response.status_code == 200
+
+    mock_storage.search_notes_with_posts.assert_called_once()
+    call_kwargs = mock_storage.search_notes_with_posts.call_args
+    assert call_kwargs.kwargs["sort_field"].value == "note_created_at"
+    assert call_kwargs.kwargs["sort_order"].value == "asc"
+
+
+def test_search_sort_field_desc(client: TestClient, mock_storage: MagicMock) -> None:
+    """Test that sort_field=note_created_at&sort_order=desc works."""
+    mock_storage.search_notes_with_posts.return_value = []
+    mock_storage.count_search_results.return_value = 0
+
+    response = client.get("/api/v1/data/search?sort_field=note_created_at&sort_order=desc")
+    assert response.status_code == 200
+
+    call_kwargs = mock_storage.search_notes_with_posts.call_args
+    assert call_kwargs.kwargs["sort_field"].value == "note_created_at"
+    assert call_kwargs.kwargs["sort_order"].value == "desc"
+
+
+def test_search_sort_default(client: TestClient, mock_storage: MagicMock) -> None:
+    """Test that default sort is note_created_at DESC."""
+    mock_storage.search_notes_with_posts.return_value = []
+    mock_storage.count_search_results.return_value = 0
+
+    response = client.get("/api/v1/data/search")
+    assert response.status_code == 200
+
+    call_kwargs = mock_storage.search_notes_with_posts.call_args
+    assert call_kwargs.kwargs["sort_field"].value == "note_created_at"
+    assert call_kwargs.kwargs["sort_order"].value == "desc"
+
+
+def test_search_sort_invalid_field(client: TestClient, mock_storage: MagicMock) -> None:
+    """Test that an invalid sort_field returns 422."""
+    response = client.get("/api/v1/data/search?sort_field=invalid_field")
+    assert response.status_code == 422
+
+
+def test_search_sort_preserved_in_pagination(client: TestClient, mock_storage: MagicMock) -> None:
+    """Test that sort parameters are preserved in pagination URLs."""
+    mock_storage.search_notes_with_posts.return_value = []
+    mock_storage.count_search_results.return_value = 150
+
+    response = client.get("/api/v1/data/search?sort_field=note_created_at&sort_order=asc&limit=50&offset=0")
+    assert response.status_code == 200
+
+    data = response.json()
+    next_url = data["meta"]["next"]
+    assert next_url is not None
+    assert "sort_field=note_created_at" in next_url
+    assert "sort_order=asc" in next_url
