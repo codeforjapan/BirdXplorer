@@ -499,7 +499,7 @@ def gen_router(storage: Storage) -> APIRouter:
             default=None, **V1DataSearchDocs.params["post_impression_count_from"]
         ),
         post_includes_media: Union[bool, None] = Query(default=None, **V1DataSearchDocs.params["post_includes_media"]),
-        sort_field: SearchSortField = Query(default=SearchSortField.NOTE_CREATED_AT, **V1DataSearchDocs.params["sort_field"]),
+        sort_field: Union[SearchSortField, None] = Query(default=None, **V1DataSearchDocs.params["sort_field"]),
         sort_order: SortOrder = Query(default=SortOrder.DESC, **V1DataSearchDocs.params["sort_order"]),
         offset: int = Query(default=0, ge=0, **V1DataSearchDocs.params["offset"]),
         limit: int = Query(default=100, gt=0, le=1000, **V1DataSearchDocs.params["limit"]),

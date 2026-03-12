@@ -276,7 +276,7 @@ def test_search_sort_field_desc(client: TestClient, mock_storage: MagicMock) -> 
 
 
 def test_search_sort_default(client: TestClient, mock_storage: MagicMock) -> None:
-    """Test that default sort is note_created_at DESC."""
+    """Test that default sort is None (no sorting)."""
     mock_storage.search_notes_with_posts.return_value = []
     mock_storage.count_search_results.return_value = 0
 
@@ -284,7 +284,7 @@ def test_search_sort_default(client: TestClient, mock_storage: MagicMock) -> Non
     assert response.status_code == 200
 
     call_kwargs = mock_storage.search_notes_with_posts.call_args
-    assert call_kwargs.kwargs["sort_field"].value == "note_created_at"
+    assert call_kwargs.kwargs["sort_field"] is None
     assert call_kwargs.kwargs["sort_order"].value == "desc"
 
 
