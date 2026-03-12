@@ -1570,6 +1570,66 @@ class Storage:
         SearchSortField.NOTE_CREATED_AT: lambda: NoteRecord.created_at,
     }
 
+    @staticmethod
+    def _has_post_filters(
+        post_includes_text: Union[str, None],
+        post_excludes_text: Union[str, None],
+        x_user_names: Union[List[str], None],
+        x_user_followers_count_from: Union[int, None],
+        x_user_follow_count_from: Union[int, None],
+        post_like_count_from: Union[int, None],
+        post_repost_count_from: Union[int, None],
+        post_impression_count_from: Union[int, None],
+        post_includes_media: Union[bool, None],
+    ) -> bool:
+        return any(
+            v is not None
+            for v in (
+                post_includes_text,
+                post_excludes_text,
+                x_user_names,
+                x_user_followers_count_from,
+                x_user_follow_count_from,
+                post_like_count_from,
+                post_repost_count_from,
+                post_impression_count_from,
+                post_includes_media,
+            )
+        )
+
+    def _apply_note_only_filters(
+        self,
+        query: RowReturningQuery[Tuple[Any, ...]],
+        note_includes_text: Union[str, None] = None,
+        note_excludes_text: Union[str, None] = None,
+        language: Union[LanguageIdentifier, None] = None,
+        topic_ids: Union[List[TopicId], None] = None,
+        note_status: Union[List[str], None] = None,
+        note_created_at_from: Union[TwitterTimestamp, None] = None,
+        note_created_at_to: Union[TwitterTimestamp, None] = None,
+    ) -> RowReturningQuery[Tuple[Any, ...]]:
+        if note_includes_text:
+            query = query.filter(NoteRecord.summary.like(f"%{note_includes_text}%"))
+        if note_excludes_text:
+            query = query.filter(~NoteRecord.summary.like(f"%{note_excludes_text}%"))
+        if language:
+            query = query.filter(NoteRecord.language == language)
+        if topic_ids:
+            subq = (
+                select(NoteTopicAssociation.note_id)
+                .filter(NoteTopicAssociation.topic_id.in_(topic_ids))
+                .group_by(NoteTopicAssociation.note_id)
+                .subquery()
+            )
+            query = query.join(subq, NoteRecord.note_id == subq.c.note_id)
+        if note_status:
+            query = query.filter(NoteRecord.current_status.in_(note_status))
+        if note_created_at_from:
+            query = query.filter(NoteRecord.created_at >= note_created_at_from)
+        if note_created_at_to:
+            query = query.filter(NoteRecord.created_at <= note_created_at_to)
+        return query
+
     def search_notes_with_posts(
         self,
         note_includes_text: Union[str, None] = None,
@@ -1593,41 +1653,102 @@ class Storage:
         sort_field: Union[SearchSortField, None] = None,
         sort_order: SortOrder = SortOrder.DESC,
     ) -> Generator[Tuple[NoteModel, PostModel | None], None, None]:
+        has_post_filters = self._has_post_filters(
+            post_includes_text,
+            post_excludes_text,
+            x_user_names,
+            x_user_followers_count_from,
+            x_user_follow_count_from,
+            post_like_count_from,
+            post_repost_count_from,
+            post_impression_count_from,
+            post_includes_media,
+        )
+
         with Session(self.engine) as sess:
-            query = (
-                sess.query(NoteRecord, PostRecord)
-                .outerjoin(PostRecord, NoteRecord.post_id == PostRecord.post_id)
-                .outerjoin(XUserRecord, PostRecord.user_id == XUserRecord.user_id)
-            )
-
-            query = self._apply_filters(
-                query,
-                note_includes_text,
-                note_excludes_text,
-                post_includes_text,
-                post_excludes_text,
-                language,
-                topic_ids,
-                note_status,
-                note_created_at_from,
-                note_created_at_to,
-                x_user_names,
-                x_user_followers_count_from,
-                x_user_follow_count_from,
-                post_like_count_from,
-                post_repost_count_from,
-                post_impression_count_from,
-                post_includes_media,
-            )
-
             if sort_field is not None:
+                # Two-phase query: collect note_ids first (lightweight), then fetch full data
                 column = self._SEARCH_SORT_FIELD_MAP[sort_field]()
-                if sort_order == SortOrder.ASC:
-                    query = query.order_by(column.asc())
-                else:
-                    query = query.order_by(column.desc())
+                order_expr = column.asc() if sort_order == SortOrder.ASC else column.desc()
 
-            query = query.offset(offset).limit(limit)
+                if has_post_filters:
+                    # Phase 1: note_id only with full JOINs for filtering
+                    id_query = (
+                        sess.query(NoteRecord.note_id)
+                        .outerjoin(PostRecord, NoteRecord.post_id == PostRecord.post_id)
+                        .outerjoin(XUserRecord, PostRecord.user_id == XUserRecord.user_id)
+                    )
+                    id_query = self._apply_filters(
+                        id_query,
+                        note_includes_text,
+                        note_excludes_text,
+                        post_includes_text,
+                        post_excludes_text,
+                        language,
+                        topic_ids,
+                        note_status,
+                        note_created_at_from,
+                        note_created_at_to,
+                        x_user_names,
+                        x_user_followers_count_from,
+                        x_user_follow_count_from,
+                        post_like_count_from,
+                        post_repost_count_from,
+                        post_impression_count_from,
+                        post_includes_media,
+                    )
+                else:
+                    # Phase 1: note_id only, no JOINs needed
+                    id_query = sess.query(NoteRecord.note_id).select_from(NoteRecord)
+                    id_query = self._apply_note_only_filters(
+                        id_query,
+                        note_includes_text,
+                        note_excludes_text,
+                        language,
+                        topic_ids,
+                        note_status,
+                        note_created_at_from,
+                        note_created_at_to,
+                    )
+
+                note_subq = id_query.order_by(order_expr).offset(offset).limit(limit).subquery()
+
+                # Phase 2: fetch full data for matched note_ids only
+                query = (
+                    sess.query(NoteRecord, PostRecord)
+                    .join(note_subq, NoteRecord.note_id == note_subq.c.note_id)
+                    .outerjoin(PostRecord, NoteRecord.post_id == PostRecord.post_id)
+                    .order_by(order_expr)
+                )
+            else:
+                # No sorting: standard path
+                query = (
+                    sess.query(NoteRecord, PostRecord)
+                    .outerjoin(PostRecord, NoteRecord.post_id == PostRecord.post_id)
+                    .outerjoin(XUserRecord, PostRecord.user_id == XUserRecord.user_id)
+                )
+
+                query = self._apply_filters(
+                    query,
+                    note_includes_text,
+                    note_excludes_text,
+                    post_includes_text,
+                    post_excludes_text,
+                    language,
+                    topic_ids,
+                    note_status,
+                    note_created_at_from,
+                    note_created_at_to,
+                    x_user_names,
+                    x_user_followers_count_from,
+                    x_user_follow_count_from,
+                    post_like_count_from,
+                    post_repost_count_from,
+                    post_impression_count_from,
+                    post_includes_media,
+                )
+
+                query = query.offset(offset).limit(limit)
 
             results = query.all()
 
