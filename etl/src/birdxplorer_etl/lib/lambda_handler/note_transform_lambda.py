@@ -298,6 +298,7 @@ def process_single_message(message: dict, postgresql, sqs_handler, topics_cache:
             int(rating_agg.somewhat_helpful_count) if rating_agg and rating_agg.somewhat_helpful_count else 0
         ),
         locked_status=note_row.locked_status,
+        has_been_helpfuled=bool(rating_agg and rating_agg.helpful_count and int(rating_agg.helpful_count) > 0),
     )
 
     postgresql.add(new_note)
