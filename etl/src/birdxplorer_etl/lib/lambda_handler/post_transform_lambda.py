@@ -131,38 +131,33 @@ def process_post_transform(
         postgresql.execute(select(RowPostMediaRecord).where(RowPostMediaRecord.post_id == post_id)).scalars().all()
     )
 
-    for row_media in row_media_list:
-        # mediaへのUPSERT
-        # media_keyから"-{post_id}"サフィックスを除去（postlookup_lambdaで付加された場合）
-        original_media_key = row_media.media_key
-        if f"-{post_id}" in original_media_key:
-            original_media_key = original_media_key.replace(f"-{post_id}", "")
-
-        stmt = (
-            insert(MediaRecord)
-            .values(
-                media_key=original_media_key,
-                type=row_media.type,
-                url=row_media.url,
-                width=row_media.width,
-                height=row_media.height,
+    if row_media_list:
+        media_entries = []
+        assoc_entries = []
+        for row_media in row_media_list:
+            # media_keyから"-{post_id}"サフィックスを除去（postlookup_lambdaで付加された場合）
+            original_media_key = row_media.media_key
+            if f"-{post_id}" in original_media_key:
+                original_media_key = original_media_key.replace(f"-{post_id}", "")
+            media_entries.append(
+                {
+                    "media_key": original_media_key,
+                    "type": row_media.type,
+                    "url": row_media.url,
+                    "width": row_media.width,
+                    "height": row_media.height,
+                }
             )
-            .on_conflict_do_nothing(index_elements=["media_key"])
-        )
-        postgresql.execute(stmt)
+            assoc_entries.append({"post_id": post_id, "media_key": original_media_key})
 
-        # post_media関連付けのUPSERT
+        stmt = insert(MediaRecord).values(media_entries).on_conflict_do_nothing(index_elements=["media_key"])
+        postgresql.execute(stmt)
         stmt = (
             insert(PostMediaAssociation)
-            .values(
-                post_id=post_id,
-                media_key=original_media_key,
-            )
+            .values(assoc_entries)
             .on_conflict_do_nothing(index_elements=["post_id", "media_key"])
         )
         postgresql.execute(stmt)
-
-    if row_media_list:
         logger.info(f"[STAGED] {len(row_media_list)} media records for post {post_id}")
 
     # row_post_embed_urlsからリンクデータを取得し変換
@@ -172,34 +167,24 @@ def process_post_transform(
         .all()
     )
 
-    for row_url in row_urls:
-        # unwound_urlを使用（最終的なリダイレクト先URL）
-        final_url = row_url.unwound_url or row_url.expanded_url or row_url.url
-        link_id = generate_link_id(final_url)
+    if row_urls:
+        link_entries = []
+        link_assoc_entries = []
+        for row_url in row_urls:
+            # unwound_urlを使用（最終的なリダイレクト先URL）
+            final_url = row_url.unwound_url or row_url.expanded_url or row_url.url
+            link_id = generate_link_id(final_url)
+            link_entries.append({"link_id": link_id, "url": final_url})
+            link_assoc_entries.append({"post_id": post_id, "link_id": link_id})
 
-        # linksへのUPSERT
-        stmt = (
-            insert(LinkRecord)
-            .values(
-                link_id=link_id,
-                url=final_url,
-            )
-            .on_conflict_do_nothing(index_elements=["link_id"])
-        )
+        stmt = insert(LinkRecord).values(link_entries).on_conflict_do_nothing(index_elements=["link_id"])
         postgresql.execute(stmt)
-
-        # post_link関連付けのUPSERT
         stmt = (
             insert(PostLinkAssociation)
-            .values(
-                post_id=post_id,
-                link_id=link_id,
-            )
+            .values(link_assoc_entries)
             .on_conflict_do_nothing(index_elements=["post_id", "link_id"])
         )
         postgresql.execute(stmt)
-
-    if row_urls:
         logger.info(f"[STAGED] {len(row_urls)} link records for post {post_id}")
 
     return {"status": "success"}
