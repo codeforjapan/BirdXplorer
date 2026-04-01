@@ -160,37 +160,37 @@ def process_save_post_data(postgresql: Any, data: dict) -> None:
     # メディアデータのbulk insert（重複は無視）
     media_list = post_data.get("media", [])
     if media_list:
-        for m in media_list:
-            stmt = (
-                insert(RowPostMediaRecord)
-                .values(
-                    media_key=m["media_key"],
-                    type=m["type"],
-                    url=m["url"],
-                    width=m["width"],
-                    height=m["height"],
-                    post_id=post_data["post_id"],
-                )
-                .on_conflict_do_nothing(index_elements=["media_key"])
-            )
-            postgresql.execute(stmt)
+        media_values = [
+            {
+                "media_key": m["media_key"],
+                "type": m["type"],
+                "url": m["url"],
+                "width": m["width"],
+                "height": m["height"],
+                "post_id": post_data["post_id"],
+            }
+            for m in media_list
+        ]
+        stmt = insert(RowPostMediaRecord).values(media_values).on_conflict_do_nothing(index_elements=["media_key"])
+        postgresql.execute(stmt)
         logger.info(f"[STAGED] {len(media_list)} media records upsert staged for commit")
 
     # 埋め込みURLデータのUPSERT
     embed_urls = post_data.get("embed_urls", [])
     if embed_urls:
-        for url_data in embed_urls:
-            stmt = (
-                insert(RowPostEmbedURLRecord)
-                .values(
-                    post_id=post_data["post_id"],
-                    url=url_data.get("url"),
-                    expanded_url=url_data.get("expanded_url"),
-                    unwound_url=url_data.get("unwound_url"),
-                )
-                .on_conflict_do_nothing(index_elements=["post_id", "url"])
-            )
-            postgresql.execute(stmt)
+        url_values = [
+            {
+                "post_id": post_data["post_id"],
+                "url": url_data.get("url"),
+                "expanded_url": url_data.get("expanded_url"),
+                "unwound_url": url_data.get("unwound_url"),
+            }
+            for url_data in embed_urls
+        ]
+        stmt = (
+            insert(RowPostEmbedURLRecord).values(url_values).on_conflict_do_nothing(index_elements=["post_id", "url"])
+        )
+        postgresql.execute(stmt)
         logger.info(f"[STAGED] {len(embed_urls)} embed URLs upsert staged for commit")
 
 
