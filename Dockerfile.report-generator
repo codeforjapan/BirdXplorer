@@ -1,0 +1,16 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# README.md をルートにコピー（common の pyproject.toml が ../README.md を参照するため）
+COPY README.md /app/README.md
+COPY common/ /app/common/
+COPY etl/ /app/etl/
+
+RUN pip install --no-cache-dir /app/common /app/etl
+
+CMD ["python", "-m", "birdxplorer_etl.scripts.report_generator"]
