@@ -18,7 +18,9 @@ DEFAULT_PROMPTS = {
 def wait_for_service(url: str, max_retries: int = 12, interval: int = 5) -> None:
     for i in range(max_retries):
         try:
-            resp = requests.get(f"{url}/healthcheck", timeout=10)
+            resp = requests.get(url, timeout=10)
+            if resp.status_code != 200:
+                resp = requests.get(f"{url}/healthcheck", timeout=10)
             if resp.status_code == 200:
                 return
         except requests.ConnectionError:
@@ -44,7 +46,7 @@ def create_report(
     with open(csv_path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            comments.append({"comment": row["comment"]})
+            comments.append({"id": row["comment-id"], "comment": row["comment-body"]})
 
     payload = {
         "title": title,

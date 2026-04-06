@@ -80,7 +80,8 @@ def main() -> None:
 
     # 2. Wait for sidecar services
     wait_for_service(args.kouchou_api_url)
-    wait_for_service(args.static_builder_url)
+    if not args.dry_run:
+        wait_for_service(args.static_builder_url)
 
     # 3. Extract notes from DB
     with tempfile.TemporaryDirectory() as tmpdir:
