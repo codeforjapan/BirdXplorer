@@ -1,8 +1,12 @@
 import csv
+import logging
 import time
+import uuid
 from typing import Optional
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_PROMPTS = {
     "extraction": (
@@ -11,6 +15,25 @@ DEFAULT_PROMPTS = {
         "* 入出力の例に記載したような形式で文字列のリストを返してください\n"
         "  * 必要な場合は2つの別個の意見に分割してください。多くの場合は1つの議論にまとめる方が望ましいです。\n"
         "* 整理した意見は日本語で出力してください"
+    ),
+    "initial_labelling": (
+        "あなたはKJ法が得意なデータ分析者です。userのinputはグループに集まったラベルです。"
+        "なぜそのラベルが一つのグループであるか解説し、表札（label）をつけてください。\n"
+        "表札については、グループ内の具体的な論点や特徴を反映した、具体性の高い名称を考案してください。\n"
+        "出力はJSONとし、フォーマットは以下のサンプルを参考にしてください。"
+    ),
+    "merge_labelling": (
+        "あなたはデータ分析のエキスパートです。\n"
+        "現在、テキストデータの階層クラスタリングを行っています。\n"
+        "下層のクラスタ（意見グループ）のタイトルと説明、およびそれらのクラスタが所属する上層のクラスタのテキストのサンプルを与えるので、"
+        "上層のクラスタのタイトルと説明を作成してください。"
+    ),
+    "overview": (
+        "あなたはシンクタンクで働く専門のリサーチアシスタントです。\n"
+        "チームは特定のテーマに関してパブリック・コンサルテーションを実施し、異なる選択肢の意見グループを分析し始めています。\n"
+        "これから意見グループのリストとその簡単な分析が提供されます。\n"
+        "あなたの仕事は、調査結果の簡潔な要約を返すことです。要約は非常に簡潔に（最大で1段落、最大4文）まとめ、無意味な言葉を避けてください。\n"
+        "出力は日本語で行ってください。"
     ),
 }
 
@@ -48,20 +71,27 @@ def create_report(
         for row in reader:
             comments.append({"id": row["comment-id"], "comment": row["comment-body"]})
 
+    slug = str(uuid.uuid4())
     payload = {
-        "title": title,
-        "comments": comments,
+        "input": slug,
+        "question": title,
+        "intro": "",
+        "cluster": cluster_nums,
         "model": model,
-        "cluster_nums": cluster_nums,
+        "provider": "openai",
         "workers": workers,
-        "prompts": DEFAULT_PROMPTS,
+        "prompt": DEFAULT_PROMPTS,
+        "comments": comments,
+        "is_pubcom": True,
     }
 
     headers = {"x-api-key": admin_api_key}
     resp = requests.post(f"{api_url}/admin/reports", json=payload, headers=headers, timeout=60)
     resp.raise_for_status()
 
-    return resp.json()["slug"]
+    # kouchou-ai API は null を返す。slug は input フィールドの値（UUID）がそのまま使われる。
+    logger.info(f"Report created with slug: {slug}")
+    return slug
 
 
 def wait_for_completion(
