@@ -18,7 +18,7 @@ class TestWaitForService:
     def test_success_on_first_try(self, mock_get: MagicMock, mock_sleep: MagicMock) -> None:
         mock_get.return_value = MagicMock(status_code=200)
         wait_for_service("http://example.com", max_retries=3, interval=1)
-        mock_get.assert_called_once_with("http://example.com/healthcheck", timeout=10)
+        mock_get.assert_called_once_with("http://example.com", timeout=10)
         mock_sleep.assert_not_called()
 
     @patch("birdxplorer_etl.scripts.report_kouchou.time.sleep")
@@ -30,17 +30,17 @@ class TestWaitForService:
 
 
 class TestCreateReport:
+    @patch("birdxplorer_etl.scripts.report_kouchou.uuid.uuid4", return_value="test-slug-123")
     @patch("birdxplorer_etl.scripts.report_kouchou.requests.post")
-    def test_create_report_returns_slug(self, mock_post: MagicMock) -> None:
+    def test_create_report_returns_slug(self, mock_post: MagicMock, mock_uuid: MagicMock) -> None:
         mock_resp = MagicMock()
-        mock_resp.json.return_value = {"slug": "test-slug-123"}
         mock_resp.raise_for_status = MagicMock()
         mock_post.return_value = mock_resp
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, newline="") as f:
-            f.write("comment\n")
-            f.write("これはテストコメントです\n")
-            f.write("2つ目のコメント\n")
+            f.write("comment-id,comment-body\n")
+            f.write("1,これはテストコメントです\n")
+            f.write("2,2つ目のコメント\n")
             csv_path = f.name
 
         try:
@@ -57,10 +57,10 @@ class TestCreateReport:
             assert args[0] == "http://api.example.com/admin/reports"
             assert kwargs["headers"] == {"x-api-key": "test-key"}
             payload = kwargs["json"]
-            assert payload["title"] == "Test Report"
+            assert payload["question"] == "Test Report"
             assert len(payload["comments"]) == 2
             assert payload["comments"][0]["comment"] == "これはテストコメントです"
-            assert payload["cluster_nums"] == [20, 100]
+            assert payload["cluster"] == [20, 100]
         finally:
             os.unlink(csv_path)
 
@@ -142,11 +142,12 @@ class TestDownloadStaticBuild:
                 builder_url="http://builder.example.com",
                 slug="test-slug",
                 output_path=output_path,
+                base_path="/kouchou-ai/2026/03",
             )
 
             mock_post.assert_called_once_with(
                 "http://builder.example.com/build",
-                json={"slugs": "test-slug"},
+                json={"slugs": "test-slug", "basePath": "/kouchou-ai/2026/03"},
                 timeout=300,
             )
 
