@@ -120,8 +120,8 @@ def wait_for_completion(
         time.sleep(poll_interval)
 
 
-def download_static_build(builder_url: str, slug: str, output_path: str) -> None:
-    resp = requests.post(f"{builder_url}/build", json={"slugs": slug}, timeout=300)
+def download_static_build(builder_url: str, slug: str, output_path: str, base_path: str = "") -> None:
+    resp = requests.post(f"{builder_url}/build", json={"slugs": slug, "basePath": base_path}, timeout=300)
     resp.raise_for_status()
 
     with open(output_path, "wb") as f:

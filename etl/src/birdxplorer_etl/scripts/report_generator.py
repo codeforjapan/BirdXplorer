@@ -123,10 +123,12 @@ def main() -> None:
 
         # 6. Download static build
         zip_path = os.path.join(tmpdir, f"report_{year}_{month:02d}.zip")
+        base_path = f"/kouchou-ai/{year}/{month:02d}"
         download_static_build(
             builder_url=args.static_builder_url,
             slug=slug,
             output_path=zip_path,
+            base_path=base_path,
         )
         logger.info(f"Static build downloaded: {zip_path}")
 
