@@ -30,47 +30,44 @@ def _get_file_content(token: str, repo: str, path: str, ref: str) -> tuple[str, 
     return content, data["sha"]
 
 
-def _update_file(
-    token: str,
-    repo: str,
-    path: str,
-    content: str,
-    message: str,
-    branch: str,
-    sha: Optional[str] = None,
-) -> None:
-    """Create or update a file on GitHub."""
-    url = f"{GITHUB_API}/repos/{repo}/contents/{path}"
-    encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
-    payload: dict[str, str] = {
-        "message": message,
-        "content": encoded,
-        "branch": branch,
-    }
-    if sha is not None:
-        payload["sha"] = sha
-    resp = requests.put(url, headers=_headers(token), json=payload, timeout=30)
-    resp.raise_for_status()
-
-
-def _upload_binary_file(
-    token: str,
-    repo: str,
-    path: str,
-    content_bytes: bytes,
-    message: str,
-    branch: str,
-) -> None:
-    """Upload a binary file to GitHub."""
-    url = f"{GITHUB_API}/repos/{repo}/contents/{path}"
+def _create_blob(token: str, repo: str, content_bytes: bytes) -> str:
+    """Create a blob in the repo and return its SHA."""
+    url = f"{GITHUB_API}/repos/{repo}/git/blobs"
     encoded = base64.b64encode(content_bytes).decode("ascii")
-    payload = {
-        "message": message,
-        "content": encoded,
-        "branch": branch,
-    }
-    resp = requests.put(url, headers=_headers(token), json=payload, timeout=60)
+    resp = requests.post(
+        url,
+        headers=_headers(token),
+        json={"content": encoded, "encoding": "base64"},
+        timeout=60,
+    )
     resp.raise_for_status()
+    return resp.json()["sha"]
+
+
+def _create_tree(token: str, repo: str, base_tree_sha: str, tree_items: list[dict]) -> str:
+    """Create a tree object and return its SHA."""
+    url = f"{GITHUB_API}/repos/{repo}/git/trees"
+    resp = requests.post(
+        url,
+        headers=_headers(token),
+        json={"base_tree": base_tree_sha, "tree": tree_items},
+        timeout=60,
+    )
+    resp.raise_for_status()
+    return resp.json()["sha"]
+
+
+def _create_commit(token: str, repo: str, message: str, tree_sha: str, parent_sha: str) -> str:
+    """Create a commit object and return its SHA."""
+    url = f"{GITHUB_API}/repos/{repo}/git/commits"
+    resp = requests.post(
+        url,
+        headers=_headers(token),
+        json={"message": message, "tree": tree_sha, "parents": [parent_sha]},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()["sha"]
 
 
 def create_report_pr(
@@ -85,10 +82,7 @@ def create_report_pr(
     reports_ts_content: str,
     index_tsx_content: str,
 ) -> Optional[str]:
-    """Create a PR with report files on GitHub.
-
-    Returns the PR html_url, or None on failure.
-    """
+    """Create a PR with report files on GitHub using a single commit via Git Trees API."""
     hdrs = _headers(github_token)
     branch_name = f"feat/add-report-{year}{month:02d}"
 
@@ -98,58 +92,51 @@ def create_report_pr(
     resp.raise_for_status()
     base_sha = resp.json()["object"]["sha"]
 
-    # 2. Create new branch
+    # 2. Get base tree SHA
+    commit_url = f"{GITHUB_API}/repos/{repo}/git/commits/{base_sha}"
+    resp = requests.get(commit_url, headers=hdrs, timeout=30)
+    resp.raise_for_status()
+    base_tree_sha = resp.json()["tree"]["sha"]
+
+    # 3. Build tree items (all files in a single tree)
+    tree_items: list[dict] = []
+
+    # Static files
+    for filename, content_bytes in static_files.items():
+        file_path = f"public/kouchou-ai/{year}/{month:02d}/{filename}"
+        blob_sha = _create_blob(github_token, repo, content_bytes)
+        tree_items.append({"path": file_path, "mode": "100644", "type": "blob", "sha": blob_sha})
+        logger.info(f"Uploaded {file_path}")
+
+    # reports.ts
+    reports_blob_sha = _create_blob(github_token, repo, reports_ts_content.encode("utf-8"))
+    tree_items.append({"path": "app/data/reports.ts", "mode": "100644", "type": "blob", "sha": reports_blob_sha})
+    logger.info("Updated reports.ts")
+
+    # _index.tsx
+    index_blob_sha = _create_blob(github_token, repo, index_tsx_content.encode("utf-8"))
+    tree_items.append({"path": "app/routes/_index.tsx", "mode": "100644", "type": "blob", "sha": index_blob_sha})
+    logger.info("Updated _index.tsx")
+
+    # 4. Create tree
+    new_tree_sha = _create_tree(github_token, repo, base_tree_sha, tree_items)
+
+    # 5. Create single commit
+    commit_message = f"feat: Add {year}-{month:02d} report"
+    new_commit_sha = _create_commit(github_token, repo, commit_message, new_tree_sha, base_sha)
+
+    # 6. Create branch pointing to the new commit
     create_ref_url = f"{GITHUB_API}/repos/{repo}/git/refs"
     resp = requests.post(
         create_ref_url,
         headers=hdrs,
-        json={"ref": f"refs/heads/{branch_name}", "sha": base_sha},
+        json={"ref": f"refs/heads/{branch_name}", "sha": new_commit_sha},
         timeout=30,
     )
     resp.raise_for_status()
     logger.info(f"Created branch {branch_name}")
 
-    # 3. Upload static files
-    for filename, content_bytes in static_files.items():
-        file_path = f"public/kouchou-ai/{year}/{month:02d}/{filename}"
-        _upload_binary_file(github_token, repo, file_path, content_bytes, f"Add static file {filename}", branch_name)
-        logger.info(f"Uploaded {file_path}")
-
-    # 4. Update reports.ts
-    reports_ts_path = "app/data/reports.ts"
-    try:
-        _, reports_sha = _get_file_content(github_token, repo, reports_ts_path, base_branch)
-    except requests.HTTPError:
-        reports_sha = None
-    _update_file(
-        github_token,
-        repo,
-        reports_ts_path,
-        reports_ts_content,
-        f"Update reports.ts for {year}-{month:02d}",
-        branch_name,
-        reports_sha,
-    )
-    logger.info("Updated reports.ts")
-
-    # 5. Update _index.tsx
-    index_tsx_path = "app/routes/_index.tsx"
-    try:
-        _, index_sha = _get_file_content(github_token, repo, index_tsx_path, base_branch)
-    except requests.HTTPError:
-        index_sha = None
-    _update_file(
-        github_token,
-        repo,
-        index_tsx_path,
-        index_tsx_content,
-        f"Update _index.tsx for {year}-{month:02d}",
-        branch_name,
-        index_sha,
-    )
-    logger.info("Updated _index.tsx")
-
-    # 6. Create PR
+    # 7. Create PR
     pr_url = f"{GITHUB_API}/repos/{repo}/pulls"
     pr_body = f"## {year}年{month}月 Community Notes レポート\n\n{report_description}"
     resp = requests.post(
