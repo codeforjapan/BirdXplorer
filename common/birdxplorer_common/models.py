@@ -914,11 +914,11 @@ class PaginationMeta(BaseModel):
         ),
     ] = None
     total: Annotated[
-        int,
+        Optional[int],
         PydanticField(
             description="検索結果の総件数",
         ),
-    ] = 0
+    ] = None
 
 
 T = TypeVar("T")
