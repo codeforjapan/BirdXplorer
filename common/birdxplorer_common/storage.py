@@ -100,7 +100,7 @@ class NoteTopicAssociation(Base):
 
     note_id: Mapped[NoteId] = mapped_column(ForeignKey("notes.note_id"), primary_key=True)
     topic_id: Mapped[TopicId] = mapped_column(ForeignKey("topics.topic_id"), primary_key=True)
-    topic: Mapped["TopicRecord"] = relationship()
+    topic: Mapped["TopicRecord"] = relationship(lazy="selectin")
 
 
 class NoteRecord(Base):
@@ -109,7 +109,7 @@ class NoteRecord(Base):
     note_id: Mapped[NoteId] = mapped_column(primary_key=True)
     note_author_participant_id: Mapped[Optional[ParticipantId]] = mapped_column(nullable=True)
     post_id: Mapped[Optional[PostId]] = mapped_column(nullable=True)
-    topics: Mapped[List[NoteTopicAssociation]] = relationship()
+    topics: Mapped[List[NoteTopicAssociation]] = relationship(lazy="selectin")
     language: Mapped[Optional[LanguageIdentifier]] = mapped_column(nullable=True)
     summary: Mapped[SummaryString] = mapped_column(nullable=False)
     current_status: Mapped[Optional[String]] = mapped_column(nullable=True)
@@ -152,7 +152,7 @@ class PostLinkAssociation(Base):
 
     post_id: Mapped[PostId] = mapped_column(ForeignKey("posts.post_id"), primary_key=True)
     link_id: Mapped[LinkId] = mapped_column(ForeignKey("links.link_id"), primary_key=True)
-    link: Mapped[LinkRecord] = relationship()
+    link: Mapped[LinkRecord] = relationship(lazy="selectin")
 
 
 class PostMediaAssociation(Base):
@@ -183,7 +183,7 @@ class PostRecord(Base):
 
     post_id: Mapped[PostId] = mapped_column(primary_key=True)
     user_id: Mapped[UserId] = mapped_column(ForeignKey("x_users.user_id"), nullable=False)
-    user: Mapped[XUserRecord] = relationship()
+    user: Mapped[XUserRecord] = relationship(lazy="selectin")
     text: Mapped[SummaryString] = mapped_column(nullable=False)
     media_details: Mapped[List[PostMediaAssociation]] = relationship()
     created_at: Mapped[TwitterTimestamp] = mapped_column(nullable=False)
@@ -191,7 +191,7 @@ class PostRecord(Base):
     like_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
     repost_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
     impression_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
-    links: Mapped[List[PostLinkAssociation]] = relationship()
+    links: Mapped[List[PostLinkAssociation]] = relationship(lazy="selectin")
 
 
 class RowNoteRecord(Base):
