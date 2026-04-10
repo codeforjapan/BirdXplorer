@@ -85,7 +85,7 @@ def test_search_pagination(client: TestClient, mock_storage: MagicMock) -> None:
     timestamp = TwitterTimestamp.from_int(int(datetime(2023, 1, 1, tzinfo=timezone.utc).timestamp() * 1000))
     note_author_participant_id = Use(lambda: "".join(random.choices("0123456789ABCDEF", k=64))).to_value()
 
-    def make_note_post(idx: int) -> tuple:
+    def make_note_post(idx: int) -> tuple[Note, Post]:
         nid = f"{1234567890123456789 + idx}"
         pid = f"{2234567890123456789 + idx}"
         note = Note(
@@ -345,3 +345,28 @@ def test_search_sort_preserved_in_pagination(client: TestClient, mock_storage: M
     assert next_url is not None
     assert "sort_field=note_created_at" in next_url
     assert "sort_order=asc" in next_url
+
+
+def test_search_count_basic(client: TestClient, mock_storage: MagicMock) -> None:
+    """カウントエンドポイントは総件数を返す。"""
+    mock_storage.count_search_results.return_value = 2598948
+
+    response = client.get("/api/v1/data/search/count")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 2598948
+
+
+def test_search_count_with_filters(client: TestClient, mock_storage: MagicMock) -> None:
+    """カウントエンドポイントはフィルタパラメータをstorageに渡す。"""
+    mock_storage.count_search_results.return_value = 42
+
+    response = client.get("/api/v1/data/search/count?language=ja&note_includes_text=test")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 42
+
+    mock_storage.count_search_results.assert_called_once()
+    call_kwargs = mock_storage.count_search_results.call_args
+    assert call_kwargs.kwargs["language"] == "ja"
+    assert call_kwargs.kwargs["note_includes_text"] == "test"
