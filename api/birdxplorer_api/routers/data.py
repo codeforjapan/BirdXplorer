@@ -77,7 +77,6 @@ SearchPaginationMetaWithExamples: TypeAlias = Annotated[
                 {
                     "next": "http://birdxplorer.onrender.com/api/v1/data/search?offset=100&limit=100",
                     "prev": "null",
-                    "total": 500,
                 }
             ]
         },
@@ -513,9 +512,8 @@ def gen_router(storage: Storage) -> APIRouter:
         except OverflowError as e:
             raise HTTPException(status_code=422, detail=str(e))
 
-        # Get search results using the optimized storage method
-        results = []
-        for note, post in storage.search_notes_with_posts(
+        # SearchResultPageからデータとhas_nextを取得
+        page = storage.search_notes_with_posts(
             note_includes_text=note_includes_text,
             note_excludes_text=note_excludes_text,
             post_includes_text=post_includes_text,
@@ -536,7 +534,10 @@ def gen_router(storage: Storage) -> APIRouter:
             limit=limit,
             sort_field=sort_field,
             sort_order=sort_order,
-        ):
+        )
+
+        results = []
+        for note, post in page.items:
             results.append(
                 SearchedNote(
                     noteId=note.note_id,
@@ -558,45 +559,26 @@ def gen_router(storage: Storage) -> APIRouter:
                     post=post,
                 )
             )
-        # Get total count for pagination
-        total_count = storage.count_search_results(
-            note_includes_text=note_includes_text,
-            note_excludes_text=note_excludes_text,
-            post_includes_text=post_includes_text,
-            post_excludes_text=post_excludes_text,
-            language=language,
-            topic_ids=topic_ids,
-            note_status=note_status,
-            note_created_at_from=note_created_at_from,
-            note_created_at_to=note_created_at_to,
-            x_user_names=x_user_names,
-            x_user_followers_count_from=x_user_followers_count_from,
-            x_user_follow_count_from=x_user_follow_count_from,
-            post_like_count_from=post_like_count_from,
-            post_repost_count_from=post_repost_count_from,
-            post_impression_count_from=post_impression_count_from,
-            post_includes_media=post_includes_media,
-        )
 
-        # Generate pagination URLs
+        # ページネーションURL生成
         base_url = str(request.url).split("?")[0]
         raw_query = request.url.query
         query_params = parse_query_string(raw_query)
-        next_offset = offset + limit
-        prev_offset = max(offset - limit, 0)
 
         next_url = None
-        if next_offset < total_count:
+        if page.has_next:
+            next_offset = offset + limit
             query_params["offset"] = [str(next_offset)]
             query_params["limit"] = [str(limit)]
             next_url = f"{base_url}?{urlencode(query_params, doseq=True)}"
 
         prev_url = None
         if offset > 0:
+            prev_offset = max(offset - limit, 0)
             query_params["offset"] = [str(prev_offset)]
             query_params["limit"] = [str(limit)]
             prev_url = f"{base_url}?{urlencode(query_params, doseq=True)}"
 
-        return SearchResponse(data=results, meta=PaginationMeta(next=next_url, prev=prev_url, total=total_count))
+        return SearchResponse(data=results, meta=PaginationMeta(next=next_url, prev=prev_url))
 
     return router
