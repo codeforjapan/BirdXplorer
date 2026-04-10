@@ -554,6 +554,11 @@ def gen_router(storage: Storage) -> APIRouter:
         sort_order: SortOrder = Query(default=SortOrder.DESC, **V1DataSearchDocs.params["sort_order"]),
         offset: int = Query(default=0, ge=0, **V1DataSearchDocs.params["offset"]),
         limit: int = Query(default=100, gt=0, le=1000, **V1DataSearchDocs.params["limit"]),
+        include_total: bool = Query(
+            default=True,
+            description="総件数を含める。falseにするとCOUNTクエリをスキップしてレスポンスが高速化されます。"
+            "件数は /search/count で非同期に取得できます。",
+        ),
     ) -> SearchResponse:
         # Convert timestamp strings to TwitterTimestamp objects
         try:
@@ -612,13 +617,37 @@ def gen_router(storage: Storage) -> APIRouter:
                 )
             )
 
+        # include_total=True のときはCOUNTクエリで総件数を取得（後方互換性のため）
+        total_count = None
+        if include_total:
+            total_count = storage.count_search_results(
+                note_includes_text=note_includes_text,
+                note_excludes_text=note_excludes_text,
+                post_includes_text=post_includes_text,
+                post_excludes_text=post_excludes_text,
+                language=language,
+                topic_ids=topic_ids,
+                note_status=note_status,
+                note_created_at_from=note_created_at_from,
+                note_created_at_to=note_created_at_to,
+                x_user_names=x_user_names,
+                x_user_followers_count_from=x_user_followers_count_from,
+                x_user_follow_count_from=x_user_follow_count_from,
+                post_like_count_from=post_like_count_from,
+                post_repost_count_from=post_repost_count_from,
+                post_impression_count_from=post_impression_count_from,
+                post_includes_media=post_includes_media,
+            )
+
         # ページネーションURL生成
         base_url = str(request.url).split("?")[0]
         raw_query = request.url.query
         query_params = parse_query_string(raw_query)
 
         next_url = None
-        if page.has_next:
+        # include_total時はCOUNTベースで判定（従来互換）、それ以外はlimit+1ベース
+        has_next = (offset + limit < total_count) if total_count is not None else page.has_next
+        if has_next:
             next_offset = offset + limit
             query_params["offset"] = [str(next_offset)]
             query_params["limit"] = [str(limit)]
@@ -631,6 +660,6 @@ def gen_router(storage: Storage) -> APIRouter:
             query_params["limit"] = [str(limit)]
             prev_url = f"{base_url}?{urlencode(query_params, doseq=True)}"
 
-        return SearchResponse(data=results, meta=PaginationMeta(next=next_url, prev=prev_url))
+        return SearchResponse(data=results, meta=PaginationMeta(next=next_url, prev=prev_url, total=total_count))
 
     return router
