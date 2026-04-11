@@ -77,7 +77,6 @@ SearchPaginationMetaWithExamples: TypeAlias = Annotated[
                 {
                     "next": "http://birdxplorer.onrender.com/api/v1/data/search?offset=100&limit=100",
                     "prev": "null",
-                    "total": 500,
                 }
             ]
         },
@@ -302,6 +301,10 @@ class SearchResponse(BaseModel):
     meta: SearchPaginationMetaWithExamples
 
 
+class SearchCountResponse(BaseModel):
+    total: Annotated[int, PydanticField(description="検索結果の総件数")]
+
+
 def str_to_twitter_timestamp(s: str) -> TwitterTimestamp:
     try:
         return TwitterTimestamp.from_int(int(s))
@@ -468,6 +471,54 @@ def gen_router(storage: Storage) -> APIRouter:
 
         return PostListResponse(data=posts, meta=PaginationMeta(next=next_url, prev=prev_url, total=total_count))
 
+    @router.get("/search/count", description="検索結果の総件数を取得する", response_model=SearchCountResponse)
+    def search_count(
+        note_includes_text: Union[None, str] = Query(default=None),
+        note_excludes_text: Union[None, str] = Query(default=None),
+        post_includes_text: Union[None, str] = Query(default=None),
+        post_excludes_text: Union[None, str] = Query(default=None),
+        language: Union[LanguageIdentifier, None] = Query(default=None),
+        topic_ids: Union[List[TopicId], None] = Query(default=None),
+        note_status: Union[None, List[str]] = Query(default=None),
+        note_created_at_from: Union[None, TwitterTimestamp, str] = Query(default=None),
+        note_created_at_to: Union[None, TwitterTimestamp, str] = Query(default=None),
+        x_user_names: Union[List[str], None] = Query(default=None),
+        x_user_followers_count_from: Union[None, int] = Query(default=None),
+        x_user_follow_count_from: Union[None, int] = Query(default=None),
+        post_like_count_from: Union[None, int] = Query(default=None),
+        post_repost_count_from: Union[None, int] = Query(default=None),
+        post_impression_count_from: Union[None, int] = Query(default=None),
+        post_includes_media: Union[bool, None] = Query(default=None),
+    ) -> SearchCountResponse:
+        try:
+            if note_created_at_from is not None and isinstance(note_created_at_from, str):
+                note_created_at_from = ensure_twitter_timestamp(note_created_at_from)
+            if note_created_at_to is not None and isinstance(note_created_at_to, str):
+                note_created_at_to = ensure_twitter_timestamp(note_created_at_to)
+        except OverflowError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+        total = storage.count_search_results(
+            note_includes_text=note_includes_text,
+            note_excludes_text=note_excludes_text,
+            post_includes_text=post_includes_text,
+            post_excludes_text=post_excludes_text,
+            language=language,
+            topic_ids=topic_ids,
+            note_status=note_status,
+            note_created_at_from=note_created_at_from,
+            note_created_at_to=note_created_at_to,
+            x_user_names=x_user_names,
+            x_user_followers_count_from=x_user_followers_count_from,
+            x_user_follow_count_from=x_user_follow_count_from,
+            post_like_count_from=post_like_count_from,
+            post_repost_count_from=post_repost_count_from,
+            post_impression_count_from=post_impression_count_from,
+            post_includes_media=post_includes_media,
+        )
+
+        return SearchCountResponse(total=total)
+
     @router.get("/search", description=V1DataSearchDocs.description, response_model=SearchResponse)
     def search(
         request: Request,
@@ -503,6 +554,11 @@ def gen_router(storage: Storage) -> APIRouter:
         sort_order: SortOrder = Query(default=SortOrder.DESC, **V1DataSearchDocs.params["sort_order"]),
         offset: int = Query(default=0, ge=0, **V1DataSearchDocs.params["offset"]),
         limit: int = Query(default=100, gt=0, le=1000, **V1DataSearchDocs.params["limit"]),
+        include_total: bool = Query(
+            default=True,
+            description="総件数を含める。falseにするとCOUNTクエリをスキップしてレスポンスが高速化されます。"
+            "件数は /search/count で非同期に取得できます。",
+        ),
     ) -> SearchResponse:
         # Convert timestamp strings to TwitterTimestamp objects
         try:
@@ -513,9 +569,8 @@ def gen_router(storage: Storage) -> APIRouter:
         except OverflowError as e:
             raise HTTPException(status_code=422, detail=str(e))
 
-        # Get search results using the optimized storage method
-        results = []
-        for note, post in storage.search_notes_with_posts(
+        # SearchResultPageからデータとhas_nextを取得
+        page = storage.search_notes_with_posts(
             note_includes_text=note_includes_text,
             note_excludes_text=note_excludes_text,
             post_includes_text=post_includes_text,
@@ -536,7 +591,10 @@ def gen_router(storage: Storage) -> APIRouter:
             limit=limit,
             sort_field=sort_field,
             sort_order=sort_order,
-        ):
+        )
+
+        results = []
+        for note, post in page.items:
             results.append(
                 SearchedNote(
                     noteId=note.note_id,
@@ -558,41 +616,46 @@ def gen_router(storage: Storage) -> APIRouter:
                     post=post,
                 )
             )
-        # Get total count for pagination
-        total_count = storage.count_search_results(
-            note_includes_text=note_includes_text,
-            note_excludes_text=note_excludes_text,
-            post_includes_text=post_includes_text,
-            post_excludes_text=post_excludes_text,
-            language=language,
-            topic_ids=topic_ids,
-            note_status=note_status,
-            note_created_at_from=note_created_at_from,
-            note_created_at_to=note_created_at_to,
-            x_user_names=x_user_names,
-            x_user_followers_count_from=x_user_followers_count_from,
-            x_user_follow_count_from=x_user_follow_count_from,
-            post_like_count_from=post_like_count_from,
-            post_repost_count_from=post_repost_count_from,
-            post_impression_count_from=post_impression_count_from,
-            post_includes_media=post_includes_media,
-        )
 
-        # Generate pagination URLs
+        # include_total=True のときはCOUNTクエリで総件数を取得（後方互換性のため）
+        total_count = None
+        if include_total:
+            total_count = storage.count_search_results(
+                note_includes_text=note_includes_text,
+                note_excludes_text=note_excludes_text,
+                post_includes_text=post_includes_text,
+                post_excludes_text=post_excludes_text,
+                language=language,
+                topic_ids=topic_ids,
+                note_status=note_status,
+                note_created_at_from=note_created_at_from,
+                note_created_at_to=note_created_at_to,
+                x_user_names=x_user_names,
+                x_user_followers_count_from=x_user_followers_count_from,
+                x_user_follow_count_from=x_user_follow_count_from,
+                post_like_count_from=post_like_count_from,
+                post_repost_count_from=post_repost_count_from,
+                post_impression_count_from=post_impression_count_from,
+                post_includes_media=post_includes_media,
+            )
+
+        # ページネーションURL生成
         base_url = str(request.url).split("?")[0]
         raw_query = request.url.query
         query_params = parse_query_string(raw_query)
-        next_offset = offset + limit
-        prev_offset = max(offset - limit, 0)
 
         next_url = None
-        if next_offset < total_count:
+        # include_total時はCOUNTベースで判定（従来互換）、それ以外はlimit+1ベース
+        has_next = (offset + limit < total_count) if total_count is not None else page.has_next
+        if has_next:
+            next_offset = offset + limit
             query_params["offset"] = [str(next_offset)]
             query_params["limit"] = [str(limit)]
             next_url = f"{base_url}?{urlencode(query_params, doseq=True)}"
 
         prev_url = None
         if offset > 0:
+            prev_offset = max(offset - limit, 0)
             query_params["offset"] = [str(prev_offset)]
             query_params["limit"] = [str(limit)]
             prev_url = f"{base_url}?{urlencode(query_params, doseq=True)}"
