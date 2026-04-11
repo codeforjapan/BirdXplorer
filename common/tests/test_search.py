@@ -23,7 +23,7 @@ def test_basic_search(
 ) -> None:
     """Test basic search functionality without any filters"""
     storage = Storage(engine=engine_for_test)
-    results = list(storage.search_notes_with_posts(limit=2))
+    results = storage.search_notes_with_posts(limit=2).items
     assert len(results) == 2
     for note, post in results:
         assert note is not None
@@ -40,13 +40,13 @@ def test_search_by_note_text(
     storage = Storage(engine=engine_for_test)
 
     # Test searching notes with text that should be included
-    results = list(storage.search_notes_with_posts(note_includes_text="summary"))
+    results = storage.search_notes_with_posts(note_includes_text="summary").items
     assert len(results) > 0
     for note, _ in results:
         assert "summary" in note.summary.lower()
 
     # Test searching notes with text that should be excluded
-    results = list(storage.search_notes_with_posts(note_excludes_text="empty"))
+    results = storage.search_notes_with_posts(note_excludes_text="empty").items
     assert len(results) > 0
     for note, _ in results:
         assert "empty" not in note.summary.lower()
@@ -63,13 +63,13 @@ def test_search_by_language(
     storage = Storage(engine=engine_for_test)
 
     # Test searching for English notes
-    results = list(storage.search_notes_with_posts(language=LanguageIdentifier("en")))
+    results = storage.search_notes_with_posts(language=LanguageIdentifier("en")).items
     assert len(results) > 0
     for note, _ in results:
         assert note.language == "en"
 
     # Test searching for Japanese notes
-    results = list(storage.search_notes_with_posts(language=LanguageIdentifier("ja")))
+    results = storage.search_notes_with_posts(language=LanguageIdentifier("ja")).items
     assert len(results) > 0
     for note, _ in results:
         assert note.language == "ja"
@@ -87,7 +87,7 @@ def test_search_by_topics(
     storage = Storage(engine=engine_for_test)
     topic_ids = [TopicId(0)]  # Topic 0 is used in several notes in the sample data
 
-    results = list(storage.search_notes_with_posts(topic_ids=topic_ids))
+    results = storage.search_notes_with_posts(topic_ids=topic_ids).items
     assert len(results) > 0
     for note, _ in results:
         note_topic_ids = [topic.topic_id for topic in note.topics]
@@ -105,14 +105,14 @@ def test_search_by_post_text(
     storage = Storage(engine=engine_for_test)
 
     # Test searching posts with text that should be included
-    results = list(storage.search_notes_with_posts(post_includes_text="プロジェクト"))
+    results = storage.search_notes_with_posts(post_includes_text="プロジェクト").items
     assert len(results) > 0
     for _, post in results:
         assert post is not None
         assert "プロジェクト" in post.text
 
     # Test searching posts with text that should be excluded
-    results = list(storage.search_notes_with_posts(post_excludes_text="empty"))
+    results = storage.search_notes_with_posts(post_excludes_text="empty").items
     assert len(results) > 0
     for _, post in results:
         if post is not None:
@@ -129,9 +129,9 @@ def test_combined_search(
     """Test combining multiple search criteria"""
     storage = Storage(engine=engine_for_test)
 
-    results = list(
-        storage.search_notes_with_posts(note_includes_text="summary", language=LanguageIdentifier("en"), limit=2)
-    )
+    results = storage.search_notes_with_posts(
+        note_includes_text="summary", language=LanguageIdentifier("en"), limit=2
+    ).items
 
     assert len(results) <= 2
     for note, _ in results:
@@ -151,11 +151,11 @@ def test_pagination(
 
     # Get first page
     page_size = 2
-    first_page = list(storage.search_notes_with_posts(limit=page_size, offset=0))
+    first_page = storage.search_notes_with_posts(limit=page_size, offset=0).items
     assert len(first_page) <= page_size
 
     # Get second page
-    second_page = list(storage.search_notes_with_posts(limit=page_size, offset=page_size))
+    second_page = storage.search_notes_with_posts(limit=page_size, offset=page_size).items
     assert len(second_page) <= page_size
 
     # Ensure pages are different
@@ -184,7 +184,7 @@ def test_count_search_results(
     assert filtered_count <= total_count
 
     # Verify count matches actual results
-    results = list(storage.search_notes_with_posts(note_includes_text="summary", language=LanguageIdentifier("en")))
+    results = storage.search_notes_with_posts(note_includes_text="summary", language=LanguageIdentifier("en")).items
     assert len(results) == filtered_count
 
 
@@ -215,7 +215,7 @@ def test_search_notes_with_non_enum_language(
         sess.commit()
 
     storage = Storage(engine=engine_for_test)
-    results = list(storage.search_notes_with_posts(note_includes_text="Korean language note"))
+    results = storage.search_notes_with_posts(note_includes_text="Korean language note").items
     assert len(results) == 1
     note, _ = results[0]
     assert note.language == "other"
@@ -248,7 +248,7 @@ def test_search_notes_with_null_language(
         sess.commit()
 
     storage = Storage(engine=engine_for_test)
-    results = list(storage.search_notes_with_posts(note_includes_text="Null language note"))
+    results = storage.search_notes_with_posts(note_includes_text="Null language note").items
     assert len(results) == 1
     note, _ = results[0]
     assert note.language == "other"
@@ -280,7 +280,7 @@ def test_search_notes_with_invalid_post_id(
         sess.commit()
 
     storage = Storage(engine=engine_for_test)
-    results = list(storage.search_notes_with_posts(note_includes_text="Invalid post id note"))
+    results = storage.search_notes_with_posts(note_includes_text="Invalid post id note").items
     assert len(results) == 1
     note, _ = results[0]
     assert note.post_id == ""
