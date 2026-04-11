@@ -1,5 +1,5 @@
 import re
-from typing import Any, Generator, List, Optional, Tuple, Union
+from typing import Any, Generator, List, NamedTuple, Optional, Tuple, Union
 
 from psycopg2.extensions import AsIs, register_adapter
 from pydantic import AnyUrl, HttpUrl
@@ -100,7 +100,7 @@ class NoteTopicAssociation(Base):
 
     note_id: Mapped[NoteId] = mapped_column(ForeignKey("notes.note_id"), primary_key=True)
     topic_id: Mapped[TopicId] = mapped_column(ForeignKey("topics.topic_id"), primary_key=True)
-    topic: Mapped["TopicRecord"] = relationship()
+    topic: Mapped["TopicRecord"] = relationship(lazy="selectin")
 
 
 class NoteRecord(Base):
@@ -109,7 +109,7 @@ class NoteRecord(Base):
     note_id: Mapped[NoteId] = mapped_column(primary_key=True)
     note_author_participant_id: Mapped[Optional[ParticipantId]] = mapped_column(nullable=True)
     post_id: Mapped[Optional[PostId]] = mapped_column(nullable=True)
-    topics: Mapped[List[NoteTopicAssociation]] = relationship()
+    topics: Mapped[List[NoteTopicAssociation]] = relationship(lazy="selectin")
     language: Mapped[Optional[LanguageIdentifier]] = mapped_column(nullable=True)
     summary: Mapped[SummaryString] = mapped_column(nullable=False)
     current_status: Mapped[Optional[String]] = mapped_column(nullable=True)
@@ -152,7 +152,7 @@ class PostLinkAssociation(Base):
 
     post_id: Mapped[PostId] = mapped_column(ForeignKey("posts.post_id"), primary_key=True)
     link_id: Mapped[LinkId] = mapped_column(ForeignKey("links.link_id"), primary_key=True)
-    link: Mapped[LinkRecord] = relationship()
+    link: Mapped[LinkRecord] = relationship(lazy="selectin")
 
 
 class PostMediaAssociation(Base):
@@ -183,7 +183,7 @@ class PostRecord(Base):
 
     post_id: Mapped[PostId] = mapped_column(primary_key=True)
     user_id: Mapped[UserId] = mapped_column(ForeignKey("x_users.user_id"), nullable=False)
-    user: Mapped[XUserRecord] = relationship()
+    user: Mapped[XUserRecord] = relationship(lazy="selectin")
     text: Mapped[SummaryString] = mapped_column(nullable=False)
     media_details: Mapped[List[PostMediaAssociation]] = relationship()
     created_at: Mapped[TwitterTimestamp] = mapped_column(nullable=False)
@@ -191,7 +191,7 @@ class PostRecord(Base):
     like_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
     repost_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
     impression_count: Mapped[NonNegativeInt] = mapped_column(nullable=False)
-    links: Mapped[List[PostLinkAssociation]] = relationship()
+    links: Mapped[List[PostLinkAssociation]] = relationship(lazy="selectin")
 
 
 class RowNoteRecord(Base):
@@ -349,6 +349,13 @@ class RowUserRecord(Base):
     location: Mapped[String] = mapped_column(nullable=False)
     url: Mapped[String] = mapped_column(nullable=False)
     row_post: Mapped["RowPostRecord"] = relationship("RowPostRecord", back_populates="user")
+
+
+class SearchResultPage(NamedTuple):
+    """search_notes_with_posts の返り値。has_next はDBクエリ結果の行数から判定される。"""
+
+    items: List[Tuple[NoteModel, Optional[PostModel]]]
+    has_next: bool
 
 
 class Storage:
@@ -1652,7 +1659,7 @@ class Storage:
         limit: int = 100,
         sort_field: Union[SearchSortField, None] = None,
         sort_order: SortOrder = SortOrder.DESC,
-    ) -> Generator[Tuple[NoteModel, PostModel | None], None, None]:
+    ) -> SearchResultPage:
         has_post_filters = self._has_post_filters(
             post_includes_text,
             post_excludes_text,
@@ -1711,7 +1718,7 @@ class Storage:
                         note_created_at_to,
                     )
 
-                note_subq = id_query.order_by(order_expr).offset(offset).limit(limit).subquery()
+                note_subq = id_query.order_by(order_expr).offset(offset).limit(limit + 1).subquery()
 
                 # Phase 2: fetch full data for matched note_ids only
                 query = (
@@ -1748,11 +1755,15 @@ class Storage:
                     post_includes_media,
                 )
 
-                query = query.offset(offset).limit(limit)
+                query = query.offset(offset).limit(limit + 1)
 
             results = query.all()
 
-            for note_record, post_record in results:
+            # DB行数ベースで次ページ判定（バリデーションスキップの影響を受けない）
+            has_next = len(results) > limit
+
+            items: List[Tuple[NoteModel, Optional[PostModel]]] = []
+            for note_record, post_record in results[:limit]:
                 try:
                     note = NoteModel(
                         note_id=note_record.note_id,
@@ -1791,12 +1802,13 @@ class Storage:
                     post = (
                         self._post_record_to_model(post_record, with_media=post_includes_media) if post_record else None
                     )
-                    yield note, post
+                    items.append((note, post))
                 except Exception as e:
-                    # Skip invalid records and log warning
                     logger = get_logger()
                     logger.warning(f"Skipping invalid note/post record (note_id={note_record.note_id}): {str(e)}")
                     continue
+
+            return SearchResultPage(items=items, has_next=has_next)
 
     def count_search_results(
         self,
