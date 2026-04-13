@@ -64,10 +64,12 @@ def validate_timestamp_range(
          ...
         fastapi.exceptions.HTTPException: 400...
     """
+    import math
+
     if start_date > end_date:
         raise HTTPException(status_code=400, detail="start_date must be before or equal to end_date")
 
-    days_diff = (end_date - start_date) / (1000 * 60 * 60 * 24)
+    days_diff = math.floor((end_date - start_date) / (1000 * 60 * 60 * 24))
     if days_diff > max_days:
         raise HTTPException(status_code=400, detail=f"Date range cannot exceed {max_days} days")
 
