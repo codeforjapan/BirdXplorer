@@ -4,7 +4,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-FASTTEXT_MODEL_PATH = os.getenv("FASTTEXT_MODEL_PATH", "/app/lid.176.ftz")
+FASTTEXT_MODEL_PATH = os.getenv("FASTTEXT_MODEL_PATH", "/var/task/lid.176.ftz")
 FASTTEXT_THRESHOLD = float(os.getenv("FASTTEXT_THRESHOLD", "0.7"))
 
 _model = None
