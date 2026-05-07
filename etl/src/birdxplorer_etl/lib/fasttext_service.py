@@ -13,6 +13,18 @@ _model = None
 def _get_model():  # type: ignore[no-untyped-def]
     global _model
     if _model is None:
+        # numpy 2.x では np.array(obj, copy=False) の挙動が変わり fasttext が失敗するため patch する
+        import numpy as np
+
+        _orig = np.array
+
+        def _patched(obj, *args, copy=True, **kwargs):  # type: ignore[no-untyped-def]
+            if copy is False:
+                return np.asarray(obj, *args, **kwargs)
+            return _orig(obj, *args, copy=copy, **kwargs)
+
+        np.array = _patched  # type: ignore[assignment]
+
         import fasttext  # type: ignore[import-untyped]
 
         _model = fasttext.load_model(FASTTEXT_MODEL_PATH)
