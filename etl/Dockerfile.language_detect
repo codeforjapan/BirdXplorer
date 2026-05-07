@@ -13,6 +13,9 @@ COPY etl/. .
 RUN python -m pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -e .[prod]
 
+RUN curl -Lo ${LAMBDA_TASK_ROOT}/lid.176.ftz \
+    https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.ftz
+
 # Lambda関数のコードをコピー
 COPY etl/src/birdxplorer_etl/lib/lambda_handler/language_detect_lambda.py ./
 
