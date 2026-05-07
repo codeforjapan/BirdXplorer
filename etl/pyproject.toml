@@ -35,6 +35,7 @@ dependencies = [
     "boto3",
     "twscrape",
     "brotli",
+    "fasttext-wheel",
 ]
 
 [project.urls]

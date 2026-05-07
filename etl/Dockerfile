@@ -16,6 +16,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends libpq5 postgres
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+RUN curl -Lo /app/lid.176.ftz \
+    https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.ftz
+
 COPY . ./
 
 # Set the entry point to run the Prefect flow
