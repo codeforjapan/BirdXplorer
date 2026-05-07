@@ -268,6 +268,13 @@ class PostIdExtractor:
         return None
 
 
+class AuthenticationError(Exception):
+    """Raised when X API returns 401/403 — indicates cookie expiry or invalid credentials.
+    Must NOT be retried; manual cookie rotation is required."""
+
+    pass
+
+
 class XAPIConfig:
     """Configuration constants for X API"""
 
@@ -612,6 +619,13 @@ class XCommunityNotesClient:
                     data = response.json()
                     logger.info(f"Successfully fetched response{context_str}")
                     return data
+                elif response.status_code in (401, 403):
+                    logger.error(
+                        f"[COOKIE_EXPIRED] Authentication failed with status "
+                        f"{response.status_code}{context_str}. "
+                        f"Cookie may be expired — manual rotation required."
+                    )
+                    raise AuthenticationError(f"Authentication failed: HTTP {response.status_code}")
                 else:
                     # Non-200 status code
                     logger.warning(f"Request{context_str} failed with status {response.status_code}: {response.text}")
@@ -735,6 +749,8 @@ class XCommunityNotesClient:
             # Use the centralized retry logic with empty params (URL already contains query string)
             return self._make_request_with_retry(full_url, {}, "BirdwatchFetchGlobalTimeline")
 
+        except AuthenticationError:
+            raise  # propagate — do not swallow, do not retry
         except Exception as e:
             logger.error(f"Failed to fetch BirdwatchFetchGlobalTimeline: {str(e)}")
             return None
@@ -785,6 +801,8 @@ class XCommunityNotesClient:
             # Use the centralized retry logic with empty params
             return self._make_request_with_retry(full_url, {}, f"tweet {tweet_id}")
 
+        except AuthenticationError:
+            raise  # propagate — do not swallow, do not retry
         except Exception as e:
             logger.error(f"Error fetching community notes for tweet {tweet_id}: {str(e)}")
             return None
