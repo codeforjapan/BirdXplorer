@@ -1,6 +1,7 @@
 import json
 import logging
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
 from botocore.exceptions import ClientError
@@ -40,6 +41,61 @@ class SQSHandler:
         except Exception as e:
             logger.error(f"Unexpected error sending message: {e}")
             return None
+
+    def send_message_batch(
+        self,
+        queue_url: str,
+        messages: List[Dict[str, Any]],
+        max_retries: int = 3,
+    ) -> Tuple[int, int]:
+        """
+        SQS バッチ送信（最大10件/リクエスト）。部分失敗時は失敗分のみリトライ。
+        extract_ecs._send_sqs_batch と同等のリトライ戦略。
+
+        Args:
+            queue_url: SQSキューのURL
+            messages: 送信するメッセージのリスト
+            max_retries: チャンクごとのリトライ回数
+
+        Returns:
+            (success_count, failure_count)
+        """
+        success_count = 0
+        failure_count = 0
+
+        for chunk_start in range(0, len(messages), 10):
+            chunk = messages[chunk_start : chunk_start + 10]
+            # Id はバッチリクエスト内で一意であれば良い (0–9)
+            batch = [{"Id": str(i), "MessageBody": json.dumps(msg)} for i, msg in enumerate(chunk)]
+
+            for attempt in range(max_retries):
+                try:
+                    response = self.sqs_client.send_message_batch(QueueUrl=queue_url, Entries=batch)
+                    success_count += len(response.get("Successful", []))
+                    failed = response.get("Failed", [])
+
+                    if not failed:
+                        break
+
+                    if attempt < max_retries - 1:
+                        logger.warning(
+                            f"SQS batch: {len(failed)} failed " f"(attempt {attempt + 1}/{max_retries}), retrying"
+                        )
+                        failed_ids = {f["Id"] for f in failed}
+                        batch = [e for e in batch if e["Id"] in failed_ids]
+                        time.sleep((attempt + 1) * 0.5)
+                    else:
+                        logger.error(f"SQS batch: {len(failed)} messages failed after {max_retries} attempts")
+                        failure_count += len(failed)
+
+                except ClientError as e:
+                    if attempt < max_retries - 1:
+                        time.sleep((attempt + 1) * 1.0)
+                    else:
+                        logger.error(f"SQS batch ClientError after {max_retries} attempts: {e}")
+                        failure_count += len(batch)
+
+        return success_count, failure_count
 
     def receive_message(
         self, queue_url: str, max_messages: int = 1, wait_time_seconds: int = 0

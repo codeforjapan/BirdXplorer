@@ -498,6 +498,7 @@ class BaseModel(PydanticBaseModel):
         warnings: bool | Literal["none", "warn", "error"] = True,
         fallback: Callable[[Any], Any] | None = None,
         serialize_as_any: bool = False,
+        polymorphic_serialization: bool | None = None,
     ) -> str:
         return super(BaseModel, self).model_dump_json(
             indent=indent,
@@ -514,6 +515,7 @@ class BaseModel(PydanticBaseModel):
             warnings=warnings,
             fallback=fallback,
             serialize_as_any=serialize_as_any,
+            polymorphic_serialization=polymorphic_serialization,
         )
 
 
