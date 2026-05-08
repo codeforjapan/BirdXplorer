@@ -4,6 +4,7 @@ import os
 
 from birdxplorer_etl import settings
 from birdxplorer_etl.lib.ai_model.ai_model_interface import get_ai_service
+from birdxplorer_etl.lib.fasttext_service import detect_language_fasttext
 from birdxplorer_etl.lib.lambda_handler.common.retry_handler import (
     call_ai_api_with_retry,
 )
@@ -79,16 +80,19 @@ def lambda_handler(event, context):
                 logger.info(f"[SKIP] Language already known for note {note_id}: {existing_language}")
                 detected_language = existing_language
             else:
-                ai_service = get_ai_service()
-
-                # 言語判定を実行（リトライ付き）
-                logger.info(f"[PROCESSING] Calling AI service for language detection...")
-                detected_language = call_ai_api_with_retry(
-                    ai_service.detect_language,
-                    summary,
-                    max_retries=3,
-                    initial_delay=1.0,
-                )
+                fasttext_result = detect_language_fasttext(summary)
+                if fasttext_result is not None:
+                    logger.info(f"[FASTTEXT_HIT] note {note_id}: {fasttext_result} (skipped OpenAI)")
+                    detected_language = fasttext_result
+                else:
+                    ai_service = get_ai_service()
+                    logger.info("[PROCESSING] Calling AI service for language detection...")
+                    detected_language = call_ai_api_with_retry(
+                        ai_service.detect_language,
+                        summary,
+                        max_retries=3,
+                        initial_delay=1.0,
+                    )
 
             logger.info(f"[SUCCESS] Language detected for note {note_id}: {detected_language}")
 
@@ -103,7 +107,7 @@ def lambda_handler(event, context):
                     "data": {"language": detected_language},
                 }
 
-                logger.info(f"[SQS_SEND] Sending language update to db-write queue...")
+                logger.info("[SQS_SEND] Sending language update to db-write queue...")
                 message_id = sqs_handler.send_message(queue_url=db_write_queue_url, message_body=db_write_message)
 
                 if message_id:
@@ -121,7 +125,7 @@ def lambda_handler(event, context):
                     "processing_type": "note_transform",
                 }
 
-                logger.info(f"[SQS_SEND] Sending message to note-transform queue...")
+                logger.info("[SQS_SEND] Sending message to note-transform queue...")
                 message_id = sqs_handler.send_message(
                     queue_url=settings.NOTE_TRANSFORM_QUEUE_URL, message_body=note_transform_message
                 )
