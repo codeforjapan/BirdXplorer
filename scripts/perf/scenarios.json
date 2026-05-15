@@ -1,0 +1,165 @@
+[
+  {
+    "name": "data/notes - 7d",
+    "path": "/api/v1/data/notes",
+    "params": {
+      "createdAtFrom": "1735689600000",
+      "createdAtTo": "1736294400000",
+      "limit": "100"
+    }
+  },
+  {
+    "name": "data/notes - 30d",
+    "path": "/api/v1/data/notes",
+    "params": {
+      "createdAtFrom": "1733097600000",
+      "createdAtTo": "1735689600000",
+      "limit": "100"
+    }
+  },
+  {
+    "name": "data/notes - 90d",
+    "path": "/api/v1/data/notes",
+    "params": {
+      "createdAtFrom": "1727913600000",
+      "createdAtTo": "1735689600000",
+      "limit": "100"
+    }
+  },
+  {
+    "name": "data/notes - 30d limit=1000",
+    "path": "/api/v1/data/notes",
+    "params": {
+      "createdAtFrom": "1733097600000",
+      "createdAtTo": "1735689600000",
+      "limit": "1000"
+    }
+  },
+  {
+    "name": "data/posts - 7d",
+    "path": "/api/v1/data/posts",
+    "params": {
+      "createdAtStart": "1735689600000",
+      "createdAtEnd": "1736294400000",
+      "limit": "100"
+    }
+  },
+  {
+    "name": "data/posts - 30d",
+    "path": "/api/v1/data/posts",
+    "params": {
+      "createdAtStart": "1733097600000",
+      "createdAtEnd": "1735689600000",
+      "limit": "100"
+    }
+  },
+  {
+    "name": "data/posts - 90d",
+    "path": "/api/v1/data/posts",
+    "params": {
+      "createdAtStart": "1727913600000",
+      "createdAtEnd": "1735689600000",
+      "limit": "100"
+    }
+  },
+  {
+    "name": "data/search - keyword, no date",
+    "path": "/api/v1/data/search",
+    "params": {
+      "noteIncludesText": "選挙",
+      "limit": "100"
+    }
+  },
+  {
+    "name": "data/search - keyword + 30d",
+    "path": "/api/v1/data/search",
+    "params": {
+      "noteIncludesText": "選挙",
+      "createdAtFrom": "1733097600000",
+      "createdAtTo": "1735689600000",
+      "limit": "100"
+    }
+  },
+  {
+    "name": "data/search/count - keyword",
+    "path": "/api/v1/data/search/count",
+    "params": {
+      "noteIncludesText": "選挙"
+    }
+  },
+  {
+    "name": "graphs/daily-notes - 7d",
+    "path": "/api/v1/graphs/daily-notes",
+    "params": {
+      "startDate": "2025-01-01",
+      "endDate": "2025-01-07"
+    }
+  },
+  {
+    "name": "graphs/daily-notes - 30d (current limit)",
+    "path": "/api/v1/graphs/daily-notes",
+    "params": {
+      "startDate": "2025-01-01",
+      "endDate": "2025-01-30"
+    }
+  },
+  {
+    "name": "graphs/daily-notes - 60d (target)",
+    "path": "/api/v1/graphs/daily-notes",
+    "params": {
+      "startDate": "2025-01-01",
+      "endDate": "2025-03-01"
+    }
+  },
+  {
+    "name": "graphs/daily-notes - 90d (target)",
+    "path": "/api/v1/graphs/daily-notes",
+    "params": {
+      "startDate": "2025-01-01",
+      "endDate": "2025-03-31"
+    }
+  },
+  {
+    "name": "graphs/daily-posts - 30d",
+    "path": "/api/v1/graphs/daily-posts",
+    "params": {
+      "startDate": "2025-01-01",
+      "endDate": "2025-01-30"
+    }
+  },
+  {
+    "name": "graphs/notes-evaluation - 30d limit=200",
+    "path": "/api/v1/graphs/notes-evaluation",
+    "params": {
+      "startDate": "2025-01-01",
+      "endDate": "2025-01-30",
+      "limit": "200"
+    }
+  },
+  {
+    "name": "graphs/notes-evaluation - 30d limit=5000",
+    "path": "/api/v1/graphs/notes-evaluation",
+    "params": {
+      "startDate": "2025-01-01",
+      "endDate": "2025-01-30",
+      "limit": "5000"
+    }
+  },
+  {
+    "name": "graphs/post-influence - 30d",
+    "path": "/api/v1/graphs/post-influence",
+    "params": {
+      "startDate": "2025-01-01",
+      "endDate": "2025-01-30",
+      "limit": "200"
+    }
+  },
+  {
+    "name": "graphs/top-note-accounts - 30d",
+    "path": "/api/v1/graphs/top-note-accounts",
+    "params": {
+      "startDate": "2025-01-01",
+      "endDate": "2025-01-30"
+    }
+  }
+]
