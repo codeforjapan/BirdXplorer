@@ -1,0 +1,189 @@
+[
+  {
+    "name": "data/notes - 7d limit=1000",
+    "path": "/api/v1/data/notes",
+    "params": {
+      "createdAtFrom": "1764547200000",
+      "createdAtTo": "1765152000000",
+      "limit": "1000"
+    }
+  },
+  {
+    "name": "data/notes - 30d limit=1000",
+    "path": "/api/v1/data/notes",
+    "params": {
+      "createdAtFrom": "1764547200000",
+      "createdAtTo": "1767139200000",
+      "limit": "1000"
+    }
+  },
+  {
+    "name": "data/notes - 90d limit=1000",
+    "path": "/api/v1/data/notes",
+    "params": {
+      "createdAtFrom": "1764547200000",
+      "createdAtTo": "1772236800000",
+      "limit": "1000"
+    }
+  },
+  {
+    "name": "data/notes - 90d ~10k rows (limit=1000 x10pages)",
+    "path": "/api/v1/data/notes",
+    "params": {
+      "createdAtFrom": "1764547200000",
+      "createdAtTo": "1772236800000",
+      "limit": "1000"
+    },
+    "pages": 10
+  },
+  {
+    "name": "data/posts - 30d limit=1000",
+    "path": "/api/v1/data/posts",
+    "params": {
+      "createdAtStart": "1764547200000",
+      "createdAtEnd": "1767139200000",
+      "limit": "1000"
+    }
+  },
+  {
+    "name": "data/posts - 90d limit=1000",
+    "path": "/api/v1/data/posts",
+    "params": {
+      "createdAtStart": "1764547200000",
+      "createdAtEnd": "1772236800000",
+      "limit": "1000"
+    }
+  },
+  {
+    "name": "data/posts - 90d ~10k rows (limit=1000 x10pages)",
+    "path": "/api/v1/data/posts",
+    "params": {
+      "createdAtStart": "1764547200000",
+      "createdAtEnd": "1772236800000",
+      "limit": "1000"
+    },
+    "pages": 10
+  },
+  {
+    "name": "data/search - keyword + 90d limit=1000",
+    "path": "/api/v1/data/search",
+    "params": {
+      "noteIncludesText": "選挙",
+      "createdAtFrom": "1764547200000",
+      "createdAtTo": "1772236800000",
+      "limit": "1000"
+    }
+  },
+  {
+    "name": "data/search - keyword + 90d ~10k rows (limit=1000 x10pages)",
+    "path": "/api/v1/data/search",
+    "params": {
+      "noteIncludesText": "選挙",
+      "createdAtFrom": "1764547200000",
+      "createdAtTo": "1772236800000",
+      "limit": "1000"
+    },
+    "pages": 10
+  },
+  {
+    "name": "data/search/count - keyword + 90d",
+    "path": "/api/v1/data/search/count",
+    "params": {
+      "noteIncludesText": "選挙",
+      "createdAtFrom": "1764547200000",
+      "createdAtTo": "1772236800000"
+    }
+  },
+  {
+    "name": "graphs/daily-notes - 7d",
+    "path": "/api/v1/graphs/daily-notes",
+    "params": {
+      "startDate": "1764547200000",
+      "endDate": "1765152000000"
+    }
+  },
+  {
+    "name": "graphs/daily-notes - 30d",
+    "path": "/api/v1/graphs/daily-notes",
+    "params": {
+      "startDate": "1764547200000",
+      "endDate": "1767139200000"
+    }
+  },
+  {
+    "name": "graphs/daily-notes - 90d (new max)",
+    "path": "/api/v1/graphs/daily-notes",
+    "params": {
+      "startDate": "1764547200000",
+      "endDate": "1772236800000"
+    }
+  },
+  {
+    "name": "graphs/daily-posts - 30d",
+    "path": "/api/v1/graphs/daily-posts",
+    "params": {
+      "startDate": "1764547200000",
+      "endDate": "1767139200000"
+    }
+  },
+  {
+    "name": "graphs/daily-posts - 90d (new max)",
+    "path": "/api/v1/graphs/daily-posts",
+    "params": {
+      "startDate": "1764547200000",
+      "endDate": "1772236800000"
+    }
+  },
+  {
+    "name": "graphs/notes-evaluation - 30d limit=5000",
+    "path": "/api/v1/graphs/notes-evaluation",
+    "params": {
+      "startDate": "1764547200000",
+      "endDate": "1767139200000",
+      "limit": "5000"
+    }
+  },
+  {
+    "name": "graphs/notes-evaluation - 90d limit=5000",
+    "path": "/api/v1/graphs/notes-evaluation",
+    "params": {
+      "startDate": "1764547200000",
+      "endDate": "1772236800000",
+      "limit": "5000"
+    }
+  },
+  {
+    "name": "graphs/post-influence - 30d limit=5000",
+    "path": "/api/v1/graphs/post-influence",
+    "params": {
+      "startDate": "1764547200000",
+      "endDate": "1767139200000",
+      "limit": "5000"
+    }
+  },
+  {
+    "name": "graphs/post-influence - 90d limit=5000",
+    "path": "/api/v1/graphs/post-influence",
+    "params": {
+      "startDate": "1764547200000",
+      "endDate": "1772236800000",
+      "limit": "5000"
+    }
+  },
+  {
+    "name": "graphs/top-note-accounts - 30d",
+    "path": "/api/v1/graphs/top-note-accounts",
+    "params": {
+      "startDate": "1764547200000",
+      "endDate": "1767139200000"
+    }
+  },
+  {
+    "name": "graphs/top-note-accounts - 90d (new max)",
+    "path": "/api/v1/graphs/top-note-accounts",
+    "params": {
+      "startDate": "1764547200000",
+      "endDate": "1772236800000"
+    }
+  }
+]
