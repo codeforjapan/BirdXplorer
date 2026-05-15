@@ -91,48 +91,48 @@
     "name": "graphs/daily-notes - 7d",
     "path": "/api/v1/graphs/daily-notes",
     "params": {
-      "startDate": "2025-01-01",
-      "endDate": "2025-01-07"
+      "startDate": "1735689600000",
+      "endDate": "1736208000000"
     }
   },
   {
     "name": "graphs/daily-notes - 30d (current limit)",
     "path": "/api/v1/graphs/daily-notes",
     "params": {
-      "startDate": "2025-01-01",
-      "endDate": "2025-01-30"
+      "startDate": "1735689600000",
+      "endDate": "1738195200000"
     }
   },
   {
     "name": "graphs/daily-notes - 60d (target)",
     "path": "/api/v1/graphs/daily-notes",
     "params": {
-      "startDate": "2025-01-01",
-      "endDate": "2025-03-01"
+      "startDate": "1735689600000",
+      "endDate": "1740787200000"
     }
   },
   {
     "name": "graphs/daily-notes - 90d (target)",
     "path": "/api/v1/graphs/daily-notes",
     "params": {
-      "startDate": "2025-01-01",
-      "endDate": "2025-03-31"
+      "startDate": "1735689600000",
+      "endDate": "1743379200000"
     }
   },
   {
     "name": "graphs/daily-posts - 30d",
     "path": "/api/v1/graphs/daily-posts",
     "params": {
-      "startDate": "2025-01-01",
-      "endDate": "2025-01-30"
+      "startDate": "1735689600000",
+      "endDate": "1738195200000"
     }
   },
   {
     "name": "graphs/notes-evaluation - 30d limit=200",
     "path": "/api/v1/graphs/notes-evaluation",
     "params": {
-      "startDate": "2025-01-01",
-      "endDate": "2025-01-30",
+      "startDate": "1735689600000",
+      "endDate": "1738195200000",
       "limit": "200"
     }
   },
@@ -140,8 +140,8 @@
     "name": "graphs/notes-evaluation - 30d limit=5000",
     "path": "/api/v1/graphs/notes-evaluation",
     "params": {
-      "startDate": "2025-01-01",
-      "endDate": "2025-01-30",
+      "startDate": "1735689600000",
+      "endDate": "1738195200000",
       "limit": "5000"
     }
   },
@@ -149,8 +149,8 @@
     "name": "graphs/post-influence - 30d",
     "path": "/api/v1/graphs/post-influence",
     "params": {
-      "startDate": "2025-01-01",
-      "endDate": "2025-01-30",
+      "startDate": "1735689600000",
+      "endDate": "1738195200000",
       "limit": "200"
     }
   },
@@ -158,8 +158,8 @@
     "name": "graphs/top-note-accounts - 30d",
     "path": "/api/v1/graphs/top-note-accounts",
     "params": {
-      "startDate": "2025-01-01",
-      "endDate": "2025-01-30"
+      "startDate": "1735689600000",
+      "endDate": "1738195200000"
     }
   }
 ]
