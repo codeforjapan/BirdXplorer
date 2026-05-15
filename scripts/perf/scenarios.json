@@ -96,7 +96,7 @@
     }
   },
   {
-    "name": "graphs/daily-notes - 30d (current limit)",
+    "name": "graphs/daily-notes - 30d",
     "path": "/api/v1/graphs/daily-notes",
     "params": {
       "startDate": "1735689600000",
@@ -104,7 +104,7 @@
     }
   },
   {
-    "name": "graphs/daily-notes - 60d (target)",
+    "name": "graphs/daily-notes - 60d",
     "path": "/api/v1/graphs/daily-notes",
     "params": {
       "startDate": "1735689600000",
@@ -112,7 +112,7 @@
     }
   },
   {
-    "name": "graphs/daily-notes - 90d (target)",
+    "name": "graphs/daily-notes - 90d (new max)",
     "path": "/api/v1/graphs/daily-notes",
     "params": {
       "startDate": "1735689600000",
