@@ -96,7 +96,7 @@ def gen_router(storage: Storage) -> APIRouter:
         """Get daily community note creation trends.
 
         Returns aggregated daily counts of community notes grouped by publication status
-        for the specified date range (maximum 30 days).
+        for the specified date range (maximum 90 days).
 
         **Publication Status Categories:**
         - `published`: Notes with status CURRENTLY_RATED_HELPFUL
@@ -106,7 +106,7 @@ def gen_router(storage: Storage) -> APIRouter:
 
         **Date Range:**
         - Timestamps must be in milliseconds (Unix epoch, UTC)
-        - Maximum range: 30 days
+        - Maximum range: 90 days
         - start_date must be <= end_date
         - Timestamps must be >= 2006-07-15 (Twitter founding) and <= current time
 
@@ -125,7 +125,7 @@ def gen_router(storage: Storage) -> APIRouter:
         """
         try:
             # Validate timestamp range
-            validate_timestamp_range(start_date, end_date, max_days=30)
+            validate_timestamp_range(start_date, end_date, max_days=90)
 
             # Parse comma-separated filters
             language_list: Optional[List[str]] = [lang.strip() for lang in language.split(",")] if language else None
@@ -176,7 +176,7 @@ def gen_router(storage: Storage) -> APIRouter:
     ) -> GraphListResponse[DailyPostCountDataItem]:
         """Get daily post volume trends.
 
-        Returns aggregated daily counts of posts for the specified date range (maximum 30 days),
+        Returns aggregated daily counts of posts for the specified date range (maximum 90 days),
         optionally filtered by associated community note status.
 
         **Status Filter:**
@@ -188,7 +188,7 @@ def gen_router(storage: Storage) -> APIRouter:
 
         **Date Range:**
         - Timestamps must be in milliseconds (Unix epoch, UTC)
-        - Maximum range: 30 days
+        - Maximum range: 90 days
         - start_date must be <= end_date
         - Timestamps must be >= 2006-07-15 (Twitter founding) and <= current time
 
@@ -207,7 +207,7 @@ def gen_router(storage: Storage) -> APIRouter:
         """
         try:
             # Validate timestamp range
-            validate_timestamp_range(start_date, end_date, max_days=30)
+            validate_timestamp_range(start_date, end_date, max_days=90)
 
             # Parse comma-separated filters
             language_list = [lang.strip() for lang in language.split(",")] if language else None
@@ -370,7 +370,7 @@ def gen_router(storage: Storage) -> APIRouter:
         """Get individual note evaluation metrics.
 
         Returns top notes by impression count with helpfulness ratings,
-        ordered descending by impression count for moderation review (maximum 30 days range).
+        ordered descending by impression count for moderation review (maximum 90 days range).
 
         **Metrics:**
         - helpfulCount: Number of helpful ratings
@@ -388,7 +388,7 @@ def gen_router(storage: Storage) -> APIRouter:
 
         **Date Range:**
         - Timestamps must be in milliseconds (Unix epoch, UTC)
-        - Maximum range: 30 days
+        - Maximum range: 90 days
         - start_date must be <= end_date
         - Timestamps must be >= 2006-07-15 (Twitter founding) and <= current time
 
@@ -408,7 +408,7 @@ def gen_router(storage: Storage) -> APIRouter:
         """
         try:
             # Validate timestamp range
-            validate_timestamp_range(start_date, end_date, max_days=30)
+            validate_timestamp_range(start_date, end_date, max_days=90)
 
             # Validate limit
             if limit > 5000:
@@ -459,7 +459,7 @@ def gen_router(storage: Storage) -> APIRouter:
         """Get individual note evaluation metrics ordered by helpful count.
 
         Alternative sorting to notes-evaluation endpoint - orders by helpfulCount instead
-        of impressionCount for moderation review workflows (maximum 30 days range).
+        of impressionCount for moderation review workflows (maximum 90 days range).
 
         **Metrics:**
         - helpfulCount: Number of helpful ratings
@@ -477,7 +477,7 @@ def gen_router(storage: Storage) -> APIRouter:
 
         **Date Range:**
         - Timestamps must be in milliseconds (Unix epoch, UTC)
-        - Maximum range: 30 days
+        - Maximum range: 90 days
         - start_date must be <= end_date
         - Timestamps must be >= 2006-07-15 (Twitter founding) and <= current time
 
@@ -497,7 +497,7 @@ def gen_router(storage: Storage) -> APIRouter:
         """
         try:
             # Validate timestamp range
-            validate_timestamp_range(start_date, end_date, max_days=30)
+            validate_timestamp_range(start_date, end_date, max_days=90)
 
             # Validate limit
             if limit > 5000:
@@ -549,7 +549,7 @@ def gen_router(storage: Storage) -> APIRouter:
         """Get individual post influence metrics.
 
         Returns top posts by impression count with engagement metrics (reposts, likes),
-        ordered descending by impression count for analyzing viral content (maximum 30 days range).
+        ordered descending by impression count for analyzing viral content (maximum 90 days range).
 
         **Metrics:**
         - repostCount: Number of times post was reposted
@@ -567,7 +567,7 @@ def gen_router(storage: Storage) -> APIRouter:
 
         **Date Range:**
         - Timestamps must be in milliseconds (Unix epoch, UTC)
-        - Maximum range: 30 days
+        - Maximum range: 90 days
         - start_date must be <= end_date
         - Timestamps must be >= 2006-07-15 (Twitter founding) and <= current time
 
@@ -587,7 +587,7 @@ def gen_router(storage: Storage) -> APIRouter:
         """
         try:
             # Validate timestamp range
-            validate_timestamp_range(start_date, end_date, max_days=30)
+            validate_timestamp_range(start_date, end_date, max_days=90)
 
             # Validate limit
             if limit > 5000:
@@ -637,7 +637,7 @@ def gen_router(storage: Storage) -> APIRouter:
         """Get top accounts by note count with period-over-period comparison.
 
         Returns the top 10 accounts ranked by number of notes created in the specified
-        date range (maximum 30 days), together with the change from the equivalent
+        date range (maximum 90 days), together with the change from the equivalent
         previous period of the same length.
 
         **Previous Period Calculation:**
@@ -648,7 +648,7 @@ def gen_router(storage: Storage) -> APIRouter:
 
         **Date Range:**
         - Timestamps must be in milliseconds (Unix epoch, UTC)
-        - Maximum range: 30 days
+        - Maximum range: 90 days
         - start_date must be <= end_date
 
         Args:
@@ -665,7 +665,7 @@ def gen_router(storage: Storage) -> APIRouter:
             HTTPException: 400 if validation fails, 422 if timestamp format invalid
         """
         try:
-            validate_timestamp_range(start_date, end_date, max_days=30)
+            validate_timestamp_range(start_date, end_date, max_days=90)
 
             # Parse comma-separated filters
             language_list = [lang.strip() for lang in language.split(",")] if language else None
