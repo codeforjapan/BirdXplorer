@@ -45,41 +45,62 @@ def run_scenario(
 ) -> List[Dict[str, Any]]:
     method = scenario.get("method", "GET")
     path = scenario["path"]
-    params = scenario.get("params") or {}
+    base_params = scenario.get("params") or {}
+    pages = int(scenario.get("pages", 1))
+    try:
+        limit_for_paging = int(base_params.get("limit", 100))
+    except (TypeError, ValueError):
+        limit_for_paging = 100
+
     results: List[Dict[str, Any]] = []
     for run_id in range(1, iterations + 1):
-        start = time.perf_counter()
-        try:
-            response = client.request(method, path, params=params)
-            duration_ms = (time.perf_counter() - start) * 1000.0
-            results.append(
-                {
-                    "scenario": scenario["name"],
-                    "run_id": run_id,
-                    "method": method,
-                    "path": path,
-                    "status": response.status_code,
-                    "duration_ms": round(duration_ms, 3),
-                    "bytes": len(response.content),
-                    "server_ms": response.headers.get("x-response-time-ms", ""),
-                    "error": "",
-                }
-            )
-        except httpx.HTTPError as exc:
-            duration_ms = (time.perf_counter() - start) * 1000.0
-            results.append(
-                {
-                    "scenario": scenario["name"],
-                    "run_id": run_id,
-                    "method": method,
-                    "path": path,
-                    "status": 0,
-                    "duration_ms": round(duration_ms, 3),
-                    "bytes": 0,
-                    "server_ms": "",
-                    "error": str(exc),
-                }
-            )
+        cumulative_ms = 0.0
+        cumulative_bytes = 0
+        cumulative_server_ms = 0.0
+        observed_status: int = 200
+        errors: List[str] = []
+
+        for page_idx in range(max(1, pages)):
+            params = dict(base_params)
+            if pages > 1:
+                params["offset"] = str(page_idx * limit_for_paging)
+            start = time.perf_counter()
+            try:
+                response = client.request(method, path, params=params)
+                page_ms = (time.perf_counter() - start) * 1000.0
+                cumulative_ms += page_ms
+                cumulative_bytes += len(response.content)
+                srv = response.headers.get("x-response-time-ms", "")
+                if srv:
+                    try:
+                        cumulative_server_ms += float(srv)
+                    except ValueError:
+                        pass
+                if response.status_code != 200:
+                    observed_status = response.status_code
+                    errors.append(f"page{page_idx}: HTTP {response.status_code}")
+            except httpx.HTTPError as exc:
+                page_ms = (time.perf_counter() - start) * 1000.0
+                cumulative_ms += page_ms
+                observed_status = 0
+                errors.append(f"page{page_idx}: {exc}")
+
+        results.append(
+            {
+                "scenario": scenario["name"],
+                "run_id": run_id,
+                "method": method,
+                "path": path,
+                "pages": pages,
+                "status": observed_status,
+                "duration_ms": round(cumulative_ms, 3),
+                "server_ms": (
+                    f"{cumulative_server_ms:.2f}" if cumulative_server_ms > 0 else ""
+                ),
+                "bytes": cumulative_bytes,
+                "error": " | ".join(errors),
+            }
+        )
     return results
 
 
@@ -136,6 +157,7 @@ def write_csv(rows: List[Dict[str, Any]], output: Path) -> None:
         "run_id",
         "method",
         "path",
+        "pages",
         "status",
         "duration_ms",
         "server_ms",
