@@ -21,6 +21,7 @@ from sqlalchemy.types import CHAR, DECIMAL, JSON, Integer, String, Text, Uuid
 from .logger import get_logger
 from .models import (
     BinaryBool,
+    LanguageCode,
     LanguageIdentifier,
 )
 from .models import Link as LinkModel
@@ -82,7 +83,7 @@ class Base(DeclarativeBase):
         NoteId: String,
         ParticipantId: String,
         PostId: String,
-        LanguageIdentifier: String,
+        LanguageCode: String,
         TwitterTimestamp: DECIMAL,
         SummaryString: String,
         UserId: String,
@@ -110,7 +111,7 @@ class NoteRecord(Base):
     note_author_participant_id: Mapped[Optional[ParticipantId]] = mapped_column(nullable=True)
     post_id: Mapped[Optional[PostId]] = mapped_column(nullable=True)
     topics: Mapped[List[NoteTopicAssociation]] = relationship(lazy="selectin")
-    language: Mapped[Optional[LanguageIdentifier]] = mapped_column(nullable=True)
+    language: Mapped[Optional[LanguageCode]] = mapped_column(nullable=True)
     summary: Mapped[SummaryString] = mapped_column(nullable=False)
     current_status: Mapped[Optional[String]] = mapped_column(nullable=True)
     locked_status: Mapped[Optional[String]] = mapped_column(nullable=True)
@@ -221,7 +222,7 @@ class RowNoteRecord(Base):
     harmful: Mapped[Optional[NotesHarmful]] = mapped_column(nullable=True)
     validation_difficulty: Mapped[Optional[SummaryString]] = mapped_column(nullable=True)
     summary: Mapped[SummaryString] = mapped_column(nullable=False)
-    language: Mapped[Optional[LanguageIdentifier]] = mapped_column(nullable=True)
+    language: Mapped[Optional[LanguageCode]] = mapped_column(nullable=True)
     row_post_id: Mapped[Optional[PostId]] = mapped_column(ForeignKey("row_posts.post_id"), nullable=True)
     row_post: Mapped[Optional["RowPostRecord"]] = relationship("RowPostRecord", back_populates="row_notes")
 
@@ -1361,9 +1362,7 @@ class Storage:
                             for topic in note_record.topics
                         ],
                         language=(
-                            LanguageIdentifier.normalize(note_record.language)
-                            if note_record.language
-                            else LanguageIdentifier.OTHER
+                            LanguageCode(note_record.language) if note_record.language else LanguageCode("other")
                         ),
                         summary=note_record.summary,
                         current_status=note_record.current_status,
@@ -1778,9 +1777,7 @@ class Storage:
                             for topic in note_record.topics
                         ],
                         language=(
-                            LanguageIdentifier.normalize(note_record.language)
-                            if note_record.language
-                            else LanguageIdentifier.OTHER
+                            LanguageCode(note_record.language) if note_record.language else LanguageCode("other")
                         ),
                         summary=note_record.summary,
                         current_status=note_record.current_status,
