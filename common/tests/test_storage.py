@@ -229,6 +229,6 @@ def test_get_notes_by_language(
 ) -> None:
     storage = Storage(engine=engine_for_test)
     language = LanguageIdentifier("en")
-    expected = [note for note in note_samples if note.language == language]
+    expected = [note for note in note_samples if note.language == language.value]
     actual = list(storage.get_notes(language=language))
     assert expected == actual
