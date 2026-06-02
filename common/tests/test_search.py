@@ -1,5 +1,6 @@
 from typing import List
 
+import pytest
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import text
@@ -284,3 +285,54 @@ def test_search_notes_with_invalid_post_id(
     assert len(results) == 1
     note, _ = results[0]
     assert note.post_id == ""
+
+
+@pytest.mark.parametrize(
+    ["note_id_suffix", "stored_language", "expected_language"],
+    [
+        # Valid ISO 639-1 codes not in LanguageIdentifier enum → preserved as-is
+        ("10", "zh", "zh"),
+        ("11", "ar", "ar"),
+        ("12", "hi", "hi"),
+        ("13", "th", "th"),
+        # Invalid / hallucinated codes → normalized to "other"
+        ("20", "Japanese", "other"),
+        ("21", "nihongo", "other"),
+        ("22", "xyz123", "other"),
+        ("23", "english", "other"),
+    ],
+)
+def test_search_notes_language_normalization(
+    engine_for_test: Engine,
+    note_samples: List[Note],
+    post_samples: List[Post],
+    note_records_sample: List[NoteRecord],
+    x_user_records_sample: List[XUserRecord],
+    post_records_sample: List[PostRecord],
+    note_id_suffix: str,
+    stored_language: str,
+    expected_language: str,
+) -> None:
+    """Test that non-enum ISO 639-1 codes are preserved and invalid codes are normalized to 'other'"""
+    note_id = f"77777777777777777{note_id_suffix}"
+    with Session(engine_for_test) as sess:
+        sess.execute(
+            text(
+                "INSERT INTO notes (note_id, post_id, summary, language, created_at) "
+                "VALUES (:note_id, :post_id, :summary, :language, :created_at)"
+            ),
+            {
+                "note_id": note_id,
+                "post_id": "2234567890123456781",
+                "summary": f"lang-norm-test-{note_id_suffix} note",
+                "language": stored_language,
+                "created_at": 1152921600000,
+            },
+        )
+        sess.commit()
+
+    storage = Storage(engine=engine_for_test)
+    results = storage.search_notes_with_posts(note_includes_text=f"lang-norm-test-{note_id_suffix}").items
+    assert len(results) == 1
+    note, _ = results[0]
+    assert note.language == expected_language
