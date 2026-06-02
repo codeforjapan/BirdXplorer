@@ -30,6 +30,7 @@ dependencies = [
     "pydantic_settings",
     "JSON-log-formatter",
     "ulid-py",
+    "pycountry",
 ]
 
 [project.urls]

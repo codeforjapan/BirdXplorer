@@ -397,7 +397,7 @@ def mock_storage(
                 continue
             if current_status is not None and note.current_status not in current_status:
                 continue
-            if language is not None and note.language != language:
+            if language is not None and note.language != language.value:
                 continue
             if search_text is not None and search_text not in note.summary:
                 continue

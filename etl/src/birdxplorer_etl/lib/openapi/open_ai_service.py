@@ -85,9 +85,9 @@ class OpenAIService(AIModelInterface):
 
     def detect_language(self, text: str) -> str:
         prompt = (
-            "Detect the language of the following text and return only the language code "
-            f"from this list: en, es, ja, pt, de, fr. Text: {text}. "
-            "Respond with only the language code, nothing else."
+            "Detect the language of the following text and return only the ISO 639-1 language code "
+            f"(e.g. 'en', 'ja', 'ko', 'zh'). Text: {text}. "
+            "Respond with only the two-letter language code, nothing else."
         )
 
         response = self.client.chat.completions.create(
@@ -101,17 +101,6 @@ class OpenAIService(AIModelInterface):
         )
 
         message_content = response.choices[0].message.content.strip()
-
-        if message_content in LanguageIdentifier._value2member_map_:
-            return LanguageIdentifier(message_content)
-
-        valid_code = next((code for code in LanguageIdentifier._value2member_map_ if code in message_content), None)
-
-        if valid_code:
-            return LanguageIdentifier(valid_code)
-
-        print(f"Invalid language code received: {message_content}")
-        # raise ValueError(f"Invalid language code received: {message_content}")
         return LanguageIdentifier.normalize(message_content)
 
     def detect_topic(self, note_id: int, note: str) -> Dict[str, List[int]]:

@@ -18,6 +18,7 @@ from typing import (
 )
 from uuid import UUID
 
+import pycountry
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import (
     ConfigDict,
@@ -646,6 +647,34 @@ class NoteData(BaseModel):
 class TopicId(NonNegativeInt): ...
 
 
+def _is_valid_iso639_1(code: str) -> bool:
+    return pycountry.languages.get(alpha_2=code) is not None
+
+
+class LanguageCode(BaseString):
+    """
+    ISO 639-1 language code or "other" for unknown/unsupported languages.
+    Invalid codes (e.g. LLM hallucinations like "Japanese") are normalized to "other".
+
+    >>> LanguageCode.from_str("ja")
+    LanguageCode('ja')
+    >>> LanguageCode.from_str("ko")
+    LanguageCode('ko')
+    >>> LanguageCode.from_str("other")
+    LanguageCode('other')
+    >>> LanguageCode.from_str("Japanese")
+    LanguageCode('other')
+    >>> LanguageCode.from_str("invalid")
+    LanguageCode('other')
+    """
+
+    @classmethod
+    def _proc_str(cls, s: str) -> str:
+        if s == "other" or _is_valid_iso639_1(s):
+            return s
+        return "other"
+
+
 class LanguageIdentifier(str, Enum):
     EN = "en"
     ES = "es"
@@ -670,11 +699,9 @@ class LanguageIdentifier(str, Enum):
 
     @classmethod
     def normalize(cls, value: str, default: str = "other") -> str:
-        try:
-            cls(value)
+        if value == "other" or _is_valid_iso639_1(value):
             return value
-        except ValueError:
-            return default
+        return default
 
 
 class TopicLabelString(NonEmptyTrimmedString): ...
@@ -732,7 +759,7 @@ class Note(BaseModel):
         Optional[ParticipantId], PydanticField(description="コミュニティノートの作成者の Participant ID")
     ]
     post_id: Annotated[PostId, PydanticField(description="コミュニティノートに対応する X の Post の ID")]
-    language: Annotated[LanguageIdentifier, PydanticField(description="コミュニティノートの言語")]
+    language: Annotated[LanguageCode, PydanticField(description="コミュニティノートの言語")]
     topics: Annotated[List[Topic], PydanticField(description="推定されたコミュニティノートのトピック")]
     summary: Annotated[SummaryString, PydanticField(description="コミュニティノートの本文")]
     current_status: Annotated[
