@@ -57,7 +57,7 @@ dev=[
     "psycopg2-binary",
     "factory_boy",
     "polyfactory",
-    "httpx",
+    "httpx2",
 ]
 prod=[
     "birdxplorer_common @ git+https://github.com/codeforjapan/BirdXplorer.git@main#subdirectory=common",
