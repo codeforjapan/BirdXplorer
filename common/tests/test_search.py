@@ -196,9 +196,9 @@ def test_search_notes_with_non_enum_language(
     x_user_records_sample: List[XUserRecord],
     post_records_sample: List[PostRecord],
 ) -> None:
-    """Test that notes with non-enum language codes (e.g. 'ko') are returned with language='other' instead of skipped"""
+    """Test that notes with valid ISO 639-1 codes (e.g. 'ko') are returned with their language code preserved"""
     with Session(engine_for_test) as sess:
-        # Insert a note with Korean language (not in LanguageIdentifier enum)
+        # Insert a note with Korean language (valid ISO 639-1 code)
         sess.execute(
             text(
                 "INSERT INTO notes (note_id, post_id, summary, language, created_at) "
@@ -218,7 +218,7 @@ def test_search_notes_with_non_enum_language(
     results = storage.search_notes_with_posts(note_includes_text="Korean language note").items
     assert len(results) == 1
     note, _ = results[0]
-    assert note.language == "other"
+    assert note.language == "ko"
 
 
 def test_search_notes_with_null_language(

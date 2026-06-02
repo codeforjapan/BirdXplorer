@@ -646,6 +646,221 @@ class NoteData(BaseModel):
 class TopicId(NonNegativeInt): ...
 
 
+_ISO_639_1_CODES: frozenset[str] = frozenset(
+    {
+        "aa",
+        "ab",
+        "ae",
+        "af",
+        "ak",
+        "am",
+        "an",
+        "ar",
+        "as",
+        "av",
+        "ay",
+        "az",
+        "ba",
+        "be",
+        "bg",
+        "bh",
+        "bi",
+        "bm",
+        "bn",
+        "bo",
+        "br",
+        "bs",
+        "ca",
+        "ce",
+        "ch",
+        "co",
+        "cr",
+        "cs",
+        "cu",
+        "cv",
+        "cy",
+        "da",
+        "de",
+        "dv",
+        "dz",
+        "ee",
+        "el",
+        "en",
+        "eo",
+        "es",
+        "et",
+        "eu",
+        "fa",
+        "ff",
+        "fi",
+        "fj",
+        "fo",
+        "fr",
+        "fy",
+        "ga",
+        "gd",
+        "gl",
+        "gn",
+        "gu",
+        "gv",
+        "ha",
+        "he",
+        "hi",
+        "ho",
+        "hr",
+        "ht",
+        "hu",
+        "hy",
+        "hz",
+        "ia",
+        "id",
+        "ie",
+        "ig",
+        "ii",
+        "ik",
+        "io",
+        "is",
+        "it",
+        "iu",
+        "ja",
+        "jv",
+        "ka",
+        "kg",
+        "ki",
+        "kj",
+        "kk",
+        "kl",
+        "km",
+        "kn",
+        "ko",
+        "kr",
+        "ks",
+        "ku",
+        "kv",
+        "kw",
+        "ky",
+        "la",
+        "lb",
+        "lg",
+        "li",
+        "ln",
+        "lo",
+        "lt",
+        "lu",
+        "lv",
+        "mg",
+        "mh",
+        "mi",
+        "mk",
+        "ml",
+        "mn",
+        "mr",
+        "ms",
+        "mt",
+        "my",
+        "na",
+        "nb",
+        "nd",
+        "ne",
+        "ng",
+        "nl",
+        "nn",
+        "no",
+        "nr",
+        "nv",
+        "ny",
+        "oc",
+        "oj",
+        "om",
+        "or",
+        "os",
+        "pa",
+        "pi",
+        "pl",
+        "ps",
+        "pt",
+        "qu",
+        "rm",
+        "rn",
+        "ro",
+        "ru",
+        "rw",
+        "sa",
+        "sc",
+        "sd",
+        "se",
+        "sg",
+        "si",
+        "sk",
+        "sl",
+        "sm",
+        "sn",
+        "so",
+        "sq",
+        "sr",
+        "ss",
+        "st",
+        "su",
+        "sv",
+        "sw",
+        "ta",
+        "te",
+        "tg",
+        "th",
+        "ti",
+        "tk",
+        "tl",
+        "tn",
+        "to",
+        "tr",
+        "ts",
+        "tt",
+        "tw",
+        "ty",
+        "ug",
+        "uk",
+        "ur",
+        "uz",
+        "va",
+        "ve",
+        "vi",
+        "vo",
+        "wa",
+        "wo",
+        "xh",
+        "yi",
+        "yo",
+        "za",
+        "zh",
+        "zu",
+    }
+)
+
+
+class LanguageCode(BaseString):
+    """
+    ISO 639-1 language code or "other" for unknown/unsupported languages.
+    Invalid codes (e.g. LLM hallucinations like "Japanese") are normalized to "other".
+
+    >>> LanguageCode.from_str("ja")
+    LanguageCode('ja')
+    >>> LanguageCode.from_str("ko")
+    LanguageCode('ko')
+    >>> LanguageCode.from_str("other")
+    LanguageCode('other')
+    >>> LanguageCode.from_str("Japanese")
+    LanguageCode('other')
+    >>> LanguageCode.from_str("invalid")
+    LanguageCode('other')
+    """
+
+    @classmethod
+    def _proc_str(cls, s: str) -> str:
+        if s in _ISO_639_1_CODES or s == "other":
+            return s
+        return "other"
+
+
 class LanguageIdentifier(str, Enum):
     EN = "en"
     ES = "es"
@@ -670,11 +885,9 @@ class LanguageIdentifier(str, Enum):
 
     @classmethod
     def normalize(cls, value: str, default: str = "other") -> str:
-        try:
-            cls(value)
+        if value in _ISO_639_1_CODES or value == "other":
             return value
-        except ValueError:
-            return default
+        return default
 
 
 class TopicLabelString(NonEmptyTrimmedString): ...
@@ -732,7 +945,7 @@ class Note(BaseModel):
         Optional[ParticipantId], PydanticField(description="コミュニティノートの作成者の Participant ID")
     ]
     post_id: Annotated[PostId, PydanticField(description="コミュニティノートに対応する X の Post の ID")]
-    language: Annotated[LanguageIdentifier, PydanticField(description="コミュニティノートの言語")]
+    language: Annotated[LanguageCode, PydanticField(description="コミュニティノートの言語")]
     topics: Annotated[List[Topic], PydanticField(description="推定されたコミュニティノートのトピック")]
     summary: Annotated[SummaryString, PydanticField(description="コミュニティノートの本文")]
     current_status: Annotated[
