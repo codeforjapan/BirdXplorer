@@ -12,6 +12,7 @@ from birdxplorer_common.logger import get_logger
 from birdxplorer_common.settings import GlobalSettings
 from birdxplorer_common.storage import gen_storage
 
+from .middlewares import TimingMiddleware
 from .routers.data import gen_router as gen_data_router
 from .routers.graphs import gen_router as gen_graphs_router
 from .routers.system import gen_router as gen_system_router
@@ -45,6 +46,7 @@ def gen_app(settings: GlobalSettings) -> FastAPI:
     app = FastAPI()
     app.add_middleware(CORSMiddleware, **settings.cors_settings.model_dump())
     app.add_middleware(QueryStringFlatteningMiddleware)
+    app.add_middleware(TimingMiddleware)
     app.include_router(gen_system_router(), prefix="/api/v1/system")
     app.include_router(gen_data_router(storage=storage), prefix="/api/v1/data")
     app.include_router(gen_graphs_router(storage=storage), prefix="/api/v1/graphs")

@@ -99,8 +99,8 @@ def test_daily_notes_get_invalid_timestamp_range(client: TestClient) -> None:
     response = client.get(f"/api/v1/graphs/daily-notes?start_date={end_ts}&end_date={start_ts}")
     assert response.status_code == 400
 
-    # Range exceeds 30 days (need 32 days since get_timestamp_range uses days-1)
-    start_ts, end_ts = get_timestamp_range(32)
+    # Range exceeds 90 days (need 92 days since get_timestamp_range uses days-1)
+    start_ts, end_ts = get_timestamp_range(92)
     response = client.get(f"/api/v1/graphs/daily-notes?start_date={start_ts}&end_date={end_ts}")
     assert response.status_code == 400
 
@@ -221,8 +221,8 @@ def test_daily_posts_range_validation(client: TestClient) -> None:
     response = client.get(f"/api/v1/graphs/daily-posts?start_date={end_ts}&end_date={start_ts}")
     assert response.status_code == 400
 
-    # Range exceeds 30 days (need 32 days since get_timestamp_range uses days-1)
-    start_ts, end_ts = get_timestamp_range(32)
+    # Range exceeds 90 days (need 92 days since get_timestamp_range uses days-1)
+    start_ts, end_ts = get_timestamp_range(92)
     response = client.get(f"/api/v1/graphs/daily-posts?start_date={start_ts}&end_date={end_ts}")
     assert response.status_code == 400
 
@@ -532,9 +532,9 @@ def test_top_note_accounts_with_status_filter(client: TestClient, note_samples: 
 
 
 def test_top_note_accounts_invalid_range(client: TestClient) -> None:
-    """Test GET /api/v1/graphs/top-note-accounts rejects range exceeding 30 days."""
-    # Need 32 days since get_timestamp_range uses days-1, giving 31-day range that exceeds max 30
-    start_ts, end_ts = get_timestamp_range(32)
+    """Test GET /api/v1/graphs/top-note-accounts rejects range exceeding 90 days."""
+    # Need 92 days since get_timestamp_range uses days-1, giving 91-day range that exceeds max 90
+    start_ts, end_ts = get_timestamp_range(92)
     response = client.get(f"/api/v1/graphs/top-note-accounts?start_date={start_ts}&end_date={end_ts}")
     assert response.status_code == 400
 
