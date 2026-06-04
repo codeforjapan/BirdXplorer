@@ -5,7 +5,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import text
 
-from birdxplorer_common.models import LanguageIdentifier, Note, Post, TopicId
+from birdxplorer_common.models import LanguageCode, Note, Post, TopicId
 from birdxplorer_common.storage import (
     NoteRecord,
     PostRecord,
@@ -64,13 +64,13 @@ def test_search_by_language(
     storage = Storage(engine=engine_for_test)
 
     # Test searching for English notes
-    results = storage.search_notes_with_posts(language=LanguageIdentifier("en")).items
+    results = storage.search_notes_with_posts(language=LanguageCode("en")).items
     assert len(results) > 0
     for note, _ in results:
         assert note.language == "en"
 
     # Test searching for Japanese notes
-    results = storage.search_notes_with_posts(language=LanguageIdentifier("ja")).items
+    results = storage.search_notes_with_posts(language=LanguageCode("ja")).items
     assert len(results) > 0
     for note, _ in results:
         assert note.language == "ja"
@@ -130,9 +130,7 @@ def test_combined_search(
     """Test combining multiple search criteria"""
     storage = Storage(engine=engine_for_test)
 
-    results = storage.search_notes_with_posts(
-        note_includes_text="summary", language=LanguageIdentifier("en"), limit=2
-    ).items
+    results = storage.search_notes_with_posts(note_includes_text="summary", language=LanguageCode("en"), limit=2).items
 
     assert len(results) <= 2
     for note, _ in results:
@@ -180,12 +178,12 @@ def test_count_search_results(
     assert total_count > 0
 
     # Get filtered count
-    filtered_count = storage.count_search_results(note_includes_text="summary", language=LanguageIdentifier("en"))
+    filtered_count = storage.count_search_results(note_includes_text="summary", language=LanguageCode("en"))
     assert filtered_count > 0
     assert filtered_count <= total_count
 
     # Verify count matches actual results
-    results = storage.search_notes_with_posts(note_includes_text="summary", language=LanguageIdentifier("en")).items
+    results = storage.search_notes_with_posts(note_includes_text="summary", language=LanguageCode("en")).items
     assert len(results) == filtered_count
 
 
