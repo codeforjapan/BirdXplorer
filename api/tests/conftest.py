@@ -15,7 +15,7 @@ from pytest import fixture
 
 from birdxplorer_common.exceptions import UserEnrollmentNotFoundError
 from birdxplorer_common.models import (
-    LanguageIdentifier,
+    LanguageCode,
     Link,
     LinkId,
     Media,
@@ -379,7 +379,7 @@ def mock_storage(
         topic_ids: Union[List[TopicId], None] = None,
         post_ids: Union[List[PostId], None] = None,
         current_status: Union[None, List[str]] = None,
-        language: Union[LanguageIdentifier, None] = None,
+        language: Union[LanguageCode, None] = None,
         search_text: Union[str, None] = None,
         offset: Union[int, None] = None,
         limit: Union[int, None] = None,
@@ -397,7 +397,7 @@ def mock_storage(
                 continue
             if current_status is not None and note.current_status not in current_status:
                 continue
-            if language is not None and note.language != language.value:
+            if language is not None and note.language != language:
                 continue
             if search_text is not None and search_text not in note.summary:
                 continue
@@ -412,7 +412,7 @@ def mock_storage(
         topic_ids: Union[List[TopicId], None] = None,
         post_ids: Union[List[PostId], None] = None,
         current_status: Union[None, List[str]] = None,
-        language: Union[LanguageIdentifier, None] = None,
+        language: Union[LanguageCode, None] = None,
         search_text: Union[str, None] = None,
     ) -> int:
         return len(

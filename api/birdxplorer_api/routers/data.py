@@ -18,7 +18,7 @@ from birdxplorer_api.openapi_doc import (
 )
 from birdxplorer_common.models import (
     BaseModel,
-    LanguageIdentifier,
+    LanguageCode,
     Note,
     NoteId,
     PaginationMeta,
@@ -184,7 +184,7 @@ class SearchedNote(BaseModel):
         Optional[ParticipantId], PydanticField(description="コミュニティノートの作成者のユーザーID")
     ]
     summary: Annotated[SummaryString, PydanticField(description="コミュニティノートの本文")]
-    language: Annotated[LanguageIdentifier, PydanticField(description="コミュニティノートの言語")]
+    language: Annotated[LanguageCode, PydanticField(description="コミュニティノートの言語")]
     topics: Annotated[List[Topic], PydanticField(description="コミュニティノートに関連付けられたトピックのリスト")]
     postId: Annotated[PostId, PydanticField(description="関連するPostのID")]
     current_status: Annotated[
@@ -360,7 +360,7 @@ def gen_router(storage: Storage) -> APIRouter:
         topic_ids: Union[List[TopicId], None] = Query(default=None, **V1DataNotesDocs.params["topic_ids"]),
         post_ids: Union[List[PostId], None] = Query(default=None, **V1DataNotesDocs.params["post_ids"]),
         current_status: Union[None, List[str]] = Query(default=None, **V1DataNotesDocs.params["current_status"]),
-        language: Union[LanguageIdentifier, None] = Query(default=None, **V1DataNotesDocs.params["language"]),
+        language: Union[LanguageCode, None] = Query(default=None, **V1DataNotesDocs.params["language"]),
         search_text: Union[None, str] = Query(default=None, **V1DataNotesDocs.params["search_text"]),
     ) -> NoteListResponse:
         try:
@@ -477,7 +477,7 @@ def gen_router(storage: Storage) -> APIRouter:
         note_excludes_text: Union[None, str] = Query(default=None),
         post_includes_text: Union[None, str] = Query(default=None),
         post_excludes_text: Union[None, str] = Query(default=None),
-        language: Union[LanguageIdentifier, None] = Query(default=None),
+        language: Union[LanguageCode, None] = Query(default=None),
         topic_ids: Union[List[TopicId], None] = Query(default=None),
         note_status: Union[None, List[str]] = Query(default=None),
         note_created_at_from: Union[None, TwitterTimestamp, str] = Query(default=None),
@@ -526,7 +526,7 @@ def gen_router(storage: Storage) -> APIRouter:
         note_excludes_text: Union[None, str] = Query(default=None, **V1DataSearchDocs.params["note_excludes_text"]),
         post_includes_text: Union[None, str] = Query(default=None, **V1DataSearchDocs.params["post_includes_text"]),
         post_excludes_text: Union[None, str] = Query(default=None, **V1DataSearchDocs.params["post_excludes_text"]),
-        language: Union[LanguageIdentifier, None] = Query(default=None, **V1DataSearchDocs.params["language"]),
+        language: Union[LanguageCode, None] = Query(default=None, **V1DataSearchDocs.params["language"]),
         topic_ids: Union[List[TopicId], None] = Query(default=None, **V1DataSearchDocs.params["topic_ids"]),
         note_status: Union[None, List[str]] = Query(default=None, **V1DataSearchDocs.params["note_status"]),
         note_created_at_from: Union[None, TwitterTimestamp, str] = Query(
