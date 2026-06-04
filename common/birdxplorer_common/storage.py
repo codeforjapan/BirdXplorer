@@ -358,6 +358,14 @@ class SearchResultPage(NamedTuple):
     has_next: bool
 
 
+class CsvExportRow(NamedTuple):
+    """search_notes_with_posts_for_csv の 1 行。status は locked_status > current_status の優先順位で解決済み。"""
+
+    note: "NoteRecord"
+    post: "PostRecord"
+    status: str
+
+
 class Storage:
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
@@ -1853,6 +1861,49 @@ class Storage:
             )
 
             return query.scalar() or 0
+
+    def search_notes_with_posts_for_csv(
+        self,
+        keywords: List[str],
+        note_created_at_from: TwitterTimestamp,
+        note_created_at_to: TwitterTimestamp,
+        limit: int = 5000,
+    ) -> List[CsvExportRow]:
+        """CSV エクスポート用にノート + ポストをまとめて取得する。
+
+        - ノート本文 (`NoteRecord.summary`) に対し、`keywords` の OR LIKE 検索
+        - `[note_created_at_from, note_created_at_to]` の範囲（両端含む）で `created_at` フィルタ
+        - `NoteRecord.post_id = PostRecord.post_id` の INNER JOIN（孤立ノートは除外）
+        - `RowNoteStatusRecord` を LEFT JOIN し、`locked_status > current_status` の優先順位で
+          ステータス文字列を解決する（解決できなければ空文字）
+        - `NoteRecord.created_at ASC, NoteRecord.note_id ASC` の安定ソート
+        - 最大 `limit` 件を返す（既定 5000）
+        """
+        if not keywords:
+            return []
+
+        with Session(self.engine) as sess:
+            query = (
+                sess.query(NoteRecord, PostRecord, RowNoteStatusRecord)
+                .join(PostRecord, NoteRecord.post_id == PostRecord.post_id)
+                .outerjoin(
+                    RowNoteStatusRecord,
+                    RowNoteStatusRecord.note_id == NoteRecord.note_id,
+                )
+                .filter(or_(*[NoteRecord.summary.like(f"%{kw}%") for kw in keywords]))
+                .filter(NoteRecord.created_at >= note_created_at_from)
+                .filter(NoteRecord.created_at <= note_created_at_to)
+                .order_by(NoteRecord.created_at.asc(), NoteRecord.note_id.asc())
+                .limit(limit)
+            )
+            rows: List[CsvExportRow] = []
+            for note, post, row_status in query.all():
+                if row_status is not None:
+                    status = row_status.locked_status or row_status.current_status or ""
+                else:
+                    status = ""
+                rows.append(CsvExportRow(note=note, post=post, status=status))
+            return rows
 
     def upsert_note(
         self,
