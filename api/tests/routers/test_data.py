@@ -248,3 +248,22 @@ def test_notes_get_has_topic_id_filter(client: TestClient, note_samples: List[No
         "data": [json.loads(correct_notes[i].model_dump_json()) for i in range(correct_notes.__len__())],
         "meta": {"next": None, "prev": None, "total": len(correct_notes)},
     }
+
+
+def test_notes_get_has_language_filter(client: TestClient, note_samples: List[Note]) -> None:
+    correct_notes = [note for note in note_samples if note.language == "en"]
+    response = client.get("/api/v1/data/notes/?language=en")
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json == {
+        "data": [json.loads(note.model_dump_json()) for note in correct_notes],
+        "meta": {"next": None, "prev": None, "total": len(correct_notes)},
+    }
+
+
+def test_notes_get_accepts_non_enum_language(client: TestClient, note_samples: List[Note]) -> None:
+    # "zh" is a valid ISO 639-1 code but is not a member of the LanguageIdentifier enum.
+    # The endpoint must accept it (200) instead of rejecting it (422).
+    response = client.get("/api/v1/data/notes/?language=zh")
+    assert response.status_code == 200
+    assert response.json()["meta"]["total"] == 0
