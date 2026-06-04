@@ -5,7 +5,7 @@ from pydantic import HttpUrl
 from sqlalchemy.engine import Engine
 
 from birdxplorer_common.models import (
-    LanguageIdentifier,
+    LanguageCode,
     Note,
     NoteId,
     Post,
@@ -228,7 +228,7 @@ def test_get_notes_by_language(
     note_records_sample: List[NoteRecord],
 ) -> None:
     storage = Storage(engine=engine_for_test)
-    language = LanguageIdentifier("en")
-    expected = [note for note in note_samples if note.language == language.value]
+    language = LanguageCode("en")
+    expected = [note for note in note_samples if note.language == language]
     actual = list(storage.get_notes(language=language))
     assert expected == actual
