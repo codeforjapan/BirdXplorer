@@ -9,9 +9,42 @@ from pathlib import Path
 import pytest
 
 from birdxplorer_etl.lib.x.community_notes_client import (
+    CommunityNote,
     XCommunityNotesClient,
     get_community_notes_client,
 )
+
+
+class TestCommunityNoteFromResponseData:
+    """Unit tests for CommunityNote.from_response_data field name handling"""
+
+    BASE_NOTE_DATA = {
+        "rest_id": "1234567890",
+        "data_v1": {"summary": {"text": "test summary"}},
+    }
+
+    def test_created_at_field(self) -> None:
+        note_data = {**self.BASE_NOTE_DATA, "created_at": 1700000000000}
+        note = CommunityNote.from_response_data(note_data)
+        assert note is not None
+        assert note.created_at == 1700000000000
+
+    def test_created_at_millis_fallback(self) -> None:
+        note_data = {**self.BASE_NOTE_DATA, "created_at_millis": 1700000000000}
+        note = CommunityNote.from_response_data(note_data)
+        assert note is not None
+        assert note.created_at == 1700000000000
+
+    def test_created_at_takes_priority_over_created_at_millis(self) -> None:
+        note_data = {**self.BASE_NOTE_DATA, "created_at": 1700000000000, "created_at_millis": 9999999999999}
+        note = CommunityNote.from_response_data(note_data)
+        assert note is not None
+        assert note.created_at == 1700000000000
+
+    def test_created_at_none_when_both_missing(self) -> None:
+        note = CommunityNote.from_response_data(self.BASE_NOTE_DATA)
+        assert note is not None
+        assert note.created_at is None
 
 
 def load_env_file():

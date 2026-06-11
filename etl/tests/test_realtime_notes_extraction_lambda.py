@@ -8,6 +8,7 @@ import pytest
 
 from birdxplorer_etl.lib.lambda_handler.realtime_notes_extraction_lambda import (
     _authenticate_phase,
+    _derive_created_at_millis,
     _enqueue_phase,
     _fetch_notes_phase,
     lambda_handler,
@@ -18,8 +19,25 @@ from birdxplorer_etl.lib.x.community_notes_client import (
 )
 
 
-def _make_note(note_id: str = "note_001", post_id: str = "post_001") -> CommunityNote:
-    return CommunityNote(note_id=note_id, summary="test summary", post_id=post_id, created_at=1700000000000)
+def _make_note(note_id: str = "note_001", post_id: str = "post_001", created_at: int | None = 1700000000000) -> CommunityNote:
+    return CommunityNote(note_id=note_id, summary="test summary", post_id=post_id, created_at=created_at)
+
+
+class TestDeriveCreatedAtMillis:
+    def test_twitter_epoch_for_zero_id(self) -> None:
+        # Snowflake ID 0 encodes timestamp 0ms past the Twitter epoch
+        assert _derive_created_at_millis("0") == 1288834974657
+
+    def test_one_increment_above_epoch(self) -> None:
+        # Snowflake ID (1 << 22) encodes exactly 1ms past the Twitter epoch
+        assert _derive_created_at_millis(str(1 << 22)) == 1288834974658
+
+    def test_realistic_note_id_produces_reasonable_timestamp(self) -> None:
+        # A plausible 2023 note ID should produce a timestamp in 2023
+        note_id = "1700000000000000000"
+        result = _derive_created_at_millis(note_id)
+        assert result > 1_600_000_000_000  # After 2020
+        assert result < 2_000_000_000_000  # Before 2033
 
 
 class TestAuthenticatePhase:
@@ -120,6 +138,36 @@ class TestEnqueuePhase:
 
         with pytest.raises(Exception, match="DB_WRITE_QUEUE_URL not configured"):
             _enqueue_phase(handler, [_make_note()])
+
+    @patch("birdxplorer_etl.lib.lambda_handler.realtime_notes_extraction_lambda.settings")
+    def test_snowflake_fallback_when_created_at_is_none(self, mock_settings):
+        """created_at が None の場合は Snowflake ID から created_at_millis を導出する"""
+        mock_settings.DB_WRITE_QUEUE_URL = "https://sqs/db-write"
+        mock_settings.LANG_DETECT_QUEUE_URL = None
+        handler = MagicMock()
+        handler.send_message_batch.return_value = (1, 0)
+
+        note = _make_note(note_id="4194304", created_at=None)  # 1 << 22 → epoch + 1ms
+        _enqueue_phase(handler, [note])
+
+        db_call = handler.send_message_batch.call_args_list[0]
+        db_messages = db_call[0][1]
+        assert db_messages[0]["data"]["created_at_millis"] == 1288834974658  # Twitter epoch + 1ms
+
+    @patch("birdxplorer_etl.lib.lambda_handler.realtime_notes_extraction_lambda.settings")
+    def test_uses_created_at_when_present_not_snowflake(self, mock_settings):
+        """created_at がある場合は Snowflake フォールバックを使わない"""
+        mock_settings.DB_WRITE_QUEUE_URL = "https://sqs/db-write"
+        mock_settings.LANG_DETECT_QUEUE_URL = None
+        handler = MagicMock()
+        handler.send_message_batch.return_value = (1, 0)
+
+        note = _make_note(note_id="4194304", created_at=1700000000000)
+        _enqueue_phase(handler, [note])
+
+        db_call = handler.send_message_batch.call_args_list[0]
+        db_messages = db_call[0][1]
+        assert db_messages[0]["data"]["created_at_millis"] == 1700000000000
 
 
 class TestLambdaHandler:
