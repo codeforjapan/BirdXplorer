@@ -65,8 +65,8 @@ class CommunityNote:
         if "text" not in summary_data:
             return None
 
-        # Extract created_at from note data
-        created_at = note_data.get("created_at")
+        # X API has returned both "created_at" and "created_at_millis" depending on the version
+        created_at = note_data.get("created_at") or note_data.get("created_at_millis")
 
         return cls(
             note_id=note_data["rest_id"],
