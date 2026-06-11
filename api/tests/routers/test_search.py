@@ -434,3 +434,63 @@ def test_search_include_total_false(client: TestClient, mock_storage: MagicMock)
     data = response.json()
     assert data["meta"].get("total") is None
     mock_storage.count_search_results.assert_not_called()
+
+
+def test_search_count_accepts_non_enum_language(client: TestClient, mock_storage: MagicMock) -> None:
+    """LanguageIdentifier enum に無いが有効な ISO 639-1 コード(zh)でも絞り込める。"""
+    mock_storage.count_search_results.return_value = 7
+
+    response = client.get("/api/v1/data/search/count?language=zh")
+    assert response.status_code == 200
+    assert response.json()["total"] == 7
+
+    call_kwargs = mock_storage.count_search_results.call_args
+    assert call_kwargs.kwargs["language"] == "zh"
+
+
+def test_search_returns_non_enum_language(client: TestClient, mock_storage: MagicMock) -> None:
+    """検索結果に enum 外の言語コード(zh)が含まれていてもシリアライズできる。"""
+    timestamp = TwitterTimestamp.from_int(int(datetime(2023, 1, 1, tzinfo=timezone.utc).timestamp() * 1000))
+    note = Note(
+        note_id="1234567890123456789",
+        note_author_participant_id="".join(random.choices("0123456789ABCDEF", k=64)),
+        post_id="2234567890123456789",
+        language="zh",
+        topics=[],
+        summary="Test summary",
+        current_status="NEEDS_MORE_RATINGS",
+        created_at=timestamp,
+        has_been_helpfuled=False,
+        helpful_count=0,
+        not_helpful_count=0,
+        somewhat_helpful_count=0,
+        current_status_history=[],
+    )
+    post = Post(
+        post_id="2234567890123456789",
+        x_user_id="9876543210123456789",
+        x_user=XUser(
+            user_id="9876543210123456789",
+            name="test_user",
+            profile_image="http://example.com/image.jpg",
+            followers_count=100,
+            following_count=50,
+        ),
+        text="Test post",
+        media_details=[],
+        created_at=timestamp,
+        aggregated_at=timestamp,
+        like_count=10,
+        repost_count=5,
+        impression_count=100,
+        links=[],
+        link="http://x.com/test_user/status/2234567890123456789",
+    )
+
+    mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[(note, post)], has_next=False)
+    mock_storage.count_search_results.return_value = 1
+
+    response = client.get("/api/v1/data/search?language=zh")
+    assert response.status_code == 200
+    result = response.json()["data"][0]
+    assert result["language"] == "zh"

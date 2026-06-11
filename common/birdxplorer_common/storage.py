@@ -22,7 +22,6 @@ from .logger import get_logger
 from .models import (
     BinaryBool,
     LanguageCode,
-    LanguageIdentifier,
 )
 from .models import Link as LinkModel
 from .models import (
@@ -1309,7 +1308,7 @@ class Storage:
         topic_ids: Union[List[TopicId], None] = None,
         post_ids: Union[List[PostId], None] = None,
         current_status: Union[None, List[str]] = None,
-        language: Union[LanguageIdentifier, None] = None,
+        language: Union[LanguageCode, None] = None,
         search_text: Union[str, None] = None,
         offset: Union[int, None] = None,
         limit: int = 100,
@@ -1394,7 +1393,7 @@ class Storage:
         topic_ids: Union[List[TopicId], None] = None,
         post_ids: Union[List[PostId], None] = None,
         current_status: Union[None, List[str]] = None,
-        language: Union[LanguageIdentifier, None] = None,
+        language: Union[LanguageCode, None] = None,
         search_text: Union[str, None] = None,
     ) -> int:
         with Session(self.engine) as sess:
@@ -1513,7 +1512,7 @@ class Storage:
         note_excludes_text: Union[str, None] = None,
         post_includes_text: Union[str, None] = None,
         post_excludes_text: Union[str, None] = None,
-        language: Union[LanguageIdentifier, None] = None,
+        language: Union[LanguageCode, None] = None,
         topic_ids: Union[List[TopicId], None] = None,
         note_status: Union[List[str], None] = None,
         note_created_at_from: Union[TwitterTimestamp, None] = None,
@@ -1608,7 +1607,7 @@ class Storage:
         query: RowReturningQuery[Tuple[Any, ...]],
         note_includes_text: Union[str, None] = None,
         note_excludes_text: Union[str, None] = None,
-        language: Union[LanguageIdentifier, None] = None,
+        language: Union[LanguageCode, None] = None,
         topic_ids: Union[List[TopicId], None] = None,
         note_status: Union[List[str], None] = None,
         note_created_at_from: Union[TwitterTimestamp, None] = None,
@@ -1642,7 +1641,7 @@ class Storage:
         note_excludes_text: Union[str, None] = None,
         post_includes_text: Union[str, None] = None,
         post_excludes_text: Union[str, None] = None,
-        language: Union[LanguageIdentifier, None] = None,
+        language: Union[LanguageCode, None] = None,
         topic_ids: Union[List[TopicId], None] = None,
         note_status: Union[List[str], None] = None,
         note_created_at_from: Union[TwitterTimestamp, None] = None,
@@ -1813,7 +1812,7 @@ class Storage:
         note_excludes_text: Union[str, None] = None,
         post_includes_text: Union[str, None] = None,
         post_excludes_text: Union[str, None] = None,
-        language: Union[LanguageIdentifier, None] = None,
+        language: Union[LanguageCode, None] = None,
         topic_ids: Union[List[TopicId], None] = None,
         note_status: Union[List[str], None] = None,
         note_created_at_from: Union[TwitterTimestamp, None] = None,
@@ -1862,7 +1861,7 @@ class Storage:
         post_id: Optional[PostId] = None,
         created_at: Optional[TwitterTimestamp] = None,
         note_author_participant_id: Optional[ParticipantId] = None,
-        language: Optional[LanguageIdentifier] = None,
+        language: Optional[LanguageCode] = None,
         current_status: Optional[str] = None,
     ) -> None:
         """
