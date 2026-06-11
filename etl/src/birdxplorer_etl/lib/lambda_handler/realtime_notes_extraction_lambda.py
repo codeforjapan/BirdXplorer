@@ -26,6 +26,12 @@ from birdxplorer_etl.lib.x.community_notes_client import (
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+_TWITTER_EPOCH_MS = 1288834974657
+
+
+def _derive_created_at_millis(note_id: str) -> int:
+    return (int(note_id) >> 22) + _TWITTER_EPOCH_MS
+
 
 async def _authenticate_phase(
     x_username: str,
@@ -104,7 +110,7 @@ def _enqueue_phase(sqs_handler: SQSHandler, all_notes: List[CommunityNote]) -> D
                 "note_id": note.note_id,
                 "summary": note.summary,
                 "tweet_id": note.post_id,
-                "created_at_millis": note.created_at,
+                "created_at_millis": note.created_at or _derive_created_at_millis(note.note_id),
             },
         }
         for note in all_notes
