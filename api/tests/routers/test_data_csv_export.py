@@ -108,7 +108,7 @@ def test_header_row_lists_all_columns(client: TestClient, mock_storage: MagicMoc
     reader = csv.reader(io.StringIO(text))
     header = next(reader)
     assert header == [
-        "ポスト(投稿)日時",
+        "ポスト（投稿）日時",
         "ポスト",
         "コミュニティノート作成日時",
         "コミュニティノート",

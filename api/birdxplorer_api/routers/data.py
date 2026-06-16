@@ -45,7 +45,7 @@ _CSV_EXPORT_THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
 _CSV_EXPORT_MAX_KEYWORDS = 50
 _CSV_EXPORT_MAX_ROWS = 5000
 _CSV_EXPORT_COLUMNS = [
-    "ポスト(投稿)日時",
+    "ポスト（投稿）日時",
     "ポスト",
     "コミュニティノート作成日時",
     "コミュニティノート",
@@ -744,7 +744,12 @@ def gen_router(storage: Storage) -> APIRouter:
         note_created_at_from: int = Query(..., description="ノート作成期間の開始(ミリ秒)"),
         note_created_at_to: int = Query(..., description="ノート作成期間の終了(ミリ秒)"),
     ) -> Response:
-        parsed_keywords = [kw.strip() for kw in keywords if kw.strip()]
+        parsed_keywords = [
+            token.strip()
+            for keyword in keywords
+            for token in keyword.split(",")
+            if token.strip()
+        ]
         if not parsed_keywords:
             return _csv_export_error("invalid_keywords", "キーワードは1個以上指定してください")
         if len(parsed_keywords) > _CSV_EXPORT_MAX_KEYWORDS:
