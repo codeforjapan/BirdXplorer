@@ -44,7 +44,7 @@ def csv_x_user(engine_for_test: Engine) -> Generator[XUserRecord, None, None]:
         followers_count=10,
         following_count=20,
     )
-    with Session(engine_for_test) as sess:
+    with Session(engine_for_test, expire_on_commit=False) as sess:
         sess.add(user)
         sess.commit()
     yield user
@@ -94,7 +94,7 @@ def csv_posts(engine_for_test: Engine, csv_x_user: XUserRecord) -> Generator[Lis
             impression_count=400,
         ),
     ]
-    with Session(engine_for_test) as sess:
+    with Session(engine_for_test, expire_on_commit=False) as sess:
         sess.add_all(posts)
         sess.commit()
     yield posts
@@ -187,7 +187,7 @@ def csv_notes(engine_for_test: Engine, csv_posts: List[PostRecord]) -> Generator
             current_status_history="[]",
         ),
     ]
-    with Session(engine_for_test) as sess:
+    with Session(engine_for_test, expire_on_commit=False) as sess:
         sess.add_all(notes)
         sess.commit()
     yield notes
@@ -223,7 +223,7 @@ def csv_row_notes(engine_for_test: Engine, csv_notes: List[NoteRecord]) -> Gener
             summary="医療と政治の両方について",
         ),
     ]
-    with Session(engine_for_test) as sess:
+    with Session(engine_for_test, expire_on_commit=False) as sess:
         sess.add_all(rows)
         sess.commit()
     yield rows
@@ -263,7 +263,7 @@ def csv_row_note_status(
             locked_status=None,
         ),
     ]
-    with Session(engine_for_test) as sess:
+    with Session(engine_for_test, expire_on_commit=False) as sess:
         sess.add_all(statuses)
         sess.commit()
     yield statuses
