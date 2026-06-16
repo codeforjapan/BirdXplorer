@@ -77,19 +77,14 @@ CSV エクスポート API が使用するデータモデル、JOIN 戦略、ス
 | `note_created_at_from` (ms) | `NoteRecord.created_at` | `created_at >= :from_ms` |
 | `note_created_at_to` (ms) | `NoteRecord.created_at` | `created_at <= :to_ms` |
 
-`_apply_filters` への追加パラメータ:
+CSV 専用メソッド `search_notes_with_posts_for_csv` の中で直接適用（_apply_filters は変更しない）:
 ```python
-note_includes_texts: Union[List[str], None] = None  # OR 検索用
-```
-適用ロジック:
-```python
-if note_includes_texts:
-    query = query.filter(
-        or_(*[NoteRecord.summary.like(f"%{kw}%") for kw in note_includes_texts])
-    )
+query = query.filter(
+    or_(*[NoteRecord.summary.like(f"%{kw}%") for kw in keywords])
+)
 ```
 
-既存の単数 `note_includes_text` と併用された場合は AND として両方適用（破壊的変更を避ける）。
+> **Note**: 当初は `_apply_filters` 拡張を予定していたが、副作用ゼロのため独立クエリ方式を採用（[plan.md](./plan.md) D-1 参照）。
 
 ## Status resolution
 
