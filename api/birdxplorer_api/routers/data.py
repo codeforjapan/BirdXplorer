@@ -397,7 +397,7 @@ def ensure_twitter_timestamp(t: Union[str, TwitterTimestamp]) -> TwitterTimestam
         raise OverflowError("Timestamp out of range")
 
 
-def gen_router(storage: Storage) -> APIRouter:
+def gen_router(storage: Storage, export_api_key: Optional[str] = None) -> APIRouter:
     router = APIRouter()
 
     @router.get(
@@ -740,16 +740,17 @@ def gen_router(storage: Storage) -> APIRouter:
         ),
     )
     def export_csv(
+        request: Request,
         keywords: List[str] = Query(..., description="カンマ区切りのキーワード(OR検索)。最大50個、最低1個"),
         note_created_at_from: int = Query(..., description="ノート作成期間の開始(ミリ秒)"),
         note_created_at_to: int = Query(..., description="ノート作成期間の終了(ミリ秒)"),
     ) -> Response:
-        parsed_keywords = [
-            token.strip()
-            for keyword in keywords
-            for token in keyword.split(",")
-            if token.strip()
-        ]
+        if export_api_key and request.headers.get("X-API-Key") != export_api_key:
+            return JSONResponse(
+                status_code=401, content={"error": "unauthorized", "message": "Invalid or missing X-API-Key"}
+            )
+
+        parsed_keywords = [token.strip() for keyword in keywords for token in keyword.split(",") if token.strip()]
         if not parsed_keywords:
             return _csv_export_error("invalid_keywords", "キーワードは1個以上指定してください")
         if len(parsed_keywords) > _CSV_EXPORT_MAX_KEYWORDS:
