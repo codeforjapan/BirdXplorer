@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic import Field, PostgresDsn, computed_field
 from pydantic_settings import BaseSettings as PydanticBaseSettings
 from pydantic_settings import SettingsConfigDict
@@ -40,3 +42,4 @@ class GlobalSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env")
     logger_settings: LoggerSettings = Field(default_factory=LoggerSettings)
     storage_settings: PostgresStorageSettings
+    export_api_key: Optional[str] = None
