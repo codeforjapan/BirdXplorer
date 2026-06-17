@@ -657,6 +657,7 @@ def global_settings_factory(
 
         cors_settings = cors_settings_factory.build()
         storage_settings = postgres_storage_settings_factory.build()
+        export_api_key = None
 
     return GlobalSettingsFactory
 
