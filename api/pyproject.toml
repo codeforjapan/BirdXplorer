@@ -71,6 +71,7 @@ testpaths = ["tests", "birdxplorer_api"]
 filterwarnings = [
     "error",
     "ignore:The \\'app\\' shortcut is now deprecated. Use the explicit style \\'transport=WSGITransport\\(app=\\.\\.\\.\\)\\' instead\\.",
+    "ignore::starlette.exceptions.StarletteDeprecationWarning",
 ]
 
 [tool.black]

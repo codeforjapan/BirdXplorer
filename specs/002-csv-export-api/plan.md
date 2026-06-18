@@ -8,9 +8,10 @@
 `/api/v1/data/export/csv` を追加し、キーワード（カンマ区切り・OR検索・最大50個）と作成期間（ミリ秒、最大30日）を指定して、コミュニティノート + ポストの組を CSV (UTF-8 BOM 付き、StreamingResponse) でダウンロードできるようにする。
 
 **Technical Approach**:
-- 既存 `_apply_filters` ([common/birdxplorer_common/storage.py:1530](../../common/birdxplorer_common/storage.py#L1530)) に複数キーワード OR 検索パラメータを追加
-- ステータス解決のため `RowNoteStatusRecord` を LEFT JOIN し、`COALESCE(locked_status, current_status)` 相当の解決ロジックを Python 側で適用
-- `api/birdxplorer_api/routers/data.py` に新エンドポイントを追加し、`StreamingResponse` で 1 行ずつ CSV を yield
+- `common/birdxplorer_common/storage.py` に CSV 専用の `search_notes_with_posts_for_csv` メソッドと戻り値型 `CsvExportRow` を追加（独立クエリ。`_apply_filters` には触らない）
+- ステータス解決のため `RowNoteStatusRecord` を LEFT JOIN し、Python 側で `locked_status or current_status or ""` の優先順位で解決
+- `api/birdxplorer_api/routers/data.py` に新エンドポイントを追加し、`StreamingResponse` で BOM → ヘッダ → 1 行ずつ CSV を yield
+- カンマ分割は既存 `QueryStringFlatteningMiddleware` ([api/birdxplorer_api/app.py:20-39](../../api/birdxplorer_api/app.py#L20-L39)) に委ね、エンドポイント側は `keywords: List[str]` で受け取る
 - 日時整形は `zoneinfo.ZoneInfo("Asia/Tokyo")` を利用
 
 ## Technical Context
@@ -84,16 +85,16 @@ common/
 
 ## Design Decisions
 
-### D-1: OR 検索の実装方針 — 既存 `_apply_filters` を拡張
+### D-1: OR 検索の実装方針 — CSV 専用の独立クエリ（実装時更新）
 
-`_apply_filters` に新パラメータ `note_includes_texts: Union[List[str], None] = None` を追加し、`or_(*[NoteRecord.summary.like(f"%{kw}%") for kw in keywords])` を AND として合流させる。
+当初は既存 `_apply_filters` の拡張を予定していたが、実装着手時に CSV 専用メソッド内で独立 SQL を構築する形に変更した。`search_notes_with_posts_for_csv` の中で `or_(*[NoteRecord.summary.like(f"%{kw}%") for kw in keywords])` を直接 query にチェインする。
 
-**Why**:
-- 既存の `note_includes_text`（単数）と互換性を維持（両指定時は AND）
-- 将来 `/api/v1/data/search` でも OR 検索に対応できる拡張ポイント
-- 単一機能のための新メソッド分岐を作らず、テスト面でも統一できる
+**Why（変更理由）**:
+- 既存 `search_notes_with_posts` / `/api/v1/data/search` への副作用ゼロ（シグネチャと挙動を保てる）
+- CSV 専用パスは INNER JOIN / LEFT JOIN / 安定ソート / LIMIT 5000 など制約が固定なので、汎用ヘルパに合流させる動機が薄い
+- テストが独立メソッド単位で完結する
 
-**Trade-off**: `_apply_filters` のシグネチャが 1 つ増える。許容範囲。
+**Trade-off**: 将来 search エンドポイントにも OR 検索が必要になった場合は `_apply_filters` を別途拡張する。本タスクのスコープ外として後送り。
 
 ### D-2: ステータス解決 — `RowNoteStatusRecord` を LEFT JOIN
 

@@ -1,10 +1,14 @@
-from datetime import timezone
-from typing import Any, Dict, List, Optional, TypeAlias, Union
+import csv
+from datetime import datetime, timezone
+from io import StringIO
+from typing import Any, Dict, Generator, List, Optional, TypeAlias, Union
 from urllib.parse import parse_qs as parse_query_string
 from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
 
 from dateutil.parser import parse as dateutil_parse
-from fastapi import APIRouter, HTTPException, Path, Query, Request
+from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import Field as PydanticField
 from pydantic import HttpUrl
 from typing_extensions import Annotated
@@ -34,7 +38,73 @@ from birdxplorer_common.models import (
     UserEnrollment,
     UserId,
 )
-from birdxplorer_common.storage import Storage
+from birdxplorer_common.storage import CsvExportRow, Storage
+
+_CSV_EXPORT_JST = ZoneInfo("Asia/Tokyo")
+_CSV_EXPORT_THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
+_CSV_EXPORT_MAX_KEYWORDS = 50
+_CSV_EXPORT_MAX_ROWS = 5000
+_CSV_EXPORT_COLUMNS = [
+    "ポスト（投稿）日時",
+    "ポスト",
+    "コミュニティノート作成日時",
+    "コミュニティノート",
+    "ステータス",
+    "ポストURL",
+    "インプレッション数",
+    "Like数",
+    "リポスト数",
+    "評価数",
+    "役に立った",
+    "少し役に立った",
+    "役に立たなかった",
+    "コミュニティノートID",
+    "コミュニティノート作成者ID",
+    "投稿者ID",
+    "投稿者アカウント名",
+    "ポスト取得日時",
+]
+
+
+def _csv_export_format_jst(ts_ms: Union[int, None]) -> str:
+    if ts_ms is None:
+        return ""
+    return (
+        datetime.fromtimestamp(int(ts_ms) / 1000, tz=timezone.utc)
+        .astimezone(_CSV_EXPORT_JST)
+        .strftime("%Y/%m/%d %H:%M:%S")
+    )
+
+
+def _csv_export_row_values(row: CsvExportRow) -> List[str]:
+    note = row.note
+    post = row.post
+    user_name = post.user.name if post.user is not None else ""
+    return [
+        _csv_export_format_jst(post.created_at),
+        post.text,
+        _csv_export_format_jst(note.created_at),
+        note.summary,
+        row.status,
+        f"https://twitter.com/i/web/status/{post.post_id}",
+        str(post.impression_count),
+        str(post.like_count),
+        str(post.repost_count),
+        str(note.rate_count if note.rate_count is not None else 0),
+        str(note.helpful_count if note.helpful_count is not None else 0),
+        str(note.somewhat_helpful_count if note.somewhat_helpful_count is not None else 0),
+        str(note.not_helpful_count if note.not_helpful_count is not None else 0),
+        str(note.note_id),
+        str(note.note_author_participant_id) if note.note_author_participant_id is not None else "",
+        str(post.user_id),
+        user_name,
+        _csv_export_format_jst(post.aggregated_at),
+    ]
+
+
+def _csv_export_error(error: str, message: str) -> JSONResponse:
+    return JSONResponse(status_code=400, content={"error": error, "message": message})
+
 
 PostsPaginationMetaWithExamples: TypeAlias = Annotated[
     PaginationMeta,
@@ -327,7 +397,7 @@ def ensure_twitter_timestamp(t: Union[str, TwitterTimestamp]) -> TwitterTimestam
         raise OverflowError("Timestamp out of range")
 
 
-def gen_router(storage: Storage) -> APIRouter:
+def gen_router(storage: Storage, export_api_key: Optional[str] = None) -> APIRouter:
     router = APIRouter()
 
     @router.get(
@@ -661,5 +731,71 @@ def gen_router(storage: Storage) -> APIRouter:
             prev_url = f"{base_url}?{urlencode(query_params, doseq=True)}"
 
         return SearchResponse(data=results, meta=PaginationMeta(next=next_url, prev=prev_url, total=total_count))
+
+    @router.get(
+        "/export/csv",
+        description=(
+            "キーワード(カンマ区切り、OR検索、最大50個)と作成期間(ミリ秒、最大30日)を指定して、"
+            "コミュニティノート + ポストを CSV(UTF-8 BOM 付き)でダウンロードする。"
+        ),
+    )
+    def export_csv(
+        request: Request,
+        keywords: List[str] = Query(..., description="カンマ区切りのキーワード(OR検索)。最大50個、最低1個"),
+        note_created_at_from: int = Query(..., description="ノート作成期間の開始(ミリ秒)"),
+        note_created_at_to: int = Query(..., description="ノート作成期間の終了(ミリ秒)"),
+    ) -> Response:
+        if export_api_key and request.headers.get("X-API-Key") != export_api_key:
+            return JSONResponse(
+                status_code=401, content={"error": "unauthorized", "message": "Invalid or missing X-API-Key"}
+            )
+
+        parsed_keywords = [token.strip() for keyword in keywords for token in keyword.split(",") if token.strip()]
+        if not parsed_keywords:
+            return _csv_export_error("invalid_keywords", "キーワードは1個以上指定してください")
+        if len(parsed_keywords) > _CSV_EXPORT_MAX_KEYWORDS:
+            return _csv_export_error("too_many_keywords", "キーワードは最大50個です")
+
+        if note_created_at_from > note_created_at_to:
+            return _csv_export_error("invalid_period", "開始日時は終了日時より前である必要があります")
+        if note_created_at_to - note_created_at_from > _CSV_EXPORT_THIRTY_DAYS_MS:
+            return _csv_export_error("invalid_period", "期間は最大30日です")
+
+        try:
+            ts_from = TwitterTimestamp.from_int(note_created_at_from)
+            ts_to = TwitterTimestamp.from_int(note_created_at_to)
+        except (OverflowError, ValueError) as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+        rows = storage.search_notes_with_posts_for_csv(
+            keywords=parsed_keywords,
+            note_created_at_from=ts_from,
+            note_created_at_to=ts_to,
+            limit=_CSV_EXPORT_MAX_ROWS,
+        )
+
+        def _stream() -> Generator[bytes, None, None]:
+            buf = StringIO()
+            writer = csv.writer(buf, quoting=csv.QUOTE_MINIMAL, lineterminator="\r\n")
+            yield "﻿".encode("utf-8")
+            writer.writerow(_CSV_EXPORT_COLUMNS)
+            yield buf.getvalue().encode("utf-8")
+            buf.seek(0)
+            buf.truncate(0)
+            for row in rows:
+                writer.writerow(_csv_export_row_values(row))
+                yield buf.getvalue().encode("utf-8")
+                buf.seek(0)
+                buf.truncate(0)
+
+        filename = f"community_notes_{datetime.now(_CSV_EXPORT_JST).strftime('%Y%m%d_%H%M%S')}.csv"
+        return StreamingResponse(
+            _stream(),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store",
+            },
+        )
 
     return router
