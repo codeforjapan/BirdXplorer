@@ -15,10 +15,10 @@
 
 ## Phase 1: Foundation（既存資産の調査と前提整備）
 
-- [ ] **T-001**: `_apply_filters` の現状コードを再確認（[common/birdxplorer_common/storage.py:1530](../../common/birdxplorer_common/storage.py#L1530)）
-- [ ] **T-002**: `search_notes_with_posts` のシグネチャを確認、新パラメータ追加箇所を特定
-- [ ] **T-003**: `RowNoteStatusRecord` の SQLAlchemy 定義を確認、JOIN 条件を確定
-- [ ] **T-004**: `api/tests/conftest.py` の `mock_storage` フィクスチャ構造を確認
+- [X] **T-001**: `_apply_filters` の現状コードを再確認（[common/birdxplorer_common/storage.py:1510](../../common/birdxplorer_common/storage.py#L1510)）
+- [X] **T-002**: `search_notes_with_posts` のシグネチャを確認 → 独立メソッド方式に決定（plan.md D-1 更新）
+- [X] **T-003**: `RowNoteStatusRecord` の SQLAlchemy 定義を確認、JOIN 条件を確定
+- [X] **T-004**: `api/tests/conftest.py` の `mock_storage` フィクスチャ構造を確認
 
 ---
 
@@ -26,30 +26,30 @@
 
 ### Tests first
 
-- [ ] **T-010**: `common/tests/test_storage_csv_export.py` を新規作成し、以下のテストケースを記述（red 状態を確認）:
-  - `test_search_notes_or_match_single_keyword` — 1キーワードで OR 検索（既存単数フィルタとの差分を確認）
-  - `test_search_notes_or_match_multiple_keywords` — 2 キーワードで両方マッチする結果が含まれる
-  - `test_search_notes_or_no_match` — 期間内に該当ノートなし
-  - `test_status_resolution_prefers_locked_status` — `locked_status` がある場合にそちらが採用される
-  - `test_status_resolution_falls_back_to_current_status` — `locked_status` が None なら `current_status`
-  - `test_status_resolution_empty_when_no_row` — `row_note_status` 自体が None なら空文字
-  - `test_inner_join_excludes_orphan_notes` — `post_id` が None のノートは結果から除外
-  - `test_orders_by_created_at_then_id` — 安定ソート
-  - `test_limit_5000` — 5,001 件あるケースで 5,000 件で打ち切られる
+- [X] **T-010**: `common/tests/test_storage_csv_export.py` を新規作成し、以下のテストケースを記述（red 状態を確認）:
+  - `test_or_search_matches_single_keyword`
+  - `test_or_search_matches_multiple_keywords`
+  - `test_or_search_no_match_returns_empty`
+  - `test_inner_join_excludes_orphan_notes`
+  - `test_status_resolution_prefers_locked_status`
+  - `test_status_resolution_falls_back_to_current_status`
+  - `test_status_resolution_empty_when_no_row`
+  - `test_date_range_filter`
+  - `test_orders_by_created_at_then_id`
+  - `test_limit_caps_result_set`
 
 ### Implementation
 
-- [ ] **T-020**: `_apply_filters` に `note_includes_texts: Union[List[str], None] = None` を追加し、`or_(*[...])` でフィルタ適用
-- [ ] **T-021**: `search_notes_with_posts_for_csv()` メソッドを `Storage` クラスに追加
-  - パラメータ: `keywords: List[str]`, `note_created_at_from: TwitterTimestamp`, `note_created_at_to: TwitterTimestamp`
-  - 戻り値: `Iterator[Tuple[NoteRecord, PostRecord, Optional[str]]]`（`status` は解決済み文字列）
-  - INNER JOIN posts、LEFT JOIN row_note_status、ORDER BY、LIMIT 5000
-  - メモリ効率のため `yield_per(...)` または stream_results を検討（実装時に評価）
+- [X] ~~**T-020**: `_apply_filters` 拡張~~ → 取消（独立クエリ方式を採用、plan.md D-1）
+- [X] **T-021**: `search_notes_with_posts_for_csv()` メソッドと `CsvExportRow` NamedTuple を追加
+  - パラメータ: `keywords: List[str]`, `note_created_at_from/to: TwitterTimestamp`, `limit: int = 5000`
+  - 戻り値: `List[CsvExportRow]` (note: NoteRecord, post: PostRecord, status: str)
+  - INNER JOIN posts、LEFT JOIN row_note_status、ORDER BY note.created_at ASC, note_id ASC、LIMIT
 
 ### Verify
 
-- [ ] **T-030**: T-010 のテストを green に
-- [ ] **T-031**: `cd common && tox` で全 PASS（"congratulations :)" 確認）
+- [X] **T-030**: T-010 のテスト 10 件 すべて green
+- [X] **T-031**: `cd common && tox` で全 PASS（101 件 "congratulations :)"）
 
 ---
 
@@ -57,51 +57,37 @@
 
 ### Tests first
 
-- [ ] **T-040**: `api/tests/conftest.py` の `mock_storage` に `search_notes_with_posts_for_csv` の `side_effect` を追加
-- [ ] **T-041**: `api/tests/routers/test_data_csv_export.py` を新規作成、以下のテストケースを記述（red 確認）:
-  - `test_csv_export_returns_200_with_correct_headers` — Content-Type, Content-Disposition の検証
-  - `test_csv_export_body_starts_with_bom` — レスポンスボディの先頭が `﻿` (UTF-8 で `b'\xef\xbb\xbf'`)
-  - `test_csv_export_header_row` — ヘッダ行が 18 カラム、日本語名で出力
-  - `test_csv_export_data_row_format` — 日時が JST `YYYY/MM/DD HH:MM:SS` 形式
-  - `test_csv_export_status_locked_priority` — `locked_status` 優先で出力
-  - `test_csv_export_status_fallback_current` — `current_status` フォールバック
-  - `test_csv_export_post_url_format` — `https://twitter.com/i/web/status/{post_id}`
-  - `test_csv_export_csv_quoting_for_special_chars` — 改行・カンマ・`"` のエスケープ
-  - `test_csv_export_filename_pattern` — `community_notes_YYYYMMDD_HHMMSS.csv` パターン
-  - `test_csv_export_400_when_period_exceeds_30_days`
-  - `test_csv_export_400_when_too_many_keywords` — 51 個指定
-  - `test_csv_export_400_when_empty_keywords` — 空 / 全空白
-  - `test_csv_export_400_when_from_greater_than_to`
-  - `test_csv_export_422_when_invalid_timestamp` — `from=abc`
-  - `test_csv_export_empty_result_returns_header_only_csv`
+- [X] **T-040**: `api/tests/conftest.py` の `mock_storage` に `search_notes_with_posts_for_csv` の `side_effect` を追加（Any 型を `typing` から import）
+- [X] **T-041**: `api/tests/routers/test_data_csv_export.py` を新規作成、12 テストケースを記述
 
 ### Implementation
 
-- [ ] **T-050**: `api/birdxplorer_api/routers/data.py` に `GET /export/csv` を追加
-  - 関数: `async def export_csv(...)` または同期版
-  - Query パラメータ受け取り（`keywords: str`, `note_created_at_from: int`, `note_created_at_to: int`）
-  - バリデーション (期間、キーワード数、from≤to) → 400 with `{"error": "...", "message": "..."}`
-  - キーワードを `,` で split → trim → empty filter
-  - storage.search_notes_with_posts_for_csv(...) を呼び出し
-  - generator で 1 行ずつ CSV 化、StreamingResponse でラップ
-- [ ] **T-051**: ヘルパ関数 `_format_jst(ts_ms)`, `_generate_csv_stream(rows)`, `_resolve_status(row_status)` を `data.py` 内に追加（プライベート関数）
-- [ ] **T-052**: BOM 付与とヘッダ行 yield を generator の最初に組み込む
-- [ ] **T-053**: `Content-Disposition` ヘッダにファイル名（JST 現在時刻）を埋め込む
+- [X] **T-050**: `api/birdxplorer_api/routers/data.py` に `GET /export/csv` を追加
+  - `keywords: List[str]` で受け取り（カンマ分割は `QueryStringFlatteningMiddleware` に委任）
+  - バリデーション (期間≤30日、from≤to、1≤kw数≤50) → 400 with `JSONResponse({"error":..., "message":...})`
+  - storage.search_notes_with_posts_for_csv(...) を呼び出し、generator で 1 行ずつ CSV 化、StreamingResponse でラップ
+- [X] **T-051**: ヘルパ `_csv_export_format_jst(ts_ms)`, `_csv_export_row_values(row)`, `_csv_export_error(error, msg)` を `data.py` モジュールトップに配置
+- [X] **T-052**: BOM 付与とヘッダ行 yield を generator の最初に組み込む
+- [X] **T-053**: `Content-Disposition` ヘッダにファイル名（JST 現在時刻）を埋め込む
 
 ### Verify
 
-- [ ] **T-060**: T-041 のテストを green に
-- [ ] **T-061**: `cd api && tox` で全 PASS
+- [X] **T-060**: T-041 のテスト 12 件すべて green
+- [X] **T-061**: `cd api && tox` で全 PASS（105 件 "congratulations :)"）
+  - 副次変更: `api/pyproject.toml` の `filterwarnings` に `ignore::starlette.exceptions.StarletteDeprecationWarning` を追加（最新 starlette が出す `httpx2` 推奨の Deprecation を抑制）
 
 ---
 
 ## Phase 4: Polish
 
-- [ ] **T-070**: `quickstart.md` の手順に従い、ローカルで curl 検証
-- [ ] **T-071**: Excel (macOS or Windows) で開いて文字化けしないことを確認
-- [ ] **T-072**: 5,000 行のモック（または実 DB）で初回バイト送信 < 2s をストップウォッチで確認（best effort）
-- [ ] **T-073**: OpenAPI 自動生成ドキュメント（`/docs`）で新エンドポイントが表示されることを確認
-- [ ] **T-074**: 必要に応じて `api/birdxplorer_api/openapi_doc.py` に description を追加
+- [X] **T-070**: `quickstart.md` の手順に従い、ローカルで curl 検証
+  - 正常系（200, BOM ok, ヘッダ正常, データ 2 行, ステータス解決 locked 優先 ok）
+  - 400: 期間超過, from > to, 51 キーワード, 全空白キーワード
+  - 422: timestamp 非整数（middleware で空クエリ展開ケースも 422 で結果的にバリデーション）
+- [ ] **T-071**: Excel (macOS or Windows) で開いて文字化けしないことを確認（ローカル CLI 環境では未実施。BOM `EF BB BF` 付与は CLI で確認済み）
+- [ ] **T-072**: 5,000 行の実 DB で初回バイト送信 < 2s を測定（実データ未投入のため未実施）
+- [ ] **T-073**: OpenAPI 自動生成ドキュメント（`/docs`）で新エンドポイントが表示されることを確認（description は付与済み）
+- [ ] **T-074**: 必要に応じて `api/birdxplorer_api/openapi_doc.py` に description を追加（現状はエンドポイント側 description で十分と判断）
 - [ ] **T-075**: README 等で外部公開ドキュメントの更新が必要か確認（必要なければスキップ）
 
 ---

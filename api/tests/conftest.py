@@ -2,7 +2,7 @@ import os
 import random
 from collections.abc import Generator
 from datetime import datetime, timezone
-from typing import List, Type, Union
+from typing import Any, List, Type, Union
 from unittest.mock import MagicMock, patch
 
 from dotenv import load_dotenv
@@ -593,6 +593,17 @@ def mock_storage(
 
     mock.get_graph_updated_at.side_effect = _get_graph_updated_at
 
+    def _search_notes_with_posts_for_csv(
+        keywords: List[str],
+        note_created_at_from: int,
+        note_created_at_to: int,
+        limit: int = 5000,
+    ) -> List[Any]:
+        # Default: return empty. Tests override via mock.search_notes_with_posts_for_csv.return_value.
+        return []
+
+    mock.search_notes_with_posts_for_csv.side_effect = _search_notes_with_posts_for_csv
+
     yield mock
 
 
@@ -646,6 +657,7 @@ def global_settings_factory(
 
         cors_settings = cors_settings_factory.build()
         storage_settings = postgres_storage_settings_factory.build()
+        export_api_key = None
 
     return GlobalSettingsFactory
 

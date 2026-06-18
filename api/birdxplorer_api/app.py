@@ -48,6 +48,6 @@ def gen_app(settings: GlobalSettings) -> FastAPI:
     app.add_middleware(QueryStringFlatteningMiddleware)
     app.add_middleware(TimingMiddleware)
     app.include_router(gen_system_router(), prefix="/api/v1/system")
-    app.include_router(gen_data_router(storage=storage), prefix="/api/v1/data")
+    app.include_router(gen_data_router(storage=storage, export_api_key=settings.export_api_key), prefix="/api/v1/data")
     app.include_router(gen_graphs_router(storage=storage), prefix="/api/v1/graphs")
     return app
