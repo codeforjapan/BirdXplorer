@@ -12,6 +12,7 @@ from sqlalchemy import (
     func,
     or_,
     select,
+    text,
 )
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
@@ -665,6 +666,7 @@ class Storage:
 
         # Execute query
         with Session(self._engine) as session:
+            session.execute(text("SET LOCAL work_mem = '256MB'"))
             result = session.execute(query)
             rows = result.fetchall()
 
@@ -774,6 +776,7 @@ class Storage:
 
         # Execute query
         with Session(self._engine) as session:
+            session.execute(text("SET LOCAL work_mem = '256MB'"))
             result = session.execute(query)
             rows = result.fetchall()
 
@@ -876,6 +879,7 @@ class Storage:
 
         # Execute query
         with Session(self._engine) as session:
+            session.execute(text("SET LOCAL work_mem = '256MB'"))
             result = session.execute(query)
             rows = result.fetchall()
 
@@ -1000,6 +1004,7 @@ class Storage:
 
         # Execute query
         with Session(self._engine) as session:
+            session.execute(text("SET LOCAL work_mem = '256MB'"))
             result = session.execute(query)
             rows = result.fetchall()
 
@@ -1124,6 +1129,7 @@ class Storage:
 
         # Execute query
         with Session(self._engine) as session:
+            session.execute(text("SET LOCAL work_mem = '256MB'"))
             result = session.execute(query)
             rows = result.fetchall()
 
