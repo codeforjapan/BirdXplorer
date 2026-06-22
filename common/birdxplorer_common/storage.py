@@ -27,6 +27,7 @@ from .models import (
 from .models import Link as LinkModel
 from .models import (
     LinkId,
+    LongHttpUrl,
     Media,
     MediaDetails,
     MediaType,
@@ -89,6 +90,7 @@ class Base(DeclarativeBase):
         UserId: String,
         UserName: String,
         HttpUrl: String,
+        LongHttpUrl: String,
         NonNegativeInt: DECIMAL,
         MediaDetails: JSON,
         BinaryBool: CHAR,
@@ -145,7 +147,7 @@ class LinkRecord(Base):
     __tablename__ = "links"
 
     link_id: Mapped[LinkId] = mapped_column(primary_key=True)
-    url: Mapped[HttpUrl] = mapped_column(nullable=False, index=True)
+    url: Mapped[LongHttpUrl] = mapped_column(nullable=False, index=True)
 
 
 class PostLinkAssociation(Base):
