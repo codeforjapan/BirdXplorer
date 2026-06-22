@@ -19,6 +19,9 @@ from typing import (
 from uuid import UUID
 
 import pycountry
+from pydantic import (
+    AnyUrl,
+)
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import (
     ConfigDict,
@@ -35,7 +38,10 @@ from pydantic import (
 from pydantic.alias_generators import to_camel
 from pydantic.json_schema import JsonSchemaValue
 from pydantic.main import IncEx
+from pydantic.networks import UrlConstraints
 from pydantic_core import core_schema
+
+LongHttpUrl = Annotated[AnyUrl, UrlConstraints(max_length=8192, allowed_schemes=["http", "https"])]
 
 StrT = TypeVar("StrT", bound="BaseString")
 IntT = TypeVar("IntT", bound="BaseInt")
@@ -881,15 +887,15 @@ class Link(BaseModel):
     t.co に短縮される前の URL ごとに一意な ID を持つ。
 
     >>> Link.model_validate_json('{"linkId": "d5d15194-6574-0c01-8f6f-15abd72b2cf6", "url": "https://example.com"}')
-    Link(link_id=LinkId('d5d15194-6574-0c01-8f6f-15abd72b2cf6'), url=HttpUrl('https://example.com/'))
+    Link(link_id=LinkId('d5d15194-6574-0c01-8f6f-15abd72b2cf6'), url=AnyUrl('https://example.com/'))
     >>> Link(url="https://example.com/")
-    Link(link_id=LinkId('d5d15194-6574-0c01-8f6f-15abd72b2cf6'), url=HttpUrl('https://example.com/'))
+    Link(link_id=LinkId('d5d15194-6574-0c01-8f6f-15abd72b2cf6'), url=AnyUrl('https://example.com/'))
     >>> Link(link_id=UUID("d5d15194-6574-0c01-8f6f-15abd72b2cf6"), url="https://example.com/")
-    Link(link_id=LinkId('d5d15194-6574-0c01-8f6f-15abd72b2cf6'), url=HttpUrl('https://example.com/'))
+    Link(link_id=LinkId('d5d15194-6574-0c01-8f6f-15abd72b2cf6'), url=AnyUrl('https://example.com/'))
     """  # noqa: E501
 
     link_id: Annotated[LinkId, PydanticField(description="リンクを識別できる UUID")]
-    url: Annotated[HttpUrl, PydanticField(description="リンクが指す URL")]
+    url: Annotated[LongHttpUrl, PydanticField(description="リンクが指す URL")]
 
     @model_validator(mode="before")
     def validate_link_id(cls, values: Dict[str, Any]) -> Dict[str, Any]:
