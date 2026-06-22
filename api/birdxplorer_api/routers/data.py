@@ -10,7 +10,6 @@ from dateutil.parser import parse as dateutil_parse
 from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import Field as PydanticField
-from pydantic import HttpUrl
 from typing_extensions import Annotated
 
 from birdxplorer_api.openapi_doc import (
@@ -23,6 +22,7 @@ from birdxplorer_api.openapi_doc import (
 from birdxplorer_common.models import (
     BaseModel,
     LanguageCode,
+    LongHttpUrl,
     Note,
     NoteId,
     PaginationMeta,
@@ -493,7 +493,7 @@ def gen_router(storage: Storage, export_api_key: Optional[str] = None) -> APIRou
         offset: int = Query(default=0, ge=0, **V1DataPostsDocs.params["offset"]),
         limit: int = Query(default=100, gt=0, le=1000, **V1DataPostsDocs.params["limit"]),
         search_text: Union[None, str] = Query(default=None, **V1DataPostsDocs.params["search_text"]),
-        search_url: Union[None, HttpUrl] = Query(default=None, **V1DataPostsDocs.params["search_url"]),
+        search_url: Union[None, LongHttpUrl] = Query(default=None, **V1DataPostsDocs.params["search_url"]),
         media: bool = Query(default=True, **V1DataPostsDocs.params["media"]),
     ) -> PostListResponse:
         try:
