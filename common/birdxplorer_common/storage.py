@@ -1448,7 +1448,7 @@ class Storage:
         start: Union[TwitterTimestamp, None] = None,
         end: Union[TwitterTimestamp, None] = None,
         search_text: Union[str, None] = None,
-        search_url: Union[HttpUrl, None] = None,
+        search_url: Union[LongHttpUrl, None] = None,
         offset: Union[int, None] = None,
         limit: int = 100,
         with_media: bool = True,
@@ -1492,7 +1492,7 @@ class Storage:
         start: Union[TwitterTimestamp, None] = None,
         end: Union[TwitterTimestamp, None] = None,
         search_text: Union[str, None] = None,
-        search_url: Union[HttpUrl, None] = None,
+        search_url: Union[LongHttpUrl, None] = None,
     ) -> int:
         with Session(self.engine) as sess:
             query = sess.query(PostRecord)

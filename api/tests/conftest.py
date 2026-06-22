@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 from polyfactory import Use
 from polyfactory.factories.pydantic_factory import ModelFactory
 from polyfactory.pytest_plugin import register_fixture
-from pydantic import HttpUrl
 from pytest import fixture
 
 from birdxplorer_common.exceptions import UserEnrollmentNotFoundError
@@ -18,6 +17,7 @@ from birdxplorer_common.models import (
     LanguageCode,
     Link,
     LinkId,
+    LongHttpUrl,
     Media,
     Note,
     NoteId,
@@ -432,7 +432,7 @@ def mock_storage(
         start: Union[TwitterTimestamp, None] = None,
         end: Union[TwitterTimestamp, None] = None,
         search_text: Union[str, None] = None,
-        search_url: Union[HttpUrl, None] = None,
+        search_url: Union[LongHttpUrl, None] = None,
         offset: Union[int, None] = None,
         limit: Union[int, None] = None,
         with_media: bool = True,
@@ -482,7 +482,7 @@ def mock_storage(
         start: Union[TwitterTimestamp, None] = None,
         end: Union[TwitterTimestamp, None] = None,
         search_text: Union[str, None] = None,
-        search_url: Union[HttpUrl, None] = None,
+        search_url: Union[LongHttpUrl, None] = None,
     ) -> int:
         return len(list(_get_posts(post_ids, note_ids, user_ids, start, end, search_text, search_url)))
 
