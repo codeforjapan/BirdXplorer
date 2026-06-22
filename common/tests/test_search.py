@@ -41,7 +41,7 @@ def test_search_by_note_text(
     storage = Storage(engine=engine_for_test)
 
     # Test searching notes with text that should be included
-    results = storage.search_notes_with_posts(note_includes_text="summary").items
+    results = storage.search_notes_with_posts(note_includes_texts=["summary"]).items
     assert len(results) > 0
     for note, _ in results:
         assert "summary" in note.summary.lower()
@@ -106,7 +106,7 @@ def test_search_by_post_text(
     storage = Storage(engine=engine_for_test)
 
     # Test searching posts with text that should be included
-    results = storage.search_notes_with_posts(post_includes_text="プロジェクト").items
+    results = storage.search_notes_with_posts(post_includes_texts=["プロジェクト"]).items
     assert len(results) > 0
     for _, post in results:
         assert post is not None
@@ -130,7 +130,9 @@ def test_combined_search(
     """Test combining multiple search criteria"""
     storage = Storage(engine=engine_for_test)
 
-    results = storage.search_notes_with_posts(note_includes_text="summary", language=LanguageCode("en"), limit=2).items
+    results = storage.search_notes_with_posts(
+        note_includes_texts=["summary"], language=LanguageCode("en"), limit=2
+    ).items
 
     assert len(results) <= 2
     for note, _ in results:
@@ -178,12 +180,12 @@ def test_count_search_results(
     assert total_count > 0
 
     # Get filtered count
-    filtered_count = storage.count_search_results(note_includes_text="summary", language=LanguageCode("en"))
+    filtered_count = storage.count_search_results(note_includes_texts=["summary"], language=LanguageCode("en"))
     assert filtered_count > 0
     assert filtered_count <= total_count
 
     # Verify count matches actual results
-    results = storage.search_notes_with_posts(note_includes_text="summary", language=LanguageCode("en")).items
+    results = storage.search_notes_with_posts(note_includes_texts=["summary"], language=LanguageCode("en")).items
     assert len(results) == filtered_count
 
 
@@ -214,7 +216,7 @@ def test_search_notes_with_non_enum_language(
         sess.commit()
 
     storage = Storage(engine=engine_for_test)
-    results = storage.search_notes_with_posts(note_includes_text="Korean language note").items
+    results = storage.search_notes_with_posts(note_includes_texts=["Korean language note"]).items
     assert len(results) == 1
     note, _ = results[0]
     assert note.language == "ko"
@@ -247,7 +249,7 @@ def test_search_notes_with_null_language(
         sess.commit()
 
     storage = Storage(engine=engine_for_test)
-    results = storage.search_notes_with_posts(note_includes_text="Null language note").items
+    results = storage.search_notes_with_posts(note_includes_texts=["Null language note"]).items
     assert len(results) == 1
     note, _ = results[0]
     assert note.language == "other"
@@ -279,7 +281,7 @@ def test_search_notes_with_invalid_post_id(
         sess.commit()
 
     storage = Storage(engine=engine_for_test)
-    results = storage.search_notes_with_posts(note_includes_text="Invalid post id note").items
+    results = storage.search_notes_with_posts(note_includes_texts=["Invalid post id note"]).items
     assert len(results) == 1
     note, _ = results[0]
     assert note.post_id == ""
@@ -330,7 +332,7 @@ def test_search_notes_language_normalization(
         sess.commit()
 
     storage = Storage(engine=engine_for_test)
-    results = storage.search_notes_with_posts(note_includes_text=f"lang-norm-test-{note_id_suffix}").items
+    results = storage.search_notes_with_posts(note_includes_texts=[f"lang-norm-test-{note_id_suffix}"]).items
     assert len(results) == 1
     note, _ = results[0]
     assert note.language == expected_language

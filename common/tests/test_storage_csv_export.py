@@ -9,7 +9,7 @@ from pytest import fixture
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from birdxplorer_common.models import NoteId, TwitterTimestamp
+from birdxplorer_common.models import NoteId, TextSearchMode, TwitterTimestamp
 from birdxplorer_common.storage import (
     NoteRecord,
     PostRecord,
@@ -434,3 +434,41 @@ def test_limit_caps_result_set(
         limit=2,
     )
     assert len(rows) == 2
+
+
+def test_and_search_requires_all_keywords(
+    engine_for_test: Engine,
+    csv_notes: List[NoteRecord],
+    csv_row_note_status: List[RowNoteStatusRecord],
+) -> None:
+    storage = Storage(engine=engine_for_test)
+    rows = storage.search_notes_with_posts_for_csv(
+        keywords=["医療", "政治"],
+        note_created_at_from=_ts(1700000000000),
+        note_created_at_to=_ts(1700001000000),
+        search_mode=TextSearchMode.AND,
+    )
+    note_ids = {r.note.note_id for r in rows}
+    # notes[3] のみが「医療」AND「政治」の両方を含む
+    assert note_ids == {_nid("4000000000000000004")}
+
+
+def test_and_search_single_keyword_matches_same_as_or(
+    engine_for_test: Engine,
+    csv_notes: List[NoteRecord],
+    csv_row_note_status: List[RowNoteStatusRecord],
+) -> None:
+    storage = Storage(engine=engine_for_test)
+    rows_or = storage.search_notes_with_posts_for_csv(
+        keywords=["医療"],
+        note_created_at_from=_ts(1700000000000),
+        note_created_at_to=_ts(1700001000000),
+        search_mode=TextSearchMode.OR,
+    )
+    rows_and = storage.search_notes_with_posts_for_csv(
+        keywords=["医療"],
+        note_created_at_from=_ts(1700000000000),
+        note_created_at_to=_ts(1700001000000),
+        search_mode=TextSearchMode.AND,
+    )
+    assert {r.note.note_id for r in rows_or} == {r.note.note_id for r in rows_and}

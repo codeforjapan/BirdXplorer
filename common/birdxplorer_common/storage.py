@@ -47,6 +47,7 @@ from .models import (
     SearchSortField,
     SortOrder,
     SummaryString,
+    TextSearchMode,
 )
 from .models import Topic as TopicModel
 from .models import (
@@ -1524,9 +1525,9 @@ class Storage:
     def _apply_filters(
         self,
         query: RowReturningQuery[Tuple[Any, ...]],
-        note_includes_text: Union[str, None] = None,
+        note_includes_texts: Union[List[str], None] = None,
         note_excludes_text: Union[str, None] = None,
-        post_includes_text: Union[str, None] = None,
+        post_includes_texts: Union[List[str], None] = None,
         post_excludes_text: Union[str, None] = None,
         language: Union[LanguageCode, None] = None,
         topic_ids: Union[List[TopicId], None] = None,
@@ -1540,10 +1541,17 @@ class Storage:
         post_repost_count_from: Union[int, None] = None,
         post_impression_count_from: Union[int, None] = None,
         post_includes_media: Union[bool, None] = None,
+        note_search_mode: TextSearchMode = TextSearchMode.OR,
+        post_search_mode: TextSearchMode = TextSearchMode.OR,
     ) -> RowReturningQuery[Tuple[Any, ...]]:
         # Apply note filters
-        if note_includes_text:
-            query = query.filter(NoteRecord.summary.like(f"%{note_includes_text}%"))
+        if note_includes_texts:
+            cond = (
+                and_(*[NoteRecord.summary.like(f"%{t}%") for t in note_includes_texts])
+                if note_search_mode == TextSearchMode.AND
+                else or_(*[NoteRecord.summary.like(f"%{t}%") for t in note_includes_texts])
+            )
+            query = query.filter(cond)
         if note_excludes_text:
             query = query.filter(~NoteRecord.summary.like(f"%{note_excludes_text}%"))
         if language:
@@ -1564,8 +1572,13 @@ class Storage:
             query = query.filter(NoteRecord.created_at <= note_created_at_to)
 
         # Apply post filters
-        if post_includes_text:
-            query = query.filter(PostRecord.text.like(f"%{post_includes_text}%"))
+        if post_includes_texts:
+            cond = (
+                and_(*[PostRecord.text.like(f"%{t}%") for t in post_includes_texts])
+                if post_search_mode == TextSearchMode.AND
+                else or_(*[PostRecord.text.like(f"%{t}%") for t in post_includes_texts])
+            )
+            query = query.filter(cond)
         if post_excludes_text:
             query = query.filter(~PostRecord.text.like(f"%{post_excludes_text}%"))
         if x_user_names:
@@ -1593,7 +1606,7 @@ class Storage:
 
     @staticmethod
     def _has_post_filters(
-        post_includes_text: Union[str, None],
+        post_includes_texts: Union[List[str], None],
         post_excludes_text: Union[str, None],
         x_user_names: Union[List[str], None],
         x_user_followers_count_from: Union[int, None],
@@ -1606,7 +1619,7 @@ class Storage:
         return any(
             v is not None
             for v in (
-                post_includes_text,
+                post_includes_texts,
                 post_excludes_text,
                 x_user_names,
                 x_user_followers_count_from,
@@ -1621,16 +1634,22 @@ class Storage:
     def _apply_note_only_filters(
         self,
         query: RowReturningQuery[Tuple[Any, ...]],
-        note_includes_text: Union[str, None] = None,
+        note_includes_texts: Union[List[str], None] = None,
         note_excludes_text: Union[str, None] = None,
         language: Union[LanguageCode, None] = None,
         topic_ids: Union[List[TopicId], None] = None,
         note_status: Union[List[str], None] = None,
         note_created_at_from: Union[TwitterTimestamp, None] = None,
         note_created_at_to: Union[TwitterTimestamp, None] = None,
+        note_search_mode: TextSearchMode = TextSearchMode.OR,
     ) -> RowReturningQuery[Tuple[Any, ...]]:
-        if note_includes_text:
-            query = query.filter(NoteRecord.summary.like(f"%{note_includes_text}%"))
+        if note_includes_texts:
+            cond = (
+                and_(*[NoteRecord.summary.like(f"%{t}%") for t in note_includes_texts])
+                if note_search_mode == TextSearchMode.AND
+                else or_(*[NoteRecord.summary.like(f"%{t}%") for t in note_includes_texts])
+            )
+            query = query.filter(cond)
         if note_excludes_text:
             query = query.filter(~NoteRecord.summary.like(f"%{note_excludes_text}%"))
         if language:
@@ -1653,9 +1672,9 @@ class Storage:
 
     def search_notes_with_posts(
         self,
-        note_includes_text: Union[str, None] = None,
+        note_includes_texts: Union[List[str], None] = None,
         note_excludes_text: Union[str, None] = None,
-        post_includes_text: Union[str, None] = None,
+        post_includes_texts: Union[List[str], None] = None,
         post_excludes_text: Union[str, None] = None,
         language: Union[LanguageCode, None] = None,
         topic_ids: Union[List[TopicId], None] = None,
@@ -1673,9 +1692,11 @@ class Storage:
         limit: int = 100,
         sort_field: Union[SearchSortField, None] = None,
         sort_order: SortOrder = SortOrder.DESC,
+        note_search_mode: TextSearchMode = TextSearchMode.OR,
+        post_search_mode: TextSearchMode = TextSearchMode.OR,
     ) -> SearchResultPage:
         has_post_filters = self._has_post_filters(
-            post_includes_text,
+            post_includes_texts,
             post_excludes_text,
             x_user_names,
             x_user_followers_count_from,
@@ -1701,9 +1722,9 @@ class Storage:
                     )
                     id_query = self._apply_filters(
                         id_query,
-                        note_includes_text,
+                        note_includes_texts,
                         note_excludes_text,
-                        post_includes_text,
+                        post_includes_texts,
                         post_excludes_text,
                         language,
                         topic_ids,
@@ -1717,19 +1738,22 @@ class Storage:
                         post_repost_count_from,
                         post_impression_count_from,
                         post_includes_media,
+                        note_search_mode,
+                        post_search_mode,
                     )
                 else:
                     # Phase 1: note_id only, no JOINs needed
                     id_query = sess.query(NoteRecord.note_id).select_from(NoteRecord)
                     id_query = self._apply_note_only_filters(
                         id_query,
-                        note_includes_text,
+                        note_includes_texts,
                         note_excludes_text,
                         language,
                         topic_ids,
                         note_status,
                         note_created_at_from,
                         note_created_at_to,
+                        note_search_mode,
                     )
 
                 note_subq = id_query.order_by(order_expr).offset(offset).limit(limit + 1).subquery()
@@ -1751,9 +1775,9 @@ class Storage:
 
                 query = self._apply_filters(
                     query,
-                    note_includes_text,
+                    note_includes_texts,
                     note_excludes_text,
-                    post_includes_text,
+                    post_includes_texts,
                     post_excludes_text,
                     language,
                     topic_ids,
@@ -1767,6 +1791,8 @@ class Storage:
                     post_repost_count_from,
                     post_impression_count_from,
                     post_includes_media,
+                    note_search_mode,
+                    post_search_mode,
                 )
 
                 query = query.offset(offset).limit(limit + 1)
@@ -1824,9 +1850,9 @@ class Storage:
 
     def count_search_results(
         self,
-        note_includes_text: Union[str, None] = None,
+        note_includes_texts: Union[List[str], None] = None,
         note_excludes_text: Union[str, None] = None,
-        post_includes_text: Union[str, None] = None,
+        post_includes_texts: Union[List[str], None] = None,
         post_excludes_text: Union[str, None] = None,
         language: Union[LanguageCode, None] = None,
         topic_ids: Union[List[TopicId], None] = None,
@@ -1840,6 +1866,8 @@ class Storage:
         post_repost_count_from: Union[int, None] = None,
         post_impression_count_from: Union[int, None] = None,
         post_includes_media: Union[bool, None] = None,
+        note_search_mode: TextSearchMode = TextSearchMode.OR,
+        post_search_mode: TextSearchMode = TextSearchMode.OR,
     ) -> int:
         with Session(self.engine) as sess:
             query = (
@@ -1850,9 +1878,9 @@ class Storage:
 
             query = self._apply_filters(
                 query,
-                note_includes_text,
+                note_includes_texts,
                 note_excludes_text,
-                post_includes_text,
+                post_includes_texts,
                 post_excludes_text,
                 language,
                 topic_ids,
@@ -1866,6 +1894,8 @@ class Storage:
                 post_repost_count_from,
                 post_impression_count_from,
                 post_includes_media,
+                note_search_mode,
+                post_search_mode,
             )
 
             return query.scalar() or 0
@@ -1876,10 +1906,12 @@ class Storage:
         note_created_at_from: TwitterTimestamp,
         note_created_at_to: TwitterTimestamp,
         limit: int = 5000,
+        search_mode: TextSearchMode = TextSearchMode.OR,
     ) -> List[CsvExportRow]:
         """CSV エクスポート用にノート + ポストをまとめて取得する。
 
-        - ノート本文 (`NoteRecord.summary`) に対し、`keywords` の OR LIKE 検索
+        - ノート本文 (`NoteRecord.summary`) に対し、`keywords` の LIKE 検索
+          （`search_mode=OR` で OR 結合、`search_mode=AND` で AND 結合）
         - `[note_created_at_from, note_created_at_to]` の範囲（両端含む）で `created_at` フィルタ
         - `NoteRecord.post_id = PostRecord.post_id` の INNER JOIN（孤立ノートは除外）
         - `RowNoteStatusRecord` を LEFT JOIN し、`locked_status > current_status` の優先順位で
@@ -1890,6 +1922,12 @@ class Storage:
         if not keywords:
             return []
 
+        keyword_cond = (
+            and_(*[NoteRecord.summary.like(f"%{kw}%") for kw in keywords])
+            if search_mode == TextSearchMode.AND
+            else or_(*[NoteRecord.summary.like(f"%{kw}%") for kw in keywords])
+        )
+
         with Session(self.engine) as sess:
             query = (
                 sess.query(NoteRecord, PostRecord, RowNoteStatusRecord)
@@ -1898,7 +1936,7 @@ class Storage:
                     RowNoteStatusRecord,
                     RowNoteStatusRecord.note_id == NoteRecord.note_id,
                 )
-                .filter(or_(*[NoteRecord.summary.like(f"%{kw}%") for kw in keywords]))
+                .filter(keyword_cond)
                 .filter(NoteRecord.created_at >= note_created_at_from)
                 .filter(NoteRecord.created_at <= note_created_at_to)
                 .order_by(NoteRecord.created_at.asc(), NoteRecord.note_id.asc())

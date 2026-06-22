@@ -750,6 +750,11 @@ class SearchSortField(str, Enum):
     NOTE_CREATED_AT = "note_created_at"
 
 
+class TextSearchMode(str, Enum):
+    OR = "or"
+    AND = "and"
+
+
 class NoteStatusHistory(BaseModel):
     """Model for note status history entry"""
 
