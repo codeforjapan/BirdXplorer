@@ -598,6 +598,7 @@ def mock_storage(
         note_created_at_from: int,
         note_created_at_to: int,
         limit: int = 5000,
+        search_mode: Any = None,
     ) -> List[Any]:
         # Default: return empty. Tests override via mock.search_notes_with_posts_for_csv.return_value.
         return []

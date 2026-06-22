@@ -32,6 +32,7 @@ from birdxplorer_common.models import (
     SearchSortField,
     SortOrder,
     SummaryString,
+    TextSearchMode,
     Topic,
     TopicId,
     TwitterTimestamp,
@@ -543,9 +544,9 @@ def gen_router(storage: Storage, export_api_key: Optional[str] = None) -> APIRou
 
     @router.get("/search/count", description="検索結果の総件数を取得する", response_model=SearchCountResponse)
     def search_count(
-        note_includes_text: Union[None, str] = Query(default=None),
+        note_includes_text: Union[None, List[str]] = Query(default=None),
         note_excludes_text: Union[None, str] = Query(default=None),
-        post_includes_text: Union[None, str] = Query(default=None),
+        post_includes_text: Union[None, List[str]] = Query(default=None),
         post_excludes_text: Union[None, str] = Query(default=None),
         language: Union[LanguageCode, None] = Query(default=None),
         topic_ids: Union[List[TopicId], None] = Query(default=None),
@@ -559,6 +560,8 @@ def gen_router(storage: Storage, export_api_key: Optional[str] = None) -> APIRou
         post_repost_count_from: Union[None, int] = Query(default=None),
         post_impression_count_from: Union[None, int] = Query(default=None),
         post_includes_media: Union[bool, None] = Query(default=None),
+        note_search_mode: TextSearchMode = Query(default=TextSearchMode.OR),
+        post_search_mode: TextSearchMode = Query(default=TextSearchMode.OR),
     ) -> SearchCountResponse:
         try:
             if note_created_at_from is not None and isinstance(note_created_at_from, str):
@@ -569,9 +572,9 @@ def gen_router(storage: Storage, export_api_key: Optional[str] = None) -> APIRou
             raise HTTPException(status_code=422, detail=str(e))
 
         total = storage.count_search_results(
-            note_includes_text=note_includes_text,
+            note_includes_texts=note_includes_text,
             note_excludes_text=note_excludes_text,
-            post_includes_text=post_includes_text,
+            post_includes_texts=post_includes_text,
             post_excludes_text=post_excludes_text,
             language=language,
             topic_ids=topic_ids,
@@ -585,6 +588,8 @@ def gen_router(storage: Storage, export_api_key: Optional[str] = None) -> APIRou
             post_repost_count_from=post_repost_count_from,
             post_impression_count_from=post_impression_count_from,
             post_includes_media=post_includes_media,
+            note_search_mode=note_search_mode,
+            post_search_mode=post_search_mode,
         )
 
         return SearchCountResponse(total=total)
@@ -592,9 +597,13 @@ def gen_router(storage: Storage, export_api_key: Optional[str] = None) -> APIRou
     @router.get("/search", description=V1DataSearchDocs.description, response_model=SearchResponse)
     def search(
         request: Request,
-        note_includes_text: Union[None, str] = Query(default=None, **V1DataSearchDocs.params["note_includes_text"]),
+        note_includes_text: Union[None, List[str]] = Query(
+            default=None, **V1DataSearchDocs.params["note_includes_text"]
+        ),
         note_excludes_text: Union[None, str] = Query(default=None, **V1DataSearchDocs.params["note_excludes_text"]),
-        post_includes_text: Union[None, str] = Query(default=None, **V1DataSearchDocs.params["post_includes_text"]),
+        post_includes_text: Union[None, List[str]] = Query(
+            default=None, **V1DataSearchDocs.params["post_includes_text"]
+        ),
         post_excludes_text: Union[None, str] = Query(default=None, **V1DataSearchDocs.params["post_excludes_text"]),
         language: Union[LanguageCode, None] = Query(default=None, **V1DataSearchDocs.params["language"]),
         topic_ids: Union[List[TopicId], None] = Query(default=None, **V1DataSearchDocs.params["topic_ids"]),
@@ -629,6 +638,12 @@ def gen_router(storage: Storage, export_api_key: Optional[str] = None) -> APIRou
             description="総件数を含める。falseにするとCOUNTクエリをスキップしてレスポンスが高速化されます。"
             "件数は /search/count で非同期に取得できます。",
         ),
+        note_search_mode: TextSearchMode = Query(
+            default=TextSearchMode.OR, description="note_includes_text の複数キーワード結合方法（or / and）"
+        ),
+        post_search_mode: TextSearchMode = Query(
+            default=TextSearchMode.OR, description="post_includes_text の複数キーワード結合方法（or / and）"
+        ),
     ) -> SearchResponse:
         # Convert timestamp strings to TwitterTimestamp objects
         try:
@@ -641,9 +656,9 @@ def gen_router(storage: Storage, export_api_key: Optional[str] = None) -> APIRou
 
         # SearchResultPageからデータとhas_nextを取得
         page = storage.search_notes_with_posts(
-            note_includes_text=note_includes_text,
+            note_includes_texts=note_includes_text,
             note_excludes_text=note_excludes_text,
-            post_includes_text=post_includes_text,
+            post_includes_texts=post_includes_text,
             post_excludes_text=post_excludes_text,
             language=language,
             topic_ids=topic_ids,
@@ -661,6 +676,8 @@ def gen_router(storage: Storage, export_api_key: Optional[str] = None) -> APIRou
             limit=limit,
             sort_field=sort_field,
             sort_order=sort_order,
+            note_search_mode=note_search_mode,
+            post_search_mode=post_search_mode,
         )
 
         results = []
@@ -691,9 +708,9 @@ def gen_router(storage: Storage, export_api_key: Optional[str] = None) -> APIRou
         total_count = None
         if include_total:
             total_count = storage.count_search_results(
-                note_includes_text=note_includes_text,
+                note_includes_texts=note_includes_text,
                 note_excludes_text=note_excludes_text,
-                post_includes_text=post_includes_text,
+                post_includes_texts=post_includes_text,
                 post_excludes_text=post_excludes_text,
                 language=language,
                 topic_ids=topic_ids,
@@ -707,6 +724,8 @@ def gen_router(storage: Storage, export_api_key: Optional[str] = None) -> APIRou
                 post_repost_count_from=post_repost_count_from,
                 post_impression_count_from=post_impression_count_from,
                 post_includes_media=post_includes_media,
+                note_search_mode=note_search_mode,
+                post_search_mode=post_search_mode,
             )
 
         # ページネーションURL生成
@@ -735,15 +754,18 @@ def gen_router(storage: Storage, export_api_key: Optional[str] = None) -> APIRou
     @router.get(
         "/export/csv",
         description=(
-            "キーワード(カンマ区切り、OR検索、最大50個)と作成期間(ミリ秒、最大30日)を指定して、"
+            "キーワード(カンマ区切り、最大50個)と作成期間(ミリ秒、最大30日)を指定して、"
             "コミュニティノート + ポストを CSV(UTF-8 BOM 付き)でダウンロードする。"
         ),
     )
     def export_csv(
         request: Request,
-        keywords: List[str] = Query(..., description="カンマ区切りのキーワード(OR検索)。最大50個、最低1個"),
+        keywords: List[str] = Query(..., description="カンマ区切りのキーワード。最大50個、最低1個"),
         note_created_at_from: int = Query(..., description="ノート作成期間の開始(ミリ秒)"),
         note_created_at_to: int = Query(..., description="ノート作成期間の終了(ミリ秒)"),
+        search_mode: TextSearchMode = Query(
+            default=TextSearchMode.OR, description="キーワードの結合方法（or: いずれかを含む / and: すべてを含む）"
+        ),
     ) -> Response:
         if export_api_key and request.headers.get("X-API-Key") != export_api_key:
             return JSONResponse(
@@ -772,6 +794,7 @@ def gen_router(storage: Storage, export_api_key: Optional[str] = None) -> APIRou
             note_created_at_from=ts_from,
             note_created_at_to=ts_to,
             limit=_CSV_EXPORT_MAX_ROWS,
+            search_mode=search_mode,
         )
 
         def _stream() -> Generator[bytes, None, None]:
