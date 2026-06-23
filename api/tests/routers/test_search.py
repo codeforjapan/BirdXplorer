@@ -378,7 +378,7 @@ def test_search_count_with_filters(client: TestClient, mock_storage: MagicMock) 
     mock_storage.count_search_results.assert_called_once()
     call_kwargs = mock_storage.count_search_results.call_args
     assert call_kwargs.kwargs["language"] == "ja"
-    assert call_kwargs.kwargs["note_includes_text"] == "test"
+    assert call_kwargs.kwargs["note_includes_texts"] == ["test"]
 
 
 def test_search_include_total_true(client: TestClient, mock_storage: MagicMock) -> None:
