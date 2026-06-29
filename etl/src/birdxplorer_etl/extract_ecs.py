@@ -558,6 +558,12 @@ def _validate_rating_row(row: dict, existing_row_note_ids: set) -> bool:
         if value not in ["HELPFUL", "SOMEWHAT_HELPFUL", "NOT_HELPFUL"]:
             row["helpfulness_level"] = None
 
+    # rating_source_bucketedフィールドのバリデーション
+    if "rating_source_bucketed" in row:
+        value = row["rating_source_bucketed"]
+        if value not in ["DEFAULT", "POPULATION_SAMPLED"]:
+            row["rating_source_bucketed"] = None
+
     # 空文字列フィールドをNoneに変換
     for key, value in row.items():
         if value == "" and key not in ["helpfulness_level"]:
@@ -819,6 +825,9 @@ _RATING_COLUMNS = [
     "not_helpful_opinion_speculation",
     "not_helpful_note_not_needed",
     "rated_on_tweet_id",
+    "rating_source_bucketed",
+    "suggestion",
+    "suggestion_id",
 ]
 
 
