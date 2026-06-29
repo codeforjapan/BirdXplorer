@@ -294,7 +294,7 @@ class RowNoteRatingRecord(Base):
     not_helpful_note_not_needed: Mapped[BinaryBool] = mapped_column(nullable=False)
     rated_on_tweet_id: Mapped[PostId] = mapped_column(nullable=False)
     rating_source_bucketed: Mapped[Optional[str]] = mapped_column(nullable=True)
-    suggestion: Mapped[Optional[str]] = mapped_column(nullable=True)
+    suggestion: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     suggestion_id: Mapped[Optional[str]] = mapped_column(nullable=True)
 
 
