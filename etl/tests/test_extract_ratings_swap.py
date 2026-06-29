@@ -395,3 +395,83 @@ class TestExtractRatingsErrorRecovery:
             extract_ratings(mock_session, "2026/03/01", {"n1"})
 
         mock_cleanup.assert_called_once_with(mock_session)
+
+
+class TestValidateRatingRowNewFields:
+    """新規3フィールドに対する _validate_rating_row のテスト"""
+
+    def _make_row(self, **overrides: str) -> dict:
+        row = {
+            "note_id": "n1",
+            "rater_participant_id": "r1",
+            "created_at_millis": "1000",
+            "version": "1",
+            "agree": "1",
+            "disagree": "0",
+            "helpful": "1",
+            "not_helpful": "0",
+            "helpfulness_level": "HELPFUL",
+            "rated_on_tweet_id": "t1",
+        }
+        row.update(overrides)
+        return row
+
+    def test_rating_source_bucketed_default_kept(self) -> None:
+        row = self._make_row(rating_source_bucketed="DEFAULT")
+        _validate_rating_row(row, {"n1"})
+        assert row["rating_source_bucketed"] == "DEFAULT"
+
+    def test_rating_source_bucketed_population_sampled_kept(self) -> None:
+        row = self._make_row(rating_source_bucketed="POPULATION_SAMPLED")
+        _validate_rating_row(row, {"n1"})
+        assert row["rating_source_bucketed"] == "POPULATION_SAMPLED"
+
+    def test_rating_source_bucketed_invalid_set_to_none(self) -> None:
+        row = self._make_row(rating_source_bucketed="INVALID_VALUE")
+        _validate_rating_row(row, {"n1"})
+        assert row["rating_source_bucketed"] is None
+
+    def test_rating_source_bucketed_empty_set_to_none(self) -> None:
+        row = self._make_row(rating_source_bucketed="")
+        _validate_rating_row(row, {"n1"})
+        assert row["rating_source_bucketed"] is None
+
+    def test_suggestion_empty_set_to_none(self) -> None:
+        row = self._make_row(suggestion="")
+        _validate_rating_row(row, {"n1"})
+        assert row["suggestion"] is None
+
+    def test_suggestion_text_kept(self) -> None:
+        row = self._make_row(suggestion="This note should include a citation.")
+        _validate_rating_row(row, {"n1"})
+        assert row["suggestion"] == "This note should include a citation."
+
+    def test_suggestion_id_empty_set_to_none(self) -> None:
+        row = self._make_row(suggestion_id="")
+        _validate_rating_row(row, {"n1"})
+        assert row["suggestion_id"] is None
+
+    def test_suggestion_id_value_kept(self) -> None:
+        row = self._make_row(suggestion_id="1234567890123456789")
+        _validate_rating_row(row, {"n1"})
+        assert row["suggestion_id"] == "1234567890123456789"
+
+
+class TestRatingColumns:
+    """_RATING_COLUMNS の内容検証"""
+
+    def test_contains_rating_source_bucketed(self) -> None:
+        assert "rating_source_bucketed" in _RATING_COLUMNS
+
+    def test_contains_suggestion(self) -> None:
+        assert "suggestion" in _RATING_COLUMNS
+
+    def test_contains_suggestion_id(self) -> None:
+        assert "suggestion_id" in _RATING_COLUMNS
+
+    def test_rated_on_tweet_id_before_new_columns(self) -> None:
+        idx_rated = _RATING_COLUMNS.index("rated_on_tweet_id")
+        idx_source = _RATING_COLUMNS.index("rating_source_bucketed")
+        idx_suggestion = _RATING_COLUMNS.index("suggestion")
+        idx_suggestion_id = _RATING_COLUMNS.index("suggestion_id")
+        assert idx_rated < idx_source < idx_suggestion < idx_suggestion_id
