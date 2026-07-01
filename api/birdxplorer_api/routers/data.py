@@ -13,8 +13,10 @@ from pydantic import Field as PydanticField
 from typing_extensions import Annotated
 
 from birdxplorer_api.openapi_doc import (
+    V1DataExportCsvDocs,
     V1DataNotesDocs,
     V1DataPostsDocs,
+    V1DataSearchCountDocs,
     V1DataSearchDocs,
     V1DataTopicsDocs,
     V1DataUserEnrollmentsDocs,
@@ -542,26 +544,54 @@ def gen_router(storage: Storage, export_api_key: Optional[str] = None) -> APIRou
 
         return PostListResponse(data=posts, meta=PaginationMeta(next=next_url, prev=prev_url, total=total_count))
 
-    @router.get("/search/count", description="検索結果の総件数を取得する", response_model=SearchCountResponse)
+    @router.get("/search/count", description=V1DataSearchCountDocs.description, response_model=SearchCountResponse)
     def search_count(
-        note_includes_text: Union[None, List[str]] = Query(default=None),
-        note_excludes_text: Union[None, str] = Query(default=None),
-        post_includes_text: Union[None, List[str]] = Query(default=None),
-        post_excludes_text: Union[None, str] = Query(default=None),
-        language: Union[LanguageCode, None] = Query(default=None),
-        topic_ids: Union[List[TopicId], None] = Query(default=None),
-        note_status: Union[None, List[str]] = Query(default=None),
-        note_created_at_from: Union[None, TwitterTimestamp, str] = Query(default=None),
-        note_created_at_to: Union[None, TwitterTimestamp, str] = Query(default=None),
-        x_user_names: Union[List[str], None] = Query(default=None),
-        x_user_followers_count_from: Union[None, int] = Query(default=None),
-        x_user_follow_count_from: Union[None, int] = Query(default=None),
-        post_like_count_from: Union[None, int] = Query(default=None),
-        post_repost_count_from: Union[None, int] = Query(default=None),
-        post_impression_count_from: Union[None, int] = Query(default=None),
-        post_includes_media: Union[bool, None] = Query(default=None),
-        note_search_mode: TextSearchMode = Query(default=TextSearchMode.OR),
-        post_search_mode: TextSearchMode = Query(default=TextSearchMode.OR),
+        note_includes_text: Union[None, List[str]] = Query(
+            default=None, **V1DataSearchCountDocs.params["note_includes_text"]
+        ),
+        note_excludes_text: Union[None, str] = Query(
+            default=None, **V1DataSearchCountDocs.params["note_excludes_text"]
+        ),
+        post_includes_text: Union[None, List[str]] = Query(
+            default=None, **V1DataSearchCountDocs.params["post_includes_text"]
+        ),
+        post_excludes_text: Union[None, str] = Query(
+            default=None, **V1DataSearchCountDocs.params["post_excludes_text"]
+        ),
+        language: Union[LanguageCode, None] = Query(default=None, **V1DataSearchCountDocs.params["language"]),
+        topic_ids: Union[List[TopicId], None] = Query(default=None, **V1DataSearchCountDocs.params["topic_ids"]),
+        note_status: Union[None, List[str]] = Query(default=None, **V1DataSearchCountDocs.params["note_status"]),
+        note_created_at_from: Union[None, TwitterTimestamp, str] = Query(
+            default=None, **V1DataSearchCountDocs.params["note_created_at_from"]
+        ),
+        note_created_at_to: Union[None, TwitterTimestamp, str] = Query(
+            default=None, **V1DataSearchCountDocs.params["note_created_at_to"]
+        ),
+        x_user_names: Union[List[str], None] = Query(default=None, **V1DataSearchCountDocs.params["x_user_name"]),
+        x_user_followers_count_from: Union[None, int] = Query(
+            default=None, **V1DataSearchCountDocs.params["x_user_followers_count_from"]
+        ),
+        x_user_follow_count_from: Union[None, int] = Query(
+            default=None, **V1DataSearchCountDocs.params["x_user_follow_count_from"]
+        ),
+        post_like_count_from: Union[None, int] = Query(
+            default=None, **V1DataSearchCountDocs.params["post_like_count_from"]
+        ),
+        post_repost_count_from: Union[None, int] = Query(
+            default=None, **V1DataSearchCountDocs.params["post_repost_count_from"]
+        ),
+        post_impression_count_from: Union[None, int] = Query(
+            default=None, **V1DataSearchCountDocs.params["post_impression_count_from"]
+        ),
+        post_includes_media: Union[bool, None] = Query(
+            default=None, **V1DataSearchCountDocs.params["post_includes_media"]
+        ),
+        note_search_mode: TextSearchMode = Query(
+            default=TextSearchMode.OR, **V1DataSearchCountDocs.params["note_search_mode"]
+        ),
+        post_search_mode: TextSearchMode = Query(
+            default=TextSearchMode.OR, **V1DataSearchCountDocs.params["post_search_mode"]
+        ),
     ) -> SearchCountResponse:
         try:
             if note_created_at_from is not None and isinstance(note_created_at_from, str):
@@ -633,16 +663,12 @@ def gen_router(storage: Storage, export_api_key: Optional[str] = None) -> APIRou
         sort_order: SortOrder = Query(default=SortOrder.DESC, **V1DataSearchDocs.params["sort_order"]),
         offset: int = Query(default=0, ge=0, **V1DataSearchDocs.params["offset"]),
         limit: int = Query(default=100, gt=0, le=1000, **V1DataSearchDocs.params["limit"]),
-        include_total: bool = Query(
-            default=True,
-            description="総件数を含める。falseにするとCOUNTクエリをスキップしてレスポンスが高速化されます。"
-            "件数は /search/count で非同期に取得できます。",
-        ),
+        include_total: bool = Query(default=True, **V1DataSearchDocs.params["include_total"]),
         note_search_mode: TextSearchMode = Query(
-            default=TextSearchMode.OR, description="note_includes_text の複数キーワード結合方法（or / and）"
+            default=TextSearchMode.OR, **V1DataSearchDocs.params["note_search_mode"]
         ),
         post_search_mode: TextSearchMode = Query(
-            default=TextSearchMode.OR, description="post_includes_text の複数キーワード結合方法（or / and）"
+            default=TextSearchMode.OR, **V1DataSearchDocs.params["post_search_mode"]
         ),
     ) -> SearchResponse:
         # Convert timestamp strings to TwitterTimestamp objects
@@ -753,19 +779,14 @@ def gen_router(storage: Storage, export_api_key: Optional[str] = None) -> APIRou
 
     @router.get(
         "/export/csv",
-        description=(
-            "キーワード(カンマ区切り、最大50個)と作成期間(ミリ秒、最大30日)を指定して、"
-            "コミュニティノート + ポストを CSV(UTF-8 BOM 付き)でダウンロードする。"
-        ),
+        description=V1DataExportCsvDocs.description,
     )
     def export_csv(
         request: Request,
-        keywords: List[str] = Query(..., description="カンマ区切りのキーワード。最大50個、最低1個"),
-        note_created_at_from: int = Query(..., description="ノート作成期間の開始(ミリ秒)"),
-        note_created_at_to: int = Query(..., description="ノート作成期間の終了(ミリ秒)"),
-        search_mode: TextSearchMode = Query(
-            default=TextSearchMode.OR, description="キーワードの結合方法（or: いずれかを含む / and: すべてを含む）"
-        ),
+        keywords: List[str] = Query(..., **V1DataExportCsvDocs.params["keywords"]),
+        note_created_at_from: int = Query(..., **V1DataExportCsvDocs.params["note_created_at_from"]),
+        note_created_at_to: int = Query(..., **V1DataExportCsvDocs.params["note_created_at_to"]),
+        search_mode: TextSearchMode = Query(default=TextSearchMode.OR, **V1DataExportCsvDocs.params["search_mode"]),
     ) -> Response:
         if export_api_key and request.headers.get("X-API-Key") != export_api_key:
             return JSONResponse(
