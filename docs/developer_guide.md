@@ -206,12 +206,27 @@ Swagger UIでは以下の情報を確認できます：
 
 主要なエンドポイント：
 
-- `/api/v1/data/posts`: Postデータを取得
-- `/api/v1/data/notes`: コミュニティノートデータを取得
-- `/api/v1/data/topics`: トピックデータを取得
-- `/api/v1/data/search`: 検索機能
+**データ取得系**
+- `/api/v1/data/topics`: AI 自動分類されたトピック一覧を取得
+- `/api/v1/data/notes`: コミュニティノートを取得（トピック・言語・ステータス・テキスト等でフィルタ）
+- `/api/v1/data/posts`: X の投稿データを取得
+- `/api/v1/data/user-enrollments/{participant_id}`: コミュニティノート参加ユーザー情報を取得
 
-各エンドポイントの詳細なパラメータや使用例はSwagger UIで確認できます。
+**検索系**
+- `/api/v1/data/search`: アドバンスドサーチ（ノート本文・投稿本文・ユーザー属性・日付等で絞り込み。OR/AND 検索対応）
+- `/api/v1/data/search/count`: 検索結果の総件数のみを高速に取得
+- `/api/v1/data/export/csv`: キーワード＋期間指定でコミュニティノート＋投稿を CSV ダウンロード（最大 30 日・50 キーワード）
+
+**グラフ・統計系**
+- `/api/v1/graphs/daily-notes`: ノートの日別作成数
+- `/api/v1/graphs/daily-posts`: 投稿の日別件数
+- `/api/v1/graphs/notes-annual`: ノートの月別集計
+- `/api/v1/graphs/notes-evaluation`: ノートの評価指標
+- `/api/v1/graphs/notes-evaluation-status`: ノートの評価ステータス別指標
+- `/api/v1/graphs/post-influence`: 投稿の影響度
+- `/api/v1/graphs/top-note-accounts`: 上位ノート作成アカウント
+
+各エンドポイントの詳細なパラメータや使用例は Swagger UI (`/docs`) で確認できます。
 
 ---
 
