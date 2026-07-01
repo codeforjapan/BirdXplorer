@@ -591,8 +591,8 @@ v1_data_search_sort_order = FastAPIEndpointParamDocs(
     },
 )
 
-v1_data_search_note_search_mode: FastAPIEndpointParamDocs = {
-    "description": """
+v1_data_search_note_search_mode = FastAPIEndpointParamDocs(
+    description="""
 `note_includes_text` で指定した複数キーワードの結合方法。
 
 | 値  | 意味                                     |
@@ -600,7 +600,7 @@ v1_data_search_note_search_mode: FastAPIEndpointParamDocs = {
 | or  | いずれかのキーワードを含むノートを取得   |
 | and | すべてのキーワードを含むノートのみを取得 |
 """,
-    "openapi_examples": {
+    openapi_examples={
         "or": {
             "summary": "OR 検索 (デフォルト)",
             "value": "or",
@@ -610,10 +610,10 @@ v1_data_search_note_search_mode: FastAPIEndpointParamDocs = {
             "value": "and",
         },
     },
-}
+)
 
-v1_data_search_post_search_mode: FastAPIEndpointParamDocs = {
-    "description": """
+v1_data_search_post_search_mode = FastAPIEndpointParamDocs(
+    description="""
 `post_includes_text` で指定した複数キーワードの結合方法。
 
 | 値  | 意味                                      |
@@ -621,7 +621,7 @@ v1_data_search_post_search_mode: FastAPIEndpointParamDocs = {
 | or  | いずれかのキーワードを含むポストを取得    |
 | and | すべてのキーワードを含むポストのみを取得  |
 """,
-    "openapi_examples": {
+    openapi_examples={
         "or": {
             "summary": "OR 検索 (デフォルト)",
             "value": "or",
@@ -631,16 +631,16 @@ v1_data_search_post_search_mode: FastAPIEndpointParamDocs = {
             "value": "and",
         },
     },
-}
+)
 
-v1_data_search_include_total: FastAPIEndpointParamDocs = {
-    "description": """
+v1_data_search_include_total = FastAPIEndpointParamDocs(
+    description="""
 レスポンスに検索結果の総件数 (`meta.total`) を含めるかどうか。
 
 `false` にすると COUNT クエリをスキップしてレスポンスが高速化される。
 件数が不要な場合や `/search/count` で非同期取得する場合に利用する。
 """,
-    "openapi_examples": {
+    openapi_examples={
         "true": {
             "summary": "総件数を含める (デフォルト)",
             "value": True,
@@ -650,7 +650,7 @@ v1_data_search_include_total: FastAPIEndpointParamDocs = {
             "value": False,
         },
     },
-}
+)
 
 # Get /api/v1/data/search の OpenAPI ドキュメント
 V1DataSearchDocs = FastAPIEndpointDocs(
@@ -707,14 +707,14 @@ V1DataSearchCountDocs = FastAPIEndpointDocs(
     },
 )
 
-v1_data_export_keywords: FastAPIEndpointParamDocs = {
-    "description": """
+v1_data_export_keywords = FastAPIEndpointParamDocs(
+    description="""
 検索キーワード。カンマ区切りまたは複数回指定で最大 50 個まで指定できる。最低 1 個必須。
 
 指定したキーワードを含むコミュニティノートが対象となる。
 結合方法は `search_mode` パラメータで切り替えられる。
 """,
-    "openapi_examples": {
+    openapi_examples={
         "single": {
             "summary": "1 キーワード",
             "value": ["選挙"],
@@ -724,36 +724,36 @@ v1_data_export_keywords: FastAPIEndpointParamDocs = {
             "value": ["選挙,投票"],
         },
     },
-}
+)
 
-v1_data_export_note_created_at_from: FastAPIEndpointParamDocs = {
-    "description": """
+v1_data_export_note_created_at_from = FastAPIEndpointParamDocs(
+    description="""
 取得するコミュニティノートの作成日時の下限 (ミリ秒単位の UNIX EPOCH TIMESTAMP)。必須。
 期間は最大 30 日。
 """,
-    "openapi_examples": {
+    openapi_examples={
         "normal": {
             "summary": "2025 / 1 / 1 00:00 (JST) 以降",
             "value": 1735657200000,
         },
     },
-}
+)
 
-v1_data_export_note_created_at_to: FastAPIEndpointParamDocs = {
-    "description": """
+v1_data_export_note_created_at_to = FastAPIEndpointParamDocs(
+    description="""
 取得するコミュニティノートの作成日時の上限 (ミリ秒単位の UNIX EPOCH TIMESTAMP)。必須。
 期間は最大 30 日。
 """,
-    "openapi_examples": {
+    openapi_examples={
         "normal": {
             "summary": "2025 / 1 / 31 23:59 (JST) まで",
             "value": 1738335540000,
         },
     },
-}
+)
 
-v1_data_export_search_mode: FastAPIEndpointParamDocs = {
-    "description": """
+v1_data_export_search_mode = FastAPIEndpointParamDocs(
+    description="""
 キーワードの結合方法。
 
 | 値  | 意味                                     |
@@ -761,7 +761,7 @@ v1_data_export_search_mode: FastAPIEndpointParamDocs = {
 | or  | いずれかのキーワードを含むノートを取得   |
 | and | すべてのキーワードを含むノートのみを取得 |
 """,
-    "openapi_examples": {
+    openapi_examples={
         "or": {
             "summary": "OR 検索 (デフォルト)",
             "value": "or",
@@ -771,7 +771,7 @@ v1_data_export_search_mode: FastAPIEndpointParamDocs = {
             "value": "and",
         },
     },
-}
+)
 
 # Get /api/v1/data/export/csv の OpenAPI ドキュメント
 V1DataExportCsvDocs = FastAPIEndpointDocs(
