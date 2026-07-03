@@ -707,6 +707,67 @@ V1DataSearchCountDocs = FastAPIEndpointDocs(
     },
 )
 
+v1_data_note_requests_tweet_ids: FastAPIEndpointParamDocs = {
+    "description": """
+取得するノートリクエストの対象 Post の ID のリスト。指定しない場合は全てのノートリクエストが対象になる。
+""",
+}
+
+v1_data_note_requests_tweet_created_at_from: FastAPIEndpointParamDocs = {
+    "description": """
+対象 Post の作成日時の下限。**指定した日時と同時かそれより新しい** Post へのリクエストのみを取得する。
+形式は UNIX EPOCH TIME (ミリ秒)。Post の作成日時は tweet ID (snowflake) から算出したもの。
+""",
+}
+
+v1_data_note_requests_tweet_created_at_to: FastAPIEndpointParamDocs = {
+    "description": """
+対象 Post の作成日時の上限。**指定した日時より古い** Post へのリクエストのみを取得する。
+形式は UNIX EPOCH TIME (ミリ秒)。
+""",
+}
+
+v1_data_note_requests_has_post: FastAPIEndpointParamDocs = {
+    "description": """
+Post の取得状況で絞り込む。`true` で BirdXplorer が Post 本文を取得済みのもののみ、
+`false` で未取得のもののみを返す。指定しない場合は両方を返す。
+""",
+}
+
+v1_data_note_requests_offset: FastAPIEndpointParamDocs = {
+    "description": """
+取得するノートリクエストのリストの先頭からのオフセット。ページネーションに利用される。
+""",
+}
+
+v1_data_note_requests_limit: FastAPIEndpointParamDocs = {
+    "description": """
+取得するノートリクエストの最大数。最大 1000。
+""",
+}
+
+V1DataNoteRequestsDocs = FastAPIEndpointDocs(
+    "コミュニティノートのリクエスト (Note Requests) のデータを取得するエンドポイント",
+    {
+        "tweet_ids": v1_data_note_requests_tweet_ids,
+        "tweet_created_at_from": v1_data_note_requests_tweet_created_at_from,
+        "tweet_created_at_to": v1_data_note_requests_tweet_created_at_to,
+        "has_post": v1_data_note_requests_has_post,
+        "offset": v1_data_note_requests_offset,
+        "limit": v1_data_note_requests_limit,
+    },
+)
+
+V1DataNoteRequestsCountDocs = FastAPIEndpointDocs(
+    "条件に一致するコミュニティノートのリクエストの件数を取得するエンドポイント",
+    {
+        "tweet_ids": v1_data_note_requests_tweet_ids,
+        "tweet_created_at_from": v1_data_note_requests_tweet_created_at_from,
+        "tweet_created_at_to": v1_data_note_requests_tweet_created_at_to,
+        "has_post": v1_data_note_requests_has_post,
+    },
+)
+
 v1_data_export_keywords = FastAPIEndpointParamDocs(
     description="""
 検索キーワード。カンマ区切りまたは複数回指定で最大 50 個まで指定できる。最低 1 個必須。

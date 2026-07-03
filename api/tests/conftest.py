@@ -21,6 +21,8 @@ from birdxplorer_common.models import (
     Media,
     Note,
     NoteId,
+    NoteRequest,
+    NoteRequestSuggestion,
     ParticipantId,
     Post,
     PostId,
@@ -81,6 +83,11 @@ class MediaFactory(ModelFactory[Media]):
 class PostFactory(ModelFactory[Post]):
     __model__ = Post
     __check_model__ = False
+
+
+@register_fixture(name="note_request_factory")
+class NoteRequestFactory(ModelFactory[NoteRequest]):
+    __model__ = NoteRequest
 
 
 @register_fixture(name="link_factory")
@@ -347,12 +354,44 @@ https://t.co/yyyyyyyyyyy/ #学び #自己啓発""",
 
 
 @fixture
+def note_request_samples(
+    note_request_factory: NoteRequestFactory, post_samples: List[Post]
+) -> Generator[List[NoteRequest], None, None]:
+    note_requests = [
+        note_request_factory.build(
+            tweet_id=post_samples[0].post_id,
+            note_request_feed_eligible_at=1782900000000,
+            api_small_feed_eligible_at=None,
+            api_large_feed_eligible_at=None,
+            api_xl_feed_eligible_at=None,
+            source_links=[],
+            suggestions=[],
+            tweet_created_at=1782870000000,
+            post=post_samples[0],
+        ),
+        note_request_factory.build(
+            tweet_id="9994567890123456789",
+            note_request_feed_eligible_at=None,
+            api_small_feed_eligible_at=None,
+            api_large_feed_eligible_at=None,
+            api_xl_feed_eligible_at=None,
+            source_links=["https://x.com/i/status/123"],
+            suggestions=[NoteRequestSuggestion(suggestion_id="1", suggestion="テスト", source_link=None)],
+            tweet_created_at=1782950000000,
+            post=None,
+        ),
+    ]
+    yield note_requests
+
+
+@fixture
 def mock_storage(
     user_enrollment_samples: List[UserEnrollment],
     topic_samples: List[Topic],
     media_samples: List[Media],
     post_samples: List[Post],
     note_samples: List[Note],
+    note_request_samples: List[NoteRequest],
     link_samples: List[Link],
 ) -> Generator[MagicMock, None, None]:
     mock = MagicMock(spec=Storage)
@@ -604,6 +643,45 @@ def mock_storage(
         return []
 
     mock.search_notes_with_posts_for_csv.side_effect = _search_notes_with_posts_for_csv
+
+    def _get_note_requests(
+        tweet_ids: Union[List[PostId], None] = None,
+        tweet_created_at_from: Union[TwitterTimestamp, None] = None,
+        tweet_created_at_to: Union[TwitterTimestamp, None] = None,
+        has_post: Union[bool, None] = None,
+        offset: Union[int, None] = None,
+        limit: int = 100,
+    ) -> Generator[NoteRequest, None, None]:
+        filtered = []
+        for r in note_request_samples:
+            if tweet_ids is not None and r.tweet_id not in tweet_ids:
+                continue
+            if tweet_created_at_from is not None and (
+                r.tweet_created_at is None or r.tweet_created_at < tweet_created_at_from
+            ):
+                continue
+            if tweet_created_at_to is not None and (
+                r.tweet_created_at is None or r.tweet_created_at >= tweet_created_at_to
+            ):
+                continue
+            if has_post is True and r.post is None:
+                continue
+            if has_post is False and r.post is not None:
+                continue
+            filtered.append(r)
+        yield from filtered[offset or 0 : (offset or 0) + limit]
+
+    mock.get_note_requests.side_effect = _get_note_requests
+
+    def _get_number_of_note_requests(
+        tweet_ids: Union[List[PostId], None] = None,
+        tweet_created_at_from: Union[TwitterTimestamp, None] = None,
+        tweet_created_at_to: Union[TwitterTimestamp, None] = None,
+        has_post: Union[bool, None] = None,
+    ) -> int:
+        return len(list(_get_note_requests(tweet_ids, tweet_created_at_from, tweet_created_at_to, has_post, 0, 10**9)))
+
+    mock.get_number_of_note_requests.side_effect = _get_number_of_note_requests
 
     yield mock
 
