@@ -16,6 +16,7 @@ from birdxplorer_etl.extract_ecs import (  # noqa: E402
     enqueue_note_request_lookups,
     extract_note_requests,
     parse_note_request_row,
+    run_note_requests_phase,
     tweet_created_at_from_id,
 )
 
@@ -169,3 +170,21 @@ class TestEnqueueNoteRequestLookups:
                 enqueue_note_request_lookups(session)
         assert send.call_count == 0
         assert session.execute.call_count == 0
+
+
+class TestRunNoteRequestsPhase:
+    def test_swallows_exceptions(self):
+        session = MagicMock()
+        with patch(
+            "birdxplorer_etl.extract_ecs.extract_note_requests",
+            side_effect=RuntimeError("SQS send failed"),
+        ):
+            run_note_requests_phase(session)  # 例外が伝播しなければ成功
+
+    def test_calls_both_functions(self):
+        session = MagicMock()
+        with patch("birdxplorer_etl.extract_ecs.extract_note_requests") as ext:
+            with patch("birdxplorer_etl.extract_ecs.enqueue_note_request_lookups") as enq:
+                run_note_requests_phase(session)
+        ext.assert_called_once_with(session)
+        enq.assert_called_once_with(session)
