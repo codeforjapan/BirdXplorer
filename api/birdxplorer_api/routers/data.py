@@ -14,6 +14,8 @@ from typing_extensions import Annotated
 
 from birdxplorer_api.openapi_doc import (
     V1DataExportCsvDocs,
+    V1DataNoteRequestsCountDocs,
+    V1DataNoteRequestsDocs,
     V1DataNotesDocs,
     V1DataPostsDocs,
     V1DataSearchCountDocs,
@@ -27,6 +29,7 @@ from birdxplorer_common.models import (
     LongHttpUrl,
     Note,
     NoteId,
+    NoteRequest,
     PaginationMeta,
     ParticipantId,
     Post,
@@ -378,6 +381,11 @@ class SearchCountResponse(BaseModel):
     total: Annotated[int, PydanticField(description="検索結果の総件数")]
 
 
+class NoteRequestListResponse(BaseModel):
+    data: Annotated[List[NoteRequest], PydanticField(description="ノートリクエストのリスト")]
+    meta: PaginationMeta
+
+
 def str_to_twitter_timestamp(s: str) -> TwitterTimestamp:
     try:
         return TwitterTimestamp.from_int(int(s))
@@ -543,6 +551,94 @@ def gen_router(storage: Storage, export_api_key: Optional[str] = None) -> APIRou
             prev_url = f"{base_url}?offset={prev_offset}&limit={limit}"
 
         return PostListResponse(data=posts, meta=PaginationMeta(next=next_url, prev=prev_url, total=total_count))
+
+    @router.get(
+        "/note-requests",
+        description=V1DataNoteRequestsDocs.description,
+        response_model=NoteRequestListResponse,
+    )
+    def get_note_requests(
+        request: Request,
+        tweet_ids: Union[List[PostId], None] = Query(default=None, **V1DataNoteRequestsDocs.params["tweet_ids"]),
+        tweet_created_at_from: Union[None, TwitterTimestamp, str] = Query(
+            default=None, **V1DataNoteRequestsDocs.params["tweet_created_at_from"]
+        ),
+        tweet_created_at_to: Union[None, TwitterTimestamp, str] = Query(
+            default=None, **V1DataNoteRequestsDocs.params["tweet_created_at_to"]
+        ),
+        has_post: Union[bool, None] = Query(default=None, **V1DataNoteRequestsDocs.params["has_post"]),
+        offset: int = Query(default=0, ge=0, **V1DataNoteRequestsDocs.params["offset"]),
+        limit: int = Query(default=100, gt=0, le=1000, **V1DataNoteRequestsDocs.params["limit"]),
+    ) -> NoteRequestListResponse:
+        try:
+            if tweet_created_at_from is not None and isinstance(tweet_created_at_from, str):
+                tweet_created_at_from = ensure_twitter_timestamp(tweet_created_at_from)
+            if tweet_created_at_to is not None and isinstance(tweet_created_at_to, str):
+                tweet_created_at_to = ensure_twitter_timestamp(tweet_created_at_to)
+        except OverflowError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+        note_requests = list(
+            storage.get_note_requests(
+                tweet_ids=tweet_ids,
+                tweet_created_at_from=tweet_created_at_from,
+                tweet_created_at_to=tweet_created_at_to,
+                has_post=has_post,
+                offset=offset,
+                limit=limit,
+            )
+        )
+        total_count = storage.get_number_of_note_requests(
+            tweet_ids=tweet_ids,
+            tweet_created_at_from=tweet_created_at_from,
+            tweet_created_at_to=tweet_created_at_to,
+            has_post=has_post,
+        )
+
+        base_url = str(request.url).split("?")[0]
+        next_offset = offset + limit
+        prev_offset = max(offset - limit, 0)
+        next_url = None
+        if next_offset < total_count:
+            next_url = f"{base_url}?offset={next_offset}&limit={limit}"
+        prev_url = None
+        if offset > 0:
+            prev_url = f"{base_url}?offset={prev_offset}&limit={limit}"
+
+        return NoteRequestListResponse(
+            data=note_requests, meta=PaginationMeta(next=next_url, prev=prev_url, total=total_count)
+        )
+
+    @router.get(
+        "/note-requests/count",
+        description=V1DataNoteRequestsCountDocs.description,
+        response_model=SearchCountResponse,
+    )
+    def get_note_requests_count(
+        tweet_ids: Union[List[PostId], None] = Query(default=None, **V1DataNoteRequestsCountDocs.params["tweet_ids"]),
+        tweet_created_at_from: Union[None, TwitterTimestamp, str] = Query(
+            default=None, **V1DataNoteRequestsCountDocs.params["tweet_created_at_from"]
+        ),
+        tweet_created_at_to: Union[None, TwitterTimestamp, str] = Query(
+            default=None, **V1DataNoteRequestsCountDocs.params["tweet_created_at_to"]
+        ),
+        has_post: Union[bool, None] = Query(default=None, **V1DataNoteRequestsCountDocs.params["has_post"]),
+    ) -> SearchCountResponse:
+        try:
+            if tweet_created_at_from is not None and isinstance(tweet_created_at_from, str):
+                tweet_created_at_from = ensure_twitter_timestamp(tweet_created_at_from)
+            if tweet_created_at_to is not None and isinstance(tweet_created_at_to, str):
+                tweet_created_at_to = ensure_twitter_timestamp(tweet_created_at_to)
+        except OverflowError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+        total_count = storage.get_number_of_note_requests(
+            tweet_ids=tweet_ids,
+            tweet_created_at_from=tweet_created_at_from,
+            tweet_created_at_to=tweet_created_at_to,
+            has_post=has_post,
+        )
+        return SearchCountResponse(total=total_count)
 
     @router.get("/search/count", description=V1DataSearchCountDocs.description, response_model=SearchCountResponse)
     def search_count(
