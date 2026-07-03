@@ -948,3 +948,68 @@ def _cleanup_staging_table(postgresql: Session) -> None:
     except Exception as e:
         logging.warning(f"Staging table cleanup failed: {e}")
         postgresql.rollback()
+
+
+# ---- Note Requests (batSignals) ----
+
+TWITTER_SNOWFLAKE_EPOCH_MILLIS = 1288834974657
+# snowflake 以前の連番 ID は最大 ~3.0e10。snowflake ID は ~1e13 以上なので 1e12 を閾値にする
+_MIN_SNOWFLAKE_TWEET_ID = 1_000_000_000_000
+# 2026-07-01T00:00:00Z。これ以降に作成された tweet のみ X API lookup 対象にする
+NOTE_REQUEST_LOOKUP_MIN_TWEET_CREATED_AT = 1782864000000
+
+
+def tweet_created_at_from_id(tweet_id: int):
+    """snowflake ID から作成時刻 (ミリ秒 UNIX EPOCH) を算出する。snowflake 以前の旧 ID は None。"""
+    if tweet_id < _MIN_SNOWFLAKE_TWEET_ID:
+        return None
+    return (tweet_id >> 22) + TWITTER_SNOWFLAKE_EPOCH_MILLIS
+
+
+def _parse_note_request_millis(value):
+    if value is None or value == "":
+        return None
+    try:
+        millis = int(value)
+    except ValueError:
+        return None
+    return millis if millis > 0 else None
+
+
+def _parse_note_request_source_links(value):
+    # sourceLinks は公式ドキュメントに反して JSON ではなくカンマ区切りの URL 文字列
+    if value is None or value.strip() == "":
+        return None
+    return [u for u in (s.strip() for s in value.split(",")) if u]
+
+
+def _parse_note_request_suggestions(value, tweet_id: str):
+    if value is None or value.strip() == "":
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        logging.warning(f"Failed to parse suggestions for tweet {tweet_id}: {value[:100]}")
+        return None
+    if not isinstance(parsed, list) or not parsed:
+        return None
+    return parsed
+
+
+def parse_note_request_row(row: dict):
+    """snake_case 化済みの batSignals TSV 行を row_note_requests のカラム dict に変換する。"""
+    tweet_id = (row.get("tweet_id") or "").strip()
+    if not tweet_id.isdigit():
+        return None
+    return {
+        "tweet_id": tweet_id,
+        "note_request_feed_eligible_at_millis": _parse_note_request_millis(
+            row.get("note_request_feed_eligible_at_millis")
+        ),
+        "api_small_feed_eligible_at_millis": _parse_note_request_millis(row.get("api_small_feed_eligible_at_millis")),
+        "api_large_feed_eligible_at_millis": _parse_note_request_millis(row.get("api_large_feed_eligible_at_millis")),
+        "api_xl_feed_eligible_at_millis": _parse_note_request_millis(row.get("api_xl_feed_eligible_at_millis")),
+        "source_links": _parse_note_request_source_links(row.get("source_links")),
+        "suggestions": _parse_note_request_suggestions(row.get("suggestions"), tweet_id),
+        "tweet_created_at": tweet_created_at_from_id(int(tweet_id)),
+    }
