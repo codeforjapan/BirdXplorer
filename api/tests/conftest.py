@@ -88,6 +88,7 @@ class PostFactory(ModelFactory[Post]):
 @register_fixture(name="note_request_factory")
 class NoteRequestFactory(ModelFactory[NoteRequest]):
     __model__ = NoteRequest
+    __check_model__ = False
 
 
 @register_fixture(name="link_factory")

@@ -442,8 +442,7 @@ def extract_data(postgresql: Session):
     logging.info(f"[PHASE_COMPLETE] Backfill: {time.time() - phase_start:.1f}s")
 
     # Note Requests (batSignals) の取り込みと投稿 lookup の enqueue
-    extract_note_requests(postgresql)
-    enqueue_note_request_lookups(postgresql)
+    run_note_requests_phase(postgresql)
 
     return
 
@@ -1120,3 +1119,12 @@ def enqueue_note_request_lookups(postgresql: Session, batch_limit: int = 10000):
         if len(rows) < batch_limit:
             break
     logging.info(f"Enqueued {total} note request tweet lookups")
+
+
+def run_note_requests_phase(postgresql: Session):
+    """Note Requests の取り込みと lookup enqueue。失敗しても extract 全体は落とさない。"""
+    try:
+        extract_note_requests(postgresql)
+        enqueue_note_request_lookups(postgresql)
+    except Exception:
+        logging.exception("Note requests phase failed, continuing")
