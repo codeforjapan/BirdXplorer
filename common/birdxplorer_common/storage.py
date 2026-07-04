@@ -1629,9 +1629,10 @@ class Storage:
         has_post: Union[bool, None] = None,
     ) -> int:
         with Session(self.engine) as sess:
-            query = sess.query(RowNoteRequestRecord).outerjoin(
-                PostRecord, RowNoteRequestRecord.tweet_id == PostRecord.post_id
-            )
+            query = sess.query(RowNoteRequestRecord)
+            if has_post is not None:
+                # posts への join は has_post フィルタでのみ必要 (post_id は PK 同士なので行数は変わらない)
+                query = query.outerjoin(PostRecord, RowNoteRequestRecord.tweet_id == PostRecord.post_id)
             query = self._apply_note_request_filters(
                 query, tweet_ids, tweet_created_at_from, tweet_created_at_to, has_post
             )
