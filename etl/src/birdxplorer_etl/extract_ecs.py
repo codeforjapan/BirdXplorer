@@ -6,6 +6,7 @@ import os
 import time
 import zipfile
 from datetime import datetime, timedelta
+from typing import Optional
 
 import boto3
 import requests
@@ -957,13 +958,14 @@ def _cleanup_staging_table(postgresql: Session) -> None:
 # ---- Note Requests (batSignals) ----
 
 TWITTER_SNOWFLAKE_EPOCH_MILLIS = 1288834974657
-# snowflake 以前の連番 ID は最大 ~3.0e10。snowflake ID は ~1e13 以上なので 1e12 を閾値にする
+# snowflake 以前の連番 ID は最大 ~3.0e10。1e12 はその上に余裕を持たせた閾値
+# (snowflake 移行直後の数分間に採番された極小 ID は None 側に倒れるが実害なし)
 _MIN_SNOWFLAKE_TWEET_ID = 1_000_000_000_000
 # 2026-07-01T00:00:00Z。これ以降に作成された tweet のみ X API lookup 対象にする
 NOTE_REQUEST_LOOKUP_MIN_TWEET_CREATED_AT = 1782864000000
 
 
-def tweet_created_at_from_id(tweet_id: int):
+def tweet_created_at_from_id(tweet_id: int) -> Optional[int]:
     """snowflake ID から作成時刻 (ミリ秒 UNIX EPOCH) を算出する。snowflake 以前の旧 ID は None。"""
     if tweet_id < _MIN_SNOWFLAKE_TWEET_ID:
         return None
@@ -1116,8 +1118,6 @@ def enqueue_note_request_lookups(postgresql: Session, batch_limit: int = 10000):
         )
         postgresql.commit()
         total += len(tweet_ids)
-        if len(rows) < batch_limit:
-            break
     logging.info(f"Enqueued {total} note request tweet lookups")
 
 

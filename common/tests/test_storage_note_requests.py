@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from birdxplorer_common.models import Post
+from birdxplorer_common.models import Post, PostId
 from birdxplorer_common.storage import PostRecord, RowNoteRequestRecord, Storage
 
 
@@ -119,3 +119,26 @@ def test_get_number_of_note_requests(
 ) -> None:
     storage = Storage(engine=engine_for_test)
     assert storage.get_number_of_note_requests(**filter_args) == expected_count
+
+
+def test_get_note_requests_out_of_range_millis_returns_none(engine_for_test: Engine) -> None:
+    # TwitterTimestamp の下限未満の異常値が DB に入っていても API を 500 にせず None に落とす
+    with Session(engine_for_test) as sess:
+        sess.add(
+            RowNoteRequestRecord(
+                tweet_id="30",
+                note_request_feed_eligible_at_millis=123,
+                api_small_feed_eligible_at_millis=None,
+                api_large_feed_eligible_at_millis=None,
+                api_xl_feed_eligible_at_millis=None,
+                source_links=None,
+                suggestions=None,
+                tweet_created_at=None,
+                lookup_enqueued_at=None,
+            )
+        )
+        sess.commit()
+    storage = Storage(engine=engine_for_test)
+    actual = list(storage.get_note_requests(tweet_ids=[PostId.from_str("30")]))
+    assert len(actual) == 1
+    assert actual[0].note_request_feed_eligible_at is None
