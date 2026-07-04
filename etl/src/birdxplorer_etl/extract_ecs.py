@@ -6,6 +6,7 @@ import os
 import time
 import zipfile
 from datetime import datetime, timedelta
+from typing import Optional
 
 import boto3
 import requests
@@ -19,6 +20,7 @@ from birdxplorer_common.storage import (
     NoteRecord,
     RowNoteRatingRecord,
     RowNoteRecord,
+    RowNoteRequestRecord,
     RowNoteStatusRecord,
 )
 
@@ -439,6 +441,9 @@ def extract_data(postgresql: Session):
     phase_start = time.time()
     backfill_missing_notes(postgresql)
     logging.info(f"[PHASE_COMPLETE] Backfill: {time.time() - phase_start:.1f}s")
+
+    # Note Requests (batSignals) の取り込みと投稿 lookup の enqueue
+    run_note_requests_phase(postgresql)
 
     return
 
@@ -948,3 +953,178 @@ def _cleanup_staging_table(postgresql: Session) -> None:
     except Exception as e:
         logging.warning(f"Staging table cleanup failed: {e}")
         postgresql.rollback()
+
+
+# ---- Note Requests (batSignals) ----
+
+TWITTER_SNOWFLAKE_EPOCH_MILLIS = 1288834974657
+# snowflake 以前の連番 ID は最大 ~3.0e10。1e12 はその上に余裕を持たせた閾値
+# (snowflake 移行直後の数分間に採番された極小 ID は None 側に倒れるが実害なし)
+_MIN_SNOWFLAKE_TWEET_ID = 1_000_000_000_000
+# 2026-07-01T00:00:00Z。これ以降に作成された tweet のみ X API lookup 対象にする
+NOTE_REQUEST_LOOKUP_MIN_TWEET_CREATED_AT = 1782864000000
+
+
+def tweet_created_at_from_id(tweet_id: int) -> Optional[int]:
+    """snowflake ID から作成時刻 (ミリ秒 UNIX EPOCH) を算出する。snowflake 以前の旧 ID は None。"""
+    if tweet_id < _MIN_SNOWFLAKE_TWEET_ID:
+        return None
+    return (tweet_id >> 22) + TWITTER_SNOWFLAKE_EPOCH_MILLIS
+
+
+def _parse_note_request_millis(value):
+    if value is None or value == "":
+        return None
+    try:
+        millis = int(value)
+    except ValueError:
+        return None
+    return millis if millis > 0 else None
+
+
+def _parse_note_request_source_links(value):
+    # sourceLinks は公式ドキュメントに反して JSON ではなくカンマ区切りの URL 文字列
+    if value is None or value.strip() == "":
+        return None
+    return [u for u in (s.strip() for s in value.split(",")) if u]
+
+
+def _parse_note_request_suggestions(value, tweet_id: str):
+    if value is None or value.strip() == "":
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        logging.warning(f"Failed to parse suggestions for tweet {tweet_id}: {value[:100]}")
+        return None
+    if not isinstance(parsed, list) or not parsed:
+        return None
+    return parsed
+
+
+def parse_note_request_row(row: dict):
+    """snake_case 化済みの batSignals TSV 行を row_note_requests のカラム dict に変換する。"""
+    tweet_id = (row.get("tweet_id") or "").strip()
+    if not tweet_id.isdigit():
+        return None
+    return {
+        "tweet_id": tweet_id,
+        "note_request_feed_eligible_at_millis": _parse_note_request_millis(
+            row.get("note_request_feed_eligible_at_millis")
+        ),
+        "api_small_feed_eligible_at_millis": _parse_note_request_millis(row.get("api_small_feed_eligible_at_millis")),
+        "api_large_feed_eligible_at_millis": _parse_note_request_millis(row.get("api_large_feed_eligible_at_millis")),
+        "api_xl_feed_eligible_at_millis": _parse_note_request_millis(row.get("api_xl_feed_eligible_at_millis")),
+        "source_links": _parse_note_request_source_links(row.get("source_links")),
+        "suggestions": _parse_note_request_suggestions(row.get("suggestions"), tweet_id),
+        "tweet_created_at": tweet_created_at_from_id(int(tweet_id)),
+    }
+
+
+_NOTE_REQUEST_UPDATE_COLUMNS = [
+    "note_request_feed_eligible_at_millis",
+    "api_small_feed_eligible_at_millis",
+    "api_large_feed_eligible_at_millis",
+    "api_xl_feed_eligible_at_millis",
+    "source_links",
+    "suggestions",
+]
+
+
+def _flush_note_request_batch(postgresql: Session, batch: list):
+    if not batch:
+        return
+    stmt = insert(RowNoteRequestRecord).values(batch)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["tweet_id"],
+        set_={col: getattr(stmt.excluded, col) for col in _NOTE_REQUEST_UPDATE_COLUMNS},
+    )
+    postgresql.execute(stmt)
+    postgresql.commit()
+
+
+def extract_note_requests(postgresql: Session):
+    """batSignals (Note Requests) の日次スナップショットを row_note_requests に UPSERT する。"""
+    phase_start = time.time()
+    for days_ago in range(3):  # 今日、昨日、一昨日
+        date = datetime.now() - timedelta(days=days_ago)
+        dateString = date.strftime("%Y/%m/%d")
+        url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/batSignals/batSignals-00000.zip"
+        logging.info(f"Fetching note requests from: {url}")
+        res = requests.get(url)
+        if res.status_code == 404:
+            logging.info(f"No note requests data available for {dateString}, trying previous day")
+            continue
+        if res.status_code != 200:
+            logging.warning(f"Unexpected status code {res.status_code} for note requests, skipping day")
+            continue
+        with zipfile.ZipFile(io.BytesIO(res.content)) as zip_file:
+            tsv_filename = "batSignals-00000.tsv"
+            if tsv_filename not in zip_file.namelist():
+                logging.error(f"TSV file {tsv_filename} not found in the zip file.")
+                return
+            with zip_file.open(tsv_filename) as tsv_file:
+                tsv_data = tsv_file.read().decode("utf-8").splitlines()
+                reader = csv.DictReader(tsv_data, delimiter="\t")
+                reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
+                rows_by_id = {}
+                total = 0
+                for row in reader:
+                    parsed = parse_note_request_row(row)
+                    if parsed is None:
+                        continue
+                    rows_by_id[parsed["tweet_id"]] = parsed
+                    if len(rows_by_id) >= 10000:
+                        _flush_note_request_batch(postgresql, list(rows_by_id.values()))
+                        total += len(rows_by_id)
+                        rows_by_id = {}
+                _flush_note_request_batch(postgresql, list(rows_by_id.values()))
+                total += len(rows_by_id)
+        logging.info(f"[PHASE_COMPLETE] NoteRequests: {total} rows in {time.time() - phase_start:.1f}s")
+        return
+    logging.warning("No note requests data found in the last 3 days")
+
+
+def enqueue_note_request_lookups(postgresql: Session, batch_limit: int = 10000):
+    """2026-07-01 以降に作成され、投稿未取得かつ未 enqueue の tweet を tweet-lookup-queue に流す。"""
+    if not settings.TWEET_LOOKUP_QUEUE_URL:
+        logging.info("TWEET_LOOKUP_QUEUE_URL not set, skipping note request lookups")
+        return
+    now_millis = int(time.time() * 1000)
+    total = 0
+    while True:
+        rows = postgresql.execute(
+            text(
+                "SELECT r.tweet_id FROM row_note_requests r "
+                "WHERE r.tweet_created_at >= :min_created_at "
+                "AND r.lookup_enqueued_at IS NULL "
+                "AND NOT EXISTS (SELECT 1 FROM row_posts p WHERE p.post_id = r.tweet_id) "
+                "ORDER BY r.tweet_id LIMIT :batch_limit"
+            ),
+            {
+                "min_created_at": NOTE_REQUEST_LOOKUP_MIN_TWEET_CREATED_AT,
+                "batch_limit": batch_limit,
+            },
+        ).fetchall()
+        if not rows:
+            break
+        tweet_ids = [r[0] for r in rows]
+        messages = [{"MessageBody": json.dumps({"tweet_id": tweet_id})} for tweet_id in tweet_ids]
+        _send_sqs_batch(settings.TWEET_LOOKUP_QUEUE_URL, messages)
+        postgresql.execute(
+            update(RowNoteRequestRecord)
+            .where(RowNoteRequestRecord.tweet_id.in_(tweet_ids))
+            .values(lookup_enqueued_at=now_millis)
+        )
+        postgresql.commit()
+        total += len(tweet_ids)
+    logging.info(f"Enqueued {total} note request tweet lookups")
+
+
+def run_note_requests_phase(postgresql: Session):
+    """Note Requests の取り込みと lookup enqueue。失敗しても extract 全体は落とさない。"""
+    try:
+        extract_note_requests(postgresql)
+        enqueue_note_request_lookups(postgresql)
+    except Exception:
+        logging.exception("Note requests phase failed, continuing")
