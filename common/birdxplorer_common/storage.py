@@ -1549,7 +1549,13 @@ class Storage:
         self, record: RowNoteRequestRecord, post_record: Optional[PostRecord]
     ) -> NoteRequestModel:
         def _millis(value: Optional[int]) -> Optional[TwitterTimestamp]:
-            return TwitterTimestamp.from_int(value) if value is not None else None
+            if value is None:
+                return None
+            try:
+                return TwitterTimestamp.from_int(value)
+            except ValueError:
+                # 外部データ由来の範囲外 millis で API 全体を 500 にしない
+                return None
 
         suggestions = [
             NoteRequestSuggestionModel(

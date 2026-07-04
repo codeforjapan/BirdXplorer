@@ -149,7 +149,9 @@ class TestEnqueueNoteRequestLookups:
         session = MagicMock()
         select_result = MagicMock()
         select_result.fetchall.return_value = [("2072000000000000000",), ("2072000000000000001",)]
-        session.execute.side_effect = [select_result, MagicMock()]
+        empty_result = MagicMock()
+        empty_result.fetchall.return_value = []
+        session.execute.side_effect = [select_result, MagicMock(), empty_result]
         with patch("birdxplorer_etl.extract_ecs.settings") as mock_settings:
             mock_settings.TWEET_LOOKUP_QUEUE_URL = "https://sqs.example.com/queue"
             with patch("birdxplorer_etl.extract_ecs._send_sqs_batch") as send:
@@ -158,8 +160,8 @@ class TestEnqueueNoteRequestLookups:
         assert send.call_args[0][0] == "https://sqs.example.com/queue"
         bodies = [json.loads(m["MessageBody"]) for m in send.call_args[0][1]]
         assert bodies == [{"tweet_id": "2072000000000000000"}, {"tweet_id": "2072000000000000001"}]
-        # select + update の 2 回実行され、commit されている
-        assert session.execute.call_count == 2
+        # select + update + 終端確認の select の 3 回実行され、commit されている
+        assert session.execute.call_count == 3
         assert session.commit.call_count == 1
 
     def test_skips_when_queue_url_not_set(self):
