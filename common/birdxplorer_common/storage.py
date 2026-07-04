@@ -4,6 +4,7 @@ from typing import Any, Generator, List, NamedTuple, Optional, Tuple, Union
 from psycopg2.extensions import AsIs, register_adapter
 from pydantic import AnyUrl, HttpUrl
 from sqlalchemy import (
+    BigInteger,
     ForeignKey,
     and_,
     case,
@@ -14,6 +15,7 @@ from sqlalchemy import (
     select,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 from sqlalchemy.orm.query import RowReturningQuery
@@ -36,6 +38,10 @@ from .models import (
 from .models import Note as NoteModel
 from .models import (
     NoteId,
+)
+from .models import NoteRequest as NoteRequestModel
+from .models import NoteRequestSuggestion as NoteRequestSuggestionModel
+from .models import (
     NotesClassification,
     NotesHarmful,
     NoteStatusHistory,
@@ -296,6 +302,20 @@ class RowNoteRatingRecord(Base):
     rating_source_bucketed: Mapped[Optional[str]] = mapped_column(nullable=True)
     suggestion: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     suggestion_id: Mapped[Optional[str]] = mapped_column(nullable=True)
+
+
+class RowNoteRequestRecord(Base):
+    __tablename__ = "row_note_requests"
+
+    tweet_id: Mapped[PostId] = mapped_column(primary_key=True)
+    note_request_feed_eligible_at_millis: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    api_small_feed_eligible_at_millis: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    api_large_feed_eligible_at_millis: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    api_xl_feed_eligible_at_millis: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    source_links: Mapped[Optional[Any]] = mapped_column(JSONB, nullable=True)
+    suggestions: Mapped[Optional[Any]] = mapped_column(JSONB, nullable=True)
+    tweet_created_at: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    lookup_enqueued_at: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
 
 
 class RowPostRecord(Base):
@@ -1524,6 +1544,99 @@ class Storage:
                     .filter(LinkRecord.url == search_url)
                 )
             return query.count()
+
+    def _note_request_record_to_model(
+        self, record: RowNoteRequestRecord, post_record: Optional[PostRecord]
+    ) -> NoteRequestModel:
+        def _millis(value: Optional[int]) -> Optional[TwitterTimestamp]:
+            if value is None:
+                return None
+            try:
+                return TwitterTimestamp.from_int(value)
+            except ValueError:
+                # 外部データ由来の範囲外 millis で API 全体を 500 にしない
+                return None
+
+        suggestions = [
+            NoteRequestSuggestionModel(
+                suggestion_id=str(s["suggestion_id"]) if s.get("suggestion_id") is not None else None,
+                suggestion=s.get("suggestion"),
+                source_link=s.get("source_link") or None,
+            )
+            for s in (record.suggestions or [])
+            if isinstance(s, dict)
+        ]
+        return NoteRequestModel(
+            tweet_id=record.tweet_id,
+            note_request_feed_eligible_at=_millis(record.note_request_feed_eligible_at_millis),
+            api_small_feed_eligible_at=_millis(record.api_small_feed_eligible_at_millis),
+            api_large_feed_eligible_at=_millis(record.api_large_feed_eligible_at_millis),
+            api_xl_feed_eligible_at=_millis(record.api_xl_feed_eligible_at_millis),
+            source_links=list(record.source_links or []),
+            suggestions=suggestions,
+            tweet_created_at=_millis(record.tweet_created_at),
+            post=self._post_record_to_model(post_record, with_media=True) if post_record is not None else None,
+        )
+
+    @staticmethod
+    def _apply_note_request_filters(
+        query: Any,
+        tweet_ids: Union[List[PostId], None] = None,
+        tweet_created_at_from: Union[TwitterTimestamp, None] = None,
+        tweet_created_at_to: Union[TwitterTimestamp, None] = None,
+        has_post: Union[bool, None] = None,
+    ) -> Any:
+        if tweet_ids is not None:
+            query = query.filter(RowNoteRequestRecord.tweet_id.in_(tweet_ids))
+        if tweet_created_at_from is not None:
+            query = query.filter(RowNoteRequestRecord.tweet_created_at >= tweet_created_at_from)
+        if tweet_created_at_to is not None:
+            query = query.filter(RowNoteRequestRecord.tweet_created_at < tweet_created_at_to)
+        if has_post is True:
+            query = query.filter(PostRecord.post_id.isnot(None))
+        elif has_post is False:
+            query = query.filter(PostRecord.post_id.is_(None))
+        return query
+
+    def get_note_requests(
+        self,
+        tweet_ids: Union[List[PostId], None] = None,
+        tweet_created_at_from: Union[TwitterTimestamp, None] = None,
+        tweet_created_at_to: Union[TwitterTimestamp, None] = None,
+        has_post: Union[bool, None] = None,
+        offset: Union[int, None] = None,
+        limit: int = 100,
+    ) -> Generator[NoteRequestModel, None, None]:
+        with Session(self.engine) as sess:
+            query = sess.query(RowNoteRequestRecord, PostRecord).outerjoin(
+                PostRecord, RowNoteRequestRecord.tweet_id == PostRecord.post_id
+            )
+            query = self._apply_note_request_filters(
+                query, tweet_ids, tweet_created_at_from, tweet_created_at_to, has_post
+            )
+            query = query.order_by(RowNoteRequestRecord.tweet_id)
+            if offset is not None:
+                query = query.offset(offset)
+            query = query.limit(limit)
+            for record, post_record in query.all():
+                yield self._note_request_record_to_model(record, post_record)
+
+    def get_number_of_note_requests(
+        self,
+        tweet_ids: Union[List[PostId], None] = None,
+        tweet_created_at_from: Union[TwitterTimestamp, None] = None,
+        tweet_created_at_to: Union[TwitterTimestamp, None] = None,
+        has_post: Union[bool, None] = None,
+    ) -> int:
+        with Session(self.engine) as sess:
+            query = sess.query(RowNoteRequestRecord)
+            if has_post is not None:
+                # posts への join は has_post フィルタでのみ必要 (post_id は PK 同士なので行数は変わらない)
+                query = query.outerjoin(PostRecord, RowNoteRequestRecord.tweet_id == PostRecord.post_id)
+            query = self._apply_note_request_filters(
+                query, tweet_ids, tweet_created_at_from, tweet_created_at_to, has_post
+            )
+            return int(query.count())
 
     def _apply_filters(
         self,

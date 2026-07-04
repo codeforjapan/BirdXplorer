@@ -3,7 +3,7 @@ from typing import List
 
 from fastapi.testclient import TestClient
 
-from birdxplorer_common.models import Note, Post, Topic, UserEnrollment
+from birdxplorer_common.models import Note, NoteRequest, Post, Topic, UserEnrollment
 
 
 def test_user_enrollments_get(client: TestClient, user_enrollment_samples: List[UserEnrollment]) -> None:
@@ -267,3 +267,35 @@ def test_notes_get_accepts_non_enum_language(client: TestClient, note_samples: L
     response = client.get("/api/v1/data/notes/?language=zh")
     assert response.status_code == 200
     assert response.json()["meta"]["total"] == 0
+
+
+def test_note_requests_get(client: TestClient, note_request_samples: List[NoteRequest]) -> None:
+    response = client.get("/api/v1/data/note-requests")
+    assert response.status_code == 200
+    res_json = response.json()
+    assert res_json == {
+        "data": [json.loads(d.model_dump_json()) for d in note_request_samples],
+        "meta": {"next": None, "prev": None, "total": 2},
+    }
+
+
+def test_note_requests_get_has_post_true(client: TestClient, note_request_samples: List[NoteRequest]) -> None:
+    response = client.get("/api/v1/data/note-requests?has_post=true")
+    assert response.status_code == 200
+    res_json = response.json()
+    assert [d["tweetId"] for d in res_json["data"]] == [str(note_request_samples[0].tweet_id)]
+
+
+def test_note_requests_get_by_tweet_created_at_from(
+    client: TestClient, note_request_samples: List[NoteRequest]
+) -> None:
+    response = client.get("/api/v1/data/note-requests?tweet_created_at_from=1782900000000")
+    assert response.status_code == 200
+    res_json = response.json()
+    assert [d["tweetId"] for d in res_json["data"]] == [str(note_request_samples[1].tweet_id)]
+
+
+def test_note_requests_count(client: TestClient, note_request_samples: List[NoteRequest]) -> None:
+    response = client.get("/api/v1/data/note-requests/count")
+    assert response.status_code == 200
+    assert response.json() == {"total": 2}

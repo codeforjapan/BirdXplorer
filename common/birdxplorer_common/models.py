@@ -940,6 +940,65 @@ class Post(BaseModel):
         return HttpUrl(f"https://x.com/{self.x_user.name}/status/{self.post_id}")
 
 
+class NoteRequestSuggestion(BaseModel):
+    suggestion_id: Annotated[Optional[str], PydanticField(default=None, description="Suggestion の ID")]
+    suggestion: Annotated[
+        Optional[str],
+        PydanticField(default=None, description="ノートリクエスト時にユーザーが入力した、ノートが必要と考える理由"),
+    ]
+    source_link: Annotated[
+        Optional[str], PydanticField(default=None, description="Suggestion に添えられたソースリンク")
+    ]
+
+
+class NoteRequest(BaseModel):
+    tweet_id: Annotated[PostId, PydanticField(description="ノートリクエストが表示された Post の ID")]
+    note_request_feed_eligible_at: Annotated[
+        Optional[TwitterTimestamp],
+        PydanticField(
+            default=None,
+            description="アプリ内リクエストフィードの掲載基準を満たした日時 (ミリ秒 UNIX EPOCH)。未達の場合 null",
+        ),
+    ]
+    api_small_feed_eligible_at: Annotated[
+        Optional[TwitterTimestamp],
+        PydanticField(
+            default=None,
+            description="AI Note Writer API の small フィードの掲載基準を満たした日時 (ミリ秒 UNIX EPOCH)。未達の場合 null",
+        ),
+    ]
+    api_large_feed_eligible_at: Annotated[
+        Optional[TwitterTimestamp],
+        PydanticField(
+            default=None,
+            description="AI Note Writer API の large フィードの掲載基準を満たした日時 (ミリ秒 UNIX EPOCH)。未達の場合 null",
+        ),
+    ]
+    api_xl_feed_eligible_at: Annotated[
+        Optional[TwitterTimestamp],
+        PydanticField(
+            default=None,
+            description="AI Note Writer API の xl フィードの掲載基準を満たした日時 (ミリ秒 UNIX EPOCH)。未達の場合 null",
+        ),
+    ]
+    source_links: Annotated[
+        List[str],
+        PydanticField(default_factory=lambda: [], description="リクエスト時に添えられた X Post URL のリスト"),
+    ]
+    suggestions: Annotated[
+        List[NoteRequestSuggestion],
+        PydanticField(default_factory=lambda: [], description="リクエスト理由の Suggestion のリスト"),
+    ]
+    tweet_created_at: Annotated[
+        Optional[TwitterTimestamp],
+        PydanticField(
+            default=None,
+            description="Post の作成日時 (snowflake ID から算出、ミリ秒 UNIX EPOCH)。2010年以前の旧 ID は null",
+        ),
+    ]
+    post: Annotated[Optional[Post], PydanticField(default=None, description="取得済みの場合、Post の情報")]
+
+
 class PaginationMeta(BaseModel):
     next: Annotated[
         Optional[HttpUrl],
