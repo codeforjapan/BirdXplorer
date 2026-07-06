@@ -1,7 +1,6 @@
-import io
 import logging
 import sys
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -108,7 +107,6 @@ class TestCreateStagingTable:
         mock_session = MagicMock()
         _create_staging_table(mock_session)
 
-        calls = [str(c) for c in mock_session.execute.call_args_list]
         # DROP IF EXISTS が2回、CREATE UNLOGGED が1回
         assert len(mock_session.execute.call_args_list) == 3
         mock_session.commit.assert_called_once()
