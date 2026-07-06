@@ -1,7 +1,23 @@
 import json
+from typing import Generator
 from unittest.mock import MagicMock, patch
 
-from birdxplorer_etl.lib.lambda_handler.db_writer_lambda import lambda_handler
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session
+
+from birdxplorer_common.storage import (
+    Base,
+    NoteRecord,
+    NoteTopicAssociation,
+    NoteTopicHistoryRecord,
+    TopicRecord,
+)
+from birdxplorer_etl.lib.lambda_handler.db_writer_lambda import (
+    lambda_handler,
+    process_update_topics,
+)
 
 
 def _make_post_data(
@@ -152,3 +168,58 @@ class TestMediaAndUrlCombined:
 
         # user UPSERT(1) + post UPSERT(1) + media bulk(1) + URL bulk(1) = 4
         assert mock_session.execute.call_count == 4
+
+
+@pytest.fixture
+def sqlite_session() -> Generator[Session, None, None]:
+    """note_topic_history の永続化を検証するための軽量な実DBセッション。"""
+    engine: Engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            NoteRecord.__table__,
+            TopicRecord.__table__,
+            NoteTopicAssociation.__table__,
+            NoteTopicHistoryRecord.__table__,
+        ],
+    )
+    with Session(engine) as session:
+        session.add(NoteRecord(note_id="note_1", summary="s"))
+        session.add(TopicRecord(topic_id=1, label={"en": "topic1"}))
+        session.add(TopicRecord(topic_id=2, label={"en": "topic2"}))
+        session.add(TopicRecord(topic_id=3, label={"en": "topic3"}))
+        session.commit()
+        yield session
+
+
+class TestUpdateTopicsHistory:
+    """process_update_topics が note_topic_history に履歴を追記し、過去の履歴を消さないことを検証"""
+
+    def test_appends_new_row_to_history(self, sqlite_session: Session) -> None:
+        process_update_topics(sqlite_session, "note_1", {"topic_ids": [1, 2]})
+        sqlite_session.commit()
+
+        current = {row.topic_id for row in sqlite_session.query(NoteTopicAssociation).all()}
+        history = {row.topic_id for row in sqlite_session.query(NoteTopicHistoryRecord).all()}
+
+        assert current == {1, 2}
+        assert history == {1, 2}
+
+    def test_previous_history_is_not_deleted_on_reassignment(self, sqlite_session: Session) -> None:
+        # 1回目の割り当て
+        process_update_topics(sqlite_session, "note_1", {"topic_ids": [1, 2]})
+        sqlite_session.commit()
+
+        # 2回目の割り当て（トピックが変わる）
+        process_update_topics(sqlite_session, "note_1", {"topic_ids": [3]})
+        sqlite_session.commit()
+
+        # note_topic（現在の割り当て）は上書きされ、最新の状態のみを保持する
+        current = [row.topic_id for row in sqlite_session.query(NoteTopicAssociation).all()]
+        assert current == [3]
+
+        # note_topic_history は削除されず、過去の割り当て(1, 2)と最新の割り当て(3)がすべて残る
+        history_rows = sqlite_session.query(NoteTopicHistoryRecord).all()
+        assert sorted(row.topic_id for row in history_rows) == [1, 2, 3]
+        assert all(row.note_id == "note_1" for row in history_rows)
+        assert len(history_rows) == 3

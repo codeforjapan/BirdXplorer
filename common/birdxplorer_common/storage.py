@@ -19,7 +19,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 from sqlalchemy.orm.query import RowReturningQuery
-from sqlalchemy.types import CHAR, DECIMAL, JSON, Integer, String, Text, Uuid
+from sqlalchemy.types import CHAR, DECIMAL, JSON, DateTime, Integer, String, Text, Uuid
 
 from .logger import get_logger
 from .models import (
@@ -111,6 +111,23 @@ class NoteTopicAssociation(Base):
     note_id: Mapped[NoteId] = mapped_column(ForeignKey("notes.note_id"), primary_key=True)
     topic_id: Mapped[TopicId] = mapped_column(ForeignKey("topics.topic_id"), primary_key=True)
     topic: Mapped["TopicRecord"] = relationship(lazy="selectin")
+
+
+class NoteTopicHistoryRecord(Base):
+    """ノートに対するトピック割り当ての履歴（追記専用）。
+
+    note_topic テーブルは「現在の割り当て」のみを保持し、更新の度に
+    delete → insert される。将来のクラスター件数変化検知（予兆検知）のために
+    過去のスナップショットを残す必要があるため、このテーブルには
+    割り当てが発生する度に行を追加するのみで、削除・更新は行わない。
+    """
+
+    __tablename__ = "note_topic_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    note_id: Mapped[NoteId] = mapped_column(ForeignKey("notes.note_id"), nullable=False, index=True)
+    topic_id: Mapped[TopicId] = mapped_column(ForeignKey("topics.topic_id"), nullable=False)
+    assigned_at: Mapped[Any] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class NoteRecord(Base):
