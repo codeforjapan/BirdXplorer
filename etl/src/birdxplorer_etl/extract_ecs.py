@@ -67,7 +67,7 @@ def _send_sqs_batch(queue_url: str, messages: list, max_retries: int = 3):
                 break
             except RuntimeError:
                 raise
-            except Exception as e:
+            except Exception:
                 if attempt < max_retries - 1:
                     time.sleep((attempt + 1) * 1.0)
                 else:
@@ -160,7 +160,10 @@ def extract_data(postgresql: Session):
 
         while True:
             if settings.USE_DUMMY_DATA:
-                note_url = "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/notes_sample.tsv"
+                note_url = (
+                    "https://raw.githubusercontent.com/codeforjapan/BirdXplorer"
+                    "/refs/heads/main/etl/data/notes_sample.tsv"
+                )
             else:
                 note_url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/notes/notes-{file_index:05d}.zip"
 
@@ -650,7 +653,10 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
         file_index = 0
         while True:
             if settings.USE_DUMMY_DATA:
-                ratings_url = "https://raw.githubusercontent.com/codeforjapan/BirdXplorer/refs/heads/main/etl/data/notesRating_sample.tsv"
+                ratings_url = (
+                    "https://raw.githubusercontent.com/codeforjapan/BirdXplorer"
+                    "/refs/heads/main/etl/data/notesRating_sample.tsv"
+                )
             else:
                 ratings_url = (
                     f"https://ton.twimg.com/birdwatch-public-data/{dateString}/noteRatings/ratings-{file_index:05d}.zip"

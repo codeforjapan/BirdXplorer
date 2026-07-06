@@ -85,7 +85,7 @@ def lambda_handler(event, context):
                     logger.info(f"[TOPICS] Set {len(topics)} topics to AI service")
 
                 # トピック推定を実行（リトライ付き）
-                logger.info(f"[PROCESSING] Calling AI service for topic detection...")
+                logger.info("[PROCESSING] Calling AI service for topic detection...")
                 topics_info = call_ai_api_with_retry(
                     ai_service.detect_topic,
                     note_id,
@@ -108,7 +108,7 @@ def lambda_handler(event, context):
                         "data": {"topic_ids": topic_ids},
                     }
 
-                    logger.info(f"[SQS_SEND] Sending topics update to db-write queue...")
+                    logger.info("[SQS_SEND] Sending topics update to db-write queue...")
                     message_id = sqs_handler.send_message(queue_url=db_write_queue_url, message_body=db_write_message)
 
                     if message_id:
@@ -127,7 +127,7 @@ def lambda_handler(event, context):
                         "processing_type": "tweet_lookup",
                         "skip_tweet_lookup": skip_tweet_lookup,
                     }
-                    logger.info(f"[SQS_SEND] Sending tweet lookup message...")
+                    logger.info("[SQS_SEND] Sending tweet lookup message...")
                     message_id = sqs_handler.send_message(
                         queue_url=TWEET_LOOKUP_QUEUE_URL, message_body=tweet_lookup_message
                     )
@@ -145,7 +145,7 @@ def lambda_handler(event, context):
             elif not post_id:
                 logger.warning(f"[WARNING] Note {note_id} has no post_id, skipping tweet lookup")
             elif not TWEET_LOOKUP_QUEUE_URL:
-                logger.warning(f"[CONFIG_WARNING] TWEET_LOOKUP_QUEUE_URL is not configured, skipping SQS message")
+                logger.warning("[CONFIG_WARNING] TWEET_LOOKUP_QUEUE_URL is not configured, skipping SQS message")
 
             result = {
                 "statusCode": 200,

@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 from birdxplorer_etl.scripts.report_github import create_report_pr
 
@@ -44,11 +44,14 @@ class TestCreateReportPr:
         pr_resp.raise_for_status = MagicMock()
 
         mock_post.side_effect = [
-            blob_resp, blob_resp, blob_resp, blob_resp,  # 4 blobs
-            tree_resp,      # tree
+            blob_resp,
+            blob_resp,
+            blob_resp,
+            blob_resp,  # 4 blobs
+            tree_resp,  # tree
             new_commit_resp,  # commit
-            branch_resp,    # ref
-            pr_resp,        # PR
+            branch_resp,  # ref
+            pr_resp,  # PR
         ]
 
         static_files = {
@@ -130,8 +133,13 @@ class TestCreateReportPr:
         pr_resp.raise_for_status = MagicMock()
 
         mock_post.side_effect = [
-            blob_resp, blob_resp, blob_resp,  # 3 blobs (1 static + 2 config)
-            tree_resp, new_commit_resp, branch_resp, pr_resp,
+            blob_resp,
+            blob_resp,
+            blob_resp,  # 3 blobs (1 static + 2 config)
+            tree_resp,
+            new_commit_resp,
+            branch_resp,
+            pr_resp,
         ]
 
         url = create_report_pr(
