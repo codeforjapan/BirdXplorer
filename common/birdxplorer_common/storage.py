@@ -6,6 +6,7 @@ from pydantic import AnyUrl, HttpUrl
 from sqlalchemy import (
     BigInteger,
     ForeignKey,
+    Index,
     and_,
     case,
     create_engine,
@@ -152,9 +153,12 @@ class XUserRecord(Base):
 
 class LinkRecord(Base):
     __tablename__ = "links"
+    # btree は行サイズ上限（約2704バイト）があり長いURLを格納できないため hash を使う。
+    # 検索は完全一致（search_url）のみなので hash で十分。
+    __table_args__ = (Index("ix_links_url", "url", postgresql_using="hash"),)
 
     link_id: Mapped[LinkId] = mapped_column(primary_key=True)
-    url: Mapped[LongHttpUrl] = mapped_column(nullable=False, index=True)
+    url: Mapped[LongHttpUrl] = mapped_column(nullable=False)
 
 
 class PostLinkAssociation(Base):

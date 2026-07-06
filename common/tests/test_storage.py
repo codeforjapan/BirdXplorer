@@ -14,7 +14,13 @@ from birdxplorer_common.models import (
     TopicId,
     TwitterTimestamp,
 )
-from birdxplorer_common.storage import NoteRecord, PostRecord, Storage, TopicRecord
+from birdxplorer_common.storage import (
+    Base,
+    NoteRecord,
+    PostRecord,
+    Storage,
+    TopicRecord,
+)
 
 
 def test_get_topic_list(
@@ -232,3 +238,13 @@ def test_get_notes_by_language(
     expected = [note for note in note_samples if note.language == language]
     actual = list(storage.get_notes(language=language))
     assert expected == actual
+
+
+def test_links_url_index_uses_hash() -> None:
+    """links.url のインデックスは hash を使う
+
+    btree には行サイズ上限（約2704バイト）があり、長いURLのINSERTが
+    ProgramLimitExceeded で失敗するため。検索は完全一致のみなので hash で十分。
+    """
+    index = next(idx for idx in Base.metadata.tables["links"].indexes if idx.name == "ix_links_url")
+    assert index.dialect_options["postgresql"]["using"] == "hash"
