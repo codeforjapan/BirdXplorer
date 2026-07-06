@@ -4,8 +4,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from birdxplorer_etl.lib.lambda_handler.postlookup_lambda import (
-    MAX_MESSAGES_PER_INVOCATION,
-    TIMEOUT_BUFFER_MS,
     _poll_message,
     _process_single_tweet,
     connect_to_endpoint,

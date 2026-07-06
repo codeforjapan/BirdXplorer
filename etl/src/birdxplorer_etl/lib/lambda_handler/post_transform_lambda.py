@@ -6,9 +6,11 @@ from random import Random
 from typing import Any, Optional
 from uuid import UUID
 
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
+from birdxplorer_common.models import LongHttpUrl
 from birdxplorer_common.storage import (
     LinkRecord,
     MediaRecord,
@@ -38,6 +40,27 @@ def generate_link_id(url: str) -> UUID:
     random_number_generator = Random()
     random_number_generator.seed(url.encode("utf-8"))
     return UUID(int=random_number_generator.getrandbits(128))
+
+
+_link_url_adapter: TypeAdapter[LongHttpUrl] = TypeAdapter(LongHttpUrl)
+
+
+def select_valid_link_url(row_url: RowPostEmbedURLRecord) -> Optional[str]:
+    """unwound_url → expanded_url → url の順で、LongHttpUrlとして有効な最初のURLを返す
+
+    links.url はAPI読み出し時に LongHttpUrl（最大8192文字・http/httpsのみ）として
+    検証されるため、書き込み境界で無効なURLを弾いて読み出し時のValidationErrorを防ぐ。
+    全候補が無効な場合はNoneを返す（リンクをスキップ）。
+    """
+    for candidate in (row_url.unwound_url, row_url.expanded_url, row_url.url):
+        if not candidate:
+            continue
+        try:
+            _link_url_adapter.validate_python(candidate)
+        except ValidationError:
+            continue
+        return str(candidate)
+    return None
 
 
 def process_post_transform(
@@ -171,21 +194,24 @@ def process_post_transform(
         link_entries = []
         link_assoc_entries = []
         for row_url in row_urls:
-            # unwound_urlを使用（最終的なリダイレクト先URL）
-            final_url = row_url.unwound_url or row_url.expanded_url or row_url.url
+            final_url = select_valid_link_url(row_url)
+            if final_url is None:
+                logger.warning(f"[SKIPPED] No valid link URL for post {post_id}: url={str(row_url.url)[:100]!r}")
+                continue
             link_id = generate_link_id(final_url)
             link_entries.append({"link_id": link_id, "url": final_url})
             link_assoc_entries.append({"post_id": post_id, "link_id": link_id})
 
-        stmt = insert(LinkRecord).values(link_entries).on_conflict_do_nothing(index_elements=["link_id"])
-        postgresql.execute(stmt)
-        stmt = (
-            insert(PostLinkAssociation)
-            .values(link_assoc_entries)
-            .on_conflict_do_nothing(index_elements=["post_id", "link_id"])
-        )
-        postgresql.execute(stmt)
-        logger.info(f"[STAGED] {len(row_urls)} link records for post {post_id}")
+        if link_entries:
+            stmt = insert(LinkRecord).values(link_entries).on_conflict_do_nothing(index_elements=["link_id"])
+            postgresql.execute(stmt)
+            stmt = (
+                insert(PostLinkAssociation)
+                .values(link_assoc_entries)
+                .on_conflict_do_nothing(index_elements=["post_id", "link_id"])
+            )
+            postgresql.execute(stmt)
+            logger.info(f"[STAGED] {len(link_entries)} link records for post {post_id}")
 
     return {"status": "success"}
 
