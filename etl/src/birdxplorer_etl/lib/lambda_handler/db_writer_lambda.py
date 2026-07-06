@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from birdxplorer_common.storage import (
     NoteTopicAssociation,
+    NoteTopicHistoryRecord,
     RowNoteRecord,
     RowPostEmbedURLRecord,
     RowPostMediaRecord,
@@ -96,6 +97,14 @@ def process_update_topics(postgresql: Any, note_id: str, data: dict) -> None:
             logger.info(
                 f"[STAGED] Topics for note {note_id}: "
                 f"{len(valid_topic_ids)}/{len(topic_ids)} valid topics bulk-inserted"
+            )
+
+            # 履歴テーブルには削除せず追記のみ行う（過去の割り当てスナップショットを保持するため）
+            postgresql.bulk_insert_mappings(
+                NoteTopicHistoryRecord, [{"note_id": note_id, "topic_id": tid} for tid in valid_topic_ids]
+            )
+            logger.info(
+                f"[STAGED] Topic history for note {note_id}: {len(valid_topic_ids)} rows appended to note_topic_history"
             )
     else:
         logger.warning(f"[WARNING] No topics to save for note {note_id}")
