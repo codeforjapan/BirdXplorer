@@ -129,6 +129,19 @@ class TestLambdaHandler:
 
         assert result == {"batchItemFailures": [{"itemIdentifier": "mid-0"}]}
 
+    @patch.object(writer, "_ensure_index")
+    @patch.object(writer, "_get_client")
+    def test_bulk_items_count_mismatch_fails_all(self, mock_get_client: MagicMock, mock_ensure: MagicMock) -> None:
+        """bulkレスポンスのitems件数が不一致の場合は全件を失敗扱いにする(サイレント欠落防止)"""
+        client = mock_get_client.return_value
+        client.bulk.return_value = {"errors": True, "items": [{"index": {"_id": "n1", "status": 200}}]}
+
+        result = writer.lambda_handler(_sqs_event([_doc_body("n1"), _doc_body("n2")]), None)
+
+        assert result == {
+            "batchItemFailures": [{"itemIdentifier": "mid-0"}, {"itemIdentifier": "mid-1"}]
+        }
+
     def test_empty_event_returns_no_failures(self) -> None:
         result = writer.lambda_handler({"Records": []}, None)
         assert result == {"batchItemFailures": []}

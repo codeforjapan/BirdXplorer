@@ -144,11 +144,21 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         response = client.bulk(body=bulk_body)
 
         if response.get("errors"):
-            for (message_id, note_id, _), item in zip(docs, response.get("items", [])):
-                error = item.get("index", {}).get("error")
-                if error:
-                    logger.error(f"Bulk index error for note {note_id}: {error}")
-                    batch_item_failures.append({"itemIdentifier": message_id})
+            items = response.get("items", [])
+            if len(items) != len(docs):
+                # 想定外のbulkレスポンス: 全件をSQSに再配信させる
+                logger.error(
+                    f"Bulk items count mismatch: expected {len(docs)}, got {len(items)}"
+                )
+                batch_item_failures.extend(
+                    {"itemIdentifier": message_id} for message_id, _, _ in docs
+                )
+            else:
+                for (message_id, note_id, _), item in zip(docs, items):
+                    error = item.get("index", {}).get("error")
+                    if error:
+                        logger.error(f"Bulk index error for note {note_id}: {error}")
+                        batch_item_failures.append({"itemIdentifier": message_id})
 
     except Exception as e:
         # 接続エラー等の全体失敗: 対象全件をSQSに再配信させる
