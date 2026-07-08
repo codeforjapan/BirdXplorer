@@ -138,9 +138,7 @@ class TestLambdaHandler:
 
         result = writer.lambda_handler(_sqs_event([_doc_body("n1"), _doc_body("n2")]), None)
 
-        assert result == {
-            "batchItemFailures": [{"itemIdentifier": "mid-0"}, {"itemIdentifier": "mid-1"}]
-        }
+        assert result == {"batchItemFailures": [{"itemIdentifier": "mid-0"}, {"itemIdentifier": "mid-1"}]}
 
     def test_empty_event_returns_no_failures(self) -> None:
         result = writer.lambda_handler({"Records": []}, None)

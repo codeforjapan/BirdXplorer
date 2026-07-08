@@ -147,12 +147,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             items = response.get("items", [])
             if len(items) != len(docs):
                 # 想定外のbulkレスポンス: 全件をSQSに再配信させる
-                logger.error(
-                    f"Bulk items count mismatch: expected {len(docs)}, got {len(items)}"
-                )
-                batch_item_failures.extend(
-                    {"itemIdentifier": message_id} for message_id, _, _ in docs
-                )
+                logger.error(f"Bulk items count mismatch: expected {len(docs)}, got {len(items)}")
+                batch_item_failures.extend({"itemIdentifier": message_id} for message_id, _, _ in docs)
             else:
                 for (message_id, note_id, _), item in zip(docs, items):
                     error = item.get("index", {}).get("error")

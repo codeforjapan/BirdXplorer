@@ -97,9 +97,7 @@ class TestEmbeddingLambda:
         with patch.object(embedding_lambda.settings, "SEARCH_INDEX_QUEUE_URL", "https://sqs/search-index"):
             result = embedding_lambda.lambda_handler(_sqs_event([_note_body("n1"), _note_body("n2")]), None)
 
-        assert result == {
-            "batchItemFailures": [{"itemIdentifier": "mid-0"}, {"itemIdentifier": "mid-1"}]
-        }
+        assert result == {"batchItemFailures": [{"itemIdentifier": "mid-0"}, {"itemIdentifier": "mid-1"}]}
         mock_sqs_cls.return_value.send_message.assert_not_called()
 
     def test_empty_event_returns_no_failures(self) -> None:
