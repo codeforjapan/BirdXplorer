@@ -69,6 +69,40 @@ def load_settings() -> dict[str, Any]:
     return settings_data
 
 
+def _send_embedding_message(
+    sqs_handler: SQSHandler,
+    note_id: str,
+    summary: str,
+    language: str,
+    created_at_millis: Union[int, Decimal, None],
+) -> None:
+    """
+    embedding-queueへ検索インデックス用メッセージを送信する
+
+    検索インデックスはPostgreSQLから再構築可能な二次データのため、
+    送信失敗は既存フロー(topic-detect以降)をブロックしない。
+    EMBEDDING_QUEUE_URL 未設定時は何もしない。
+    """
+    if not settings.EMBEDDING_QUEUE_URL:
+        logger.debug(f"EMBEDDING_QUEUE_URL not set, skipping embedding enqueue for note {note_id}")
+        return
+
+    try:
+        message = {
+            "note_id": note_id,
+            "text": summary,
+            "language": language,
+            "created_at": int(created_at_millis) if created_at_millis is not None else None,
+            "processing_type": "embedding",
+        }
+        if sqs_handler.send_message(queue_url=settings.EMBEDDING_QUEUE_URL, message_body=message):
+            logger.info(f"Enqueued note {note_id} to embedding queue")
+        else:
+            logger.error(f"Failed to enqueue note {note_id} to embedding queue (non-blocking)")
+    except Exception as e:
+        logger.error(f"Error enqueuing note {note_id} to embedding queue (non-blocking): {e}")
+
+
 def check_date_filter(
     created_at_millis: Union[int, Decimal], start_millis: int, end_millis: Union[int, None] = None
 ) -> bool:
@@ -395,6 +429,10 @@ def lambda_handler(event, context):
             if created_at_millis is not None and not check_date_filter(created_at_millis, start_millis, end_millis):
                 logger.info(f"Note {note_id} outside date range, skipping")
                 continue
+
+            # 検索インデックス用のembedding-queueに送信(失敗しても既存フローをブロックしない)
+            # skip_topic_detectより前に置く: 既存ノートの再処理時もembeddingは冪等なupsertのため常に送る
+            _send_embedding_message(sqs_handler, note_id, summary, detected_language, created_at_millis)
 
             # 既存ノートで下流処理が全て完了済みの場合はキュー送信をスキップ
             if result.get("skip_topic_detect") and result.get("skip_tweet_lookup"):

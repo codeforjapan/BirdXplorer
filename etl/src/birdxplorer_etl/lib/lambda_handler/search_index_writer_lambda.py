@@ -1,0 +1,165 @@
+"""
+search-index-queueのメッセージを受け取り、OpenSearchのnotesインデックスへ
+bulk upsertするLambda(VPC内・IAM SigV4認証)。
+
+- インデックスnotes-v1とエイリアスnotesをコールドスタート時に自動作成する
+- _id=note_idの全置換upsertのため何度実行しても冪等
+- 部分失敗はbatchItemFailuresで報告する
+"""
+
+import json
+import logging
+import os
+from typing import Any, Dict, List
+
+import boto3
+from opensearchpy import AWSV4SignerAuth, OpenSearch, RequestsHttpConnection
+
+from birdxplorer_etl import settings
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+INDEX_NAME = "notes-v1"
+ALIAS_NAME = "notes"
+
+# spec: 2026-07-08-opensearch-phase2-etl-design.md §7
+INDEX_BODY = {
+    "settings": {
+        "index.knn": True,
+        "analysis": {
+            "analyzer": {
+                "ja_analyzer": {
+                    "type": "custom",
+                    "tokenizer": "kuromoji_tokenizer",
+                    "filter": [
+                        "kuromoji_baseform",
+                        "kuromoji_part_of_speech",
+                        "ja_stop",
+                        "kuromoji_stemmer",
+                        "lowercase",
+                    ],
+                }
+            }
+        },
+    },
+    "mappings": {
+        "properties": {
+            "note_id": {"type": "keyword"},
+            "text": {
+                "type": "text",
+                "fields": {
+                    "ja": {"type": "text", "analyzer": "ja_analyzer"},
+                    "en": {"type": "text", "analyzer": "english"},
+                },
+            },
+            "language": {"type": "keyword"},
+            "created_at": {"type": "date", "format": "strict_date_optional_time||epoch_millis"},
+            "impression_bucket": {"type": "keyword"},
+            "embedding": {
+                "type": "knn_vector",
+                "dimension": 1536,
+                "method": {"name": "hnsw", "engine": "faiss", "space_type": "cosinesimil"},
+            },
+        }
+    },
+}
+
+_client = None
+_index_ensured = False
+
+
+def _get_client() -> OpenSearch:
+    """OpenSearchクライアントを生成する(コールドスタート後は再利用)"""
+    global _client
+    if _client is None:
+        endpoint = settings.OPENSEARCH_ENDPOINT
+        credentials = boto3.Session().get_credentials()
+        auth = AWSV4SignerAuth(credentials, os.environ.get("AWS_REGION", "ap-northeast-1"), "es")
+        _client = OpenSearch(
+            hosts=[{"host": endpoint, "port": 443}],
+            http_auth=auth,
+            use_ssl=True,
+            verify_certs=True,
+            connection_class=RequestsHttpConnection,
+            timeout=30,
+        )
+    return _client
+
+
+def _ensure_index(client: OpenSearch) -> None:
+    """notes-v1インデックスとnotesエイリアスがなければ作成する(冪等)"""
+    global _index_ensured
+    if _index_ensured:
+        return
+
+    if not client.indices.exists(index=INDEX_NAME):
+        client.indices.create(index=INDEX_NAME, body=INDEX_BODY)
+        logger.info(f"Created index {INDEX_NAME}")
+    if not client.indices.exists_alias(name=ALIAS_NAME):
+        client.indices.put_alias(index=INDEX_NAME, name=ALIAS_NAME)
+        logger.info(f"Created alias {ALIAS_NAME} -> {INDEX_NAME}")
+
+    _index_ensured = True
+
+
+def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    records = event.get("Records", [])
+    if not records:
+        logger.warning("No records found in SQS event")
+        return {"batchItemFailures": []}
+
+    batch_item_failures: List[Dict[str, str]] = []
+    docs: List[tuple] = []  # (message_id, note_id, doc)
+
+    for record in records:
+        message_id = record.get("messageId")
+        try:
+            body = json.loads(record["body"])
+            note_id = body["note_id"]
+            doc = {
+                "note_id": note_id,
+                "text": body.get("text"),
+                "language": body.get("language"),
+                "created_at": body.get("created_at"),
+                "embedding": body["embedding"],
+            }
+            docs.append((message_id, note_id, doc))
+        except Exception as e:
+            logger.error(f"Error parsing message {message_id}: {e}")
+            batch_item_failures.append({"itemIdentifier": message_id})
+
+    if not docs:
+        return {"batchItemFailures": batch_item_failures}
+
+    try:
+        client = _get_client()
+        _ensure_index(client)
+
+        bulk_body: List[Dict[str, Any]] = []
+        for _, note_id, doc in docs:
+            bulk_body.append({"index": {"_index": ALIAS_NAME, "_id": note_id}})
+            bulk_body.append(doc)
+
+        response = client.bulk(body=bulk_body)
+
+        if response.get("errors"):
+            items = response.get("items", [])
+            if len(items) != len(docs):
+                # 想定外のbulkレスポンス: 全件をSQSに再配信させる
+                logger.error(f"Bulk items count mismatch: expected {len(docs)}, got {len(items)}")
+                batch_item_failures.extend({"itemIdentifier": message_id} for message_id, _, _ in docs)
+            else:
+                for (message_id, note_id, _), item in zip(docs, items):
+                    error = item.get("index", {}).get("error")
+                    if error:
+                        logger.error(f"Bulk index error for note {note_id}: {error}")
+                        batch_item_failures.append({"itemIdentifier": message_id})
+
+    except Exception as e:
+        # 接続エラー等の全体失敗: 対象全件をSQSに再配信させる
+        logger.error(f"OpenSearch bulk indexing failed: {e}")
+        batch_item_failures.extend({"itemIdentifier": message_id} for message_id, _, _ in docs)
+
+    logger.info(f"Batch complete: {len(records)} received, {len(batch_item_failures)} failed")
+    return {"batchItemFailures": batch_item_failures}

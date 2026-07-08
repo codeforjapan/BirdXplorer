@@ -40,6 +40,8 @@ jobs:
           - { dockerfile: Dockerfile.post_transform, repository: birdxplorer-etl-post-transform }
           - { dockerfile: Dockerfile.report_generator, repository: birdxplorer-report-generator }
           - { dockerfile: Dockerfile.realtime_notes_extraction, repository: birdxplorer-etl-realtime }
+          - { dockerfile: Dockerfile.embedding, repository: birdxplorer-etl-embedding }
+          - { dockerfile: Dockerfile.search_index_writer, repository: birdxplorer-etl-search-index-writer }
 
     steps:
       - uses: actions/checkout@v5
@@ -87,6 +89,8 @@ jobs:
         birdxplorer-etl-note-status-update,
         birdxplorer-etl-post-transform,
         birdxplorer-report-generator,
-        birdxplorer-etl-realtime
+        birdxplorer-etl-realtime,
+        birdxplorer-etl-embedding,
+        birdxplorer-etl-search-index-writer
       stacks: "devbird-xplorerStack devbird-xplorerMonitoringStack"
     secrets: inherit
