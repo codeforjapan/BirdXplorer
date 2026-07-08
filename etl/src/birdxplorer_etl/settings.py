@@ -45,5 +45,10 @@ TOPIC_DETECT_QUEUE_URL = os.environ.get("TOPIC_DETECT_QUEUE_URL")
 TWEET_LOOKUP_QUEUE_URL = os.environ.get("TWEET_LOOKUP_QUEUE_URL")
 NOTE_STATUS_UPDATE_QUEUE_URL = os.environ.get("NOTE_STATUS_UPDATE_QUEUE_URL")
 
+# 検索インデックス(OpenSearch)用のSQSキューURLとエンドポイント
+EMBEDDING_QUEUE_URL = os.environ.get("EMBEDDING_QUEUE_URL")
+SEARCH_INDEX_QUEUE_URL = os.environ.get("SEARCH_INDEX_QUEUE_URL")
+OPENSEARCH_ENDPOINT = os.environ.get("OPENSEARCH_ENDPOINT")
+
 # トピック取得方法の設定 ("csv" または "db")
 TOPIC_SOURCE = os.getenv("TOPIC_SOURCE", "csv")
