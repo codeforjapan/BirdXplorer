@@ -25,7 +25,7 @@ from birdxplorer_etl.lib.sqlite.init import init_postgresql
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-FLUSH_SIZE = 100  # send_message_batch内部で10件ずつに分割される
+FLUSH_SIZE = 100  # SQSへの送信単位(蓄積してからバッチ送信する)
 
 
 def _build_message(
@@ -63,9 +63,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         NoteRecord.language,
         NoteRecord.created_at,
     ).order_by(NoteRecord.note_id)
-    if args.offset:
+    if args.offset is not None:
         query = query.offset(args.offset)
-    if args.limit:
+    if args.limit is not None:
         query = query.limit(args.limit)
 
     total_success = 0
@@ -73,7 +73,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     buffer: List[Dict[str, Any]] = []
 
     try:
-        for note_id, summary, language, created_at in session.execute(query):
+        for note_id, summary, language, created_at in session.execute(query.execution_options(yield_per=1000)):
             buffer.append(_build_message(note_id, summary, language, created_at))
             if len(buffer) >= FLUSH_SIZE:
                 success, failure = sqs_handler.send_message_batch(settings.EMBEDDING_QUEUE_URL, buffer)

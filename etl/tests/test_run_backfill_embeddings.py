@@ -68,3 +68,18 @@ class TestMain:
             exit_code = backfill.main([])
 
         assert exit_code == 1
+
+    @patch.object(backfill, "SQSHandler")
+    @patch.object(backfill, "init_postgresql")
+    def test_limit_zero_fetches_nothing(self, mock_init_pg: MagicMock, mock_sqs_cls: MagicMock) -> None:
+        """--limit 0 は「全件」ではなく「0件」として扱う"""
+        session = mock_init_pg.return_value
+        session.execute.return_value = []
+
+        with patch.object(backfill.settings, "EMBEDDING_QUEUE_URL", "https://sqs/embedding"):
+            exit_code = backfill.main(["--limit", "0"])
+
+        assert exit_code == 0
+        executed_query = session.execute.call_args.args[0]
+        assert executed_query._limit_clause is not None
+        mock_sqs_cls.return_value.send_message_batch.assert_not_called()
