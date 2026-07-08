@@ -86,6 +86,21 @@ class TestEmbeddingLambda:
             result = embedding_lambda.lambda_handler(_sqs_event([_note_body("n1"), _note_body("n2")]), None)
 
         assert result == {"batchItemFailures": [{"itemIdentifier": "mid-1"}]}
+        assert mock_sqs_cls.return_value.send_message.call_count == 2
+
+    @patch.object(embedding_lambda, "SQSHandler")
+    @patch.object(embedding_lambda, "_create_embeddings")
+    def test_embedding_count_mismatch_fails_all(self, mock_embed: MagicMock, mock_sqs_cls: MagicMock) -> None:
+        """APIが件数不一致のレスポンスを返した場合は全件を失敗扱いにする(サイレント欠落防止)"""
+        mock_embed.return_value = [[0.1] * 3]  # 2件の入力に対し1件しか返さない
+
+        with patch.object(embedding_lambda.settings, "SEARCH_INDEX_QUEUE_URL", "https://sqs/search-index"):
+            result = embedding_lambda.lambda_handler(_sqs_event([_note_body("n1"), _note_body("n2")]), None)
+
+        assert result == {
+            "batchItemFailures": [{"itemIdentifier": "mid-0"}, {"itemIdentifier": "mid-1"}]
+        }
+        mock_sqs_cls.return_value.send_message.assert_not_called()
 
     def test_empty_event_returns_no_failures(self) -> None:
         result = embedding_lambda.lambda_handler({"Records": []}, None)
