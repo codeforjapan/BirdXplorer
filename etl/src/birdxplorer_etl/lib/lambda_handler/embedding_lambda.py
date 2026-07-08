@@ -75,6 +75,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         batch_item_failures.extend({"itemIdentifier": message_id} for message_id, _ in entries)
         return {"batchItemFailures": batch_item_failures}
 
+    # 想定外のAPIレスポンス: 全件をSQSに再配信させる
+    if len(embeddings) != len(entries):
+        logger.error(f"Embedding count mismatch: expected {len(entries)}, got {len(embeddings)}")
+        batch_item_failures.extend({"itemIdentifier": message_id} for message_id, _ in entries)
+        return {"batchItemFailures": batch_item_failures}
+
     sqs_handler = SQSHandler()
     forwarded = 0
     for (message_id, body), embedding in zip(entries, embeddings):
