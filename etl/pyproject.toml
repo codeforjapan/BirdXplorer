@@ -36,6 +36,7 @@ dependencies = [
     "twscrape",
     "brotli",
     "fasttext-wheel",
+    "opensearch-py",
 ]
 
 [project.urls]
