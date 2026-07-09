@@ -20,7 +20,9 @@ from birdxplorer_etl import settings
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-INDEX_NAME = "notes-v1"
+# v2: ディスクベースベクトル検索(mode: on_disk)に変更。
+# notesテーブルは約293万件あり、in-memoryのHNSW(約19GB)はm6g.largeに収まらないため。
+INDEX_NAME = "notes-v2"
 ALIAS_NAME = "notes"
 
 # spec: 2026-07-08-opensearch-phase2-etl-design.md §7
@@ -59,7 +61,12 @@ INDEX_BODY = {
             "embedding": {
                 "type": "knn_vector",
                 "dimension": 1536,
-                "method": {"name": "hnsw", "engine": "faiss", "space_type": "cosinesimil"},
+                # on_disk: faiss/HNSW + 32x圧縮(バイナリ量子化)+ リスコアがデフォルト。
+                # メモリ必要量が約1/32になり、全ノートを現行ドメインに収められる。
+                # BQはcosine非対応だがOpenAI embeddingは単位ベクトルのためinnerproduct=cosineと同順位。
+                "space_type": "innerproduct",
+                "data_type": "float",
+                "mode": "on_disk",
             },
         }
     },
@@ -88,7 +95,11 @@ def _get_client() -> OpenSearch:
 
 
 def _ensure_index(client: OpenSearch) -> None:
-    """notes-v1インデックスとnotesエイリアスがなければ作成する(冪等)"""
+    """インデックスとnotesエイリアスがなければ作成する(冪等)
+
+    エイリアスが旧バージョンのインデックスを向いている場合は付け替える
+    (マッピング変更時のゼロダウン移行。旧インデックスは削除せず残す)。
+    """
     global _index_ensured
     if _index_ensured:
         return
@@ -99,6 +110,16 @@ def _ensure_index(client: OpenSearch) -> None:
     if not client.indices.exists_alias(name=ALIAS_NAME):
         client.indices.put_alias(index=INDEX_NAME, name=ALIAS_NAME)
         logger.info(f"Created alias {ALIAS_NAME} -> {INDEX_NAME}")
+    elif not client.indices.exists_alias(index=INDEX_NAME, name=ALIAS_NAME):
+        client.indices.update_aliases(
+            body={
+                "actions": [
+                    {"remove": {"index": "*", "alias": ALIAS_NAME}},
+                    {"add": {"index": INDEX_NAME, "alias": ALIAS_NAME}},
+                ]
+            }
+        )
+        logger.info(f"Moved alias {ALIAS_NAME} -> {INDEX_NAME}")
 
     _index_ensured = True
 
