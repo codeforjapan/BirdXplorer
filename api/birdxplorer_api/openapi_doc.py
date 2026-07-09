@@ -682,6 +682,33 @@ V1DataSearchDocs = FastAPIEndpointDocs(
     },
 )
 
+v1_data_search_semantic_q: FastAPIEndpointParamDocs = {"description": "検索クエリ(自然文)"}
+
+v1_data_search_semantic_language: FastAPIEndpointParamDocs = {"description": "ノートの言語で絞り込み"}
+
+v1_data_search_semantic_limit: FastAPIEndpointParamDocs = {"description": "取得件数(最大100)"}
+
+v1_data_search_similar_note_id: FastAPIEndpointParamDocs = {"description": "起点となるノートのID"}
+
+# Get /api/v1/data/search/semantic の OpenAPI ドキュメント
+V1DataSearchSemanticDocs = FastAPIEndpointDocs(
+    "自然文クエリによるセマンティック検索。クエリをベクトル化し、意味的に近いノートを返します。",
+    {
+        "q": v1_data_search_semantic_q,
+        "language": v1_data_search_semantic_language,
+        "limit": v1_data_search_semantic_limit,
+    },
+)
+
+# Get /api/v1/data/search/similar/{note_id} の OpenAPI ドキュメント
+V1DataSearchSimilarDocs = FastAPIEndpointDocs(
+    "指定したノートに意味的に近いノートを返します(自分自身は除外)。",
+    {
+        "note_id": v1_data_search_similar_note_id,
+        "limit": v1_data_search_semantic_limit,
+    },
+)
+
 # Get /api/v1/data/search/count の OpenAPI ドキュメント
 V1DataSearchCountDocs = FastAPIEndpointDocs(
     "検索結果の総件数を取得するエンドポイント",

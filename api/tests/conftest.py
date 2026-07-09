@@ -755,10 +755,26 @@ def settings_for_test(
 
 
 @fixture
-def client(settings_for_test: GlobalSettings, mock_storage: MagicMock) -> Generator[TestClient, None, None]:
+def mock_semantic_search(note_samples: List[Note]) -> Generator[MagicMock, None, None]:
+    from birdxplorer_api.semantic_search import SemanticSearchService
+
+    mock = MagicMock(spec=SemanticSearchService)
+    mock.embed_query.return_value = [0.1] * 3
+    mock.knn_search.return_value = [(note_samples[0].note_id, 0.9), (note_samples[1].note_id, 0.8)]
+    mock.get_note_embedding.return_value = [0.2] * 3
+    yield mock
+
+
+@fixture
+def client(
+    settings_for_test: GlobalSettings, mock_storage: MagicMock, mock_semantic_search: MagicMock
+) -> Generator[TestClient, None, None]:
     from birdxplorer_api.app import gen_app
 
-    with patch("birdxplorer_api.app.gen_storage", return_value=mock_storage):
+    with (
+        patch("birdxplorer_api.app.gen_storage", return_value=mock_storage),
+        patch("birdxplorer_api.app.gen_semantic_search_service", return_value=mock_semantic_search),
+    ):
         app = gen_app(settings=settings_for_test)
         yield TestClient(app)
 

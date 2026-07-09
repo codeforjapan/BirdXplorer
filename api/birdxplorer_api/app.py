@@ -16,6 +16,7 @@ from .middlewares import TimingMiddleware
 from .routers.data import gen_router as gen_data_router
 from .routers.graphs import gen_router as gen_graphs_router
 from .routers.system import gen_router as gen_system_router
+from .semantic_search import SemanticSearchSettings, gen_semantic_search_service
 
 
 class QueryStringFlatteningMiddleware:
@@ -43,11 +44,15 @@ class QueryStringFlatteningMiddleware:
 def gen_app(settings: GlobalSettings) -> FastAPI:
     _ = get_logger(level=settings.logger_settings.level)
     storage = gen_storage(settings=settings)
+    semantic_search = gen_semantic_search_service(SemanticSearchSettings())
     app = FastAPI()
     app.add_middleware(CORSMiddleware, **settings.cors_settings.model_dump())
     app.add_middleware(QueryStringFlatteningMiddleware)
     app.add_middleware(TimingMiddleware)
     app.include_router(gen_system_router(), prefix="/api/v1/system")
-    app.include_router(gen_data_router(storage=storage, export_api_key=settings.export_api_key), prefix="/api/v1/data")
+    app.include_router(
+        gen_data_router(storage=storage, export_api_key=settings.export_api_key, semantic_search=semantic_search),
+        prefix="/api/v1/data",
+    )
     app.include_router(gen_graphs_router(storage=storage), prefix="/api/v1/graphs")
     return app
