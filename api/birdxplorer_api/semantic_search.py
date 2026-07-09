@@ -6,6 +6,7 @@ routers/data.py からは gen_router(semantic_search=...) で注入される
 が未設定の場合はサービス自体が生成されず、エンドポイントは503を返す。
 """
 
+from logging import getLogger
 from typing import Any, Dict, List, Optional, Tuple
 
 import boto3  # type: ignore[import-untyped]
@@ -16,10 +17,18 @@ from opensearchpy import (
     OpenSearch,
     RequestsHttpConnection,
 )
+from pydantic import ValidationError
+from pydantic_settings import SettingsConfigDict
 
+from birdxplorer_common.exceptions import BaseError
 from birdxplorer_common.models import LanguageCode, NoteId
 from birdxplorer_common.settings import BaseSettings
 
+logger = getLogger(__name__)
+
+# 契約: この2定数は ETL 側と一致している必要がある
+# (etl/src/birdxplorer_etl/lib/lambda_handler/embedding_lambda.py の EMBEDDING_MODEL /
+#  search_index_writer_lambda.py の ALIAS_NAME)。変更時は両方を同時に更新すること。
 EMBEDDING_MODEL = "text-embedding-3-small"
 ALIAS_NAME = "notes"
 
@@ -27,11 +36,15 @@ ALIAS_NAME = "notes"
 class SemanticSearchSettings(BaseSettings):
     """セマンティック検索の設定(env: BX_OPENSEARCH_ENDPOINT / BX_OPENAI_API_KEY)"""
 
+    model_config = SettingsConfigDict(
+        env_prefix="BX_", env_file=".env", env_file_encoding="utf-8", env_nested_delimiter="__"
+    )
+
     opensearch_endpoint: Optional[str] = None
     openai_api_key: Optional[str] = None
 
 
-class SemanticSearchUnavailableError(Exception):
+class SemanticSearchUnavailableError(BaseError):
     """OpenSearch / OpenAI への接続・呼び出しに失敗した場合に送出される"""
 
 
@@ -68,8 +81,11 @@ class SemanticSearchService:
             return None
         except Exception as e:  # noqa: BLE001
             raise SemanticSearchUnavailableError(f"failed to fetch note embedding: {e}") from e
-        embedding: List[float] = doc["_source"]["embedding"]
-        return embedding
+        # embeddingフィールドが存在しない場合は None を返す(インデックス移行期の整合ズレ対策)
+        embedding = doc.get("_source", {}).get("embedding")
+        if embedding is None:
+            return None
+        return list(embedding)
 
     def knn_search(
         self,
@@ -94,7 +110,13 @@ class SemanticSearchService:
         for hit in response["hits"]["hits"]:
             if exclude_note_id is not None and hit["_id"] == str(exclude_note_id):
                 continue
-            results.append((NoteId(hit["_id"]), float(hit["_score"])))
+            # 不正な _id はスキップして処理を継続する
+            try:
+                note_id = NoteId.from_str(hit["_id"])
+            except ValidationError:
+                logger.warning(f"skipping invalid note id from search index: {hit['_id']}")
+                continue
+            results.append((note_id, float(hit["_score"])))
         return results[:limit]
 
 
@@ -102,7 +124,11 @@ def gen_semantic_search_service(settings: SemanticSearchSettings) -> Optional[Se
     """設定が揃っている場合のみサービスを生成する(ローカル開発等ではNone)"""
     if not settings.opensearch_endpoint or not settings.openai_api_key:
         return None
-    return SemanticSearchService(
-        opensearch_endpoint=settings.opensearch_endpoint,
-        openai_api_key=settings.openai_api_key,
-    )
+    try:
+        return SemanticSearchService(
+            opensearch_endpoint=settings.opensearch_endpoint,
+            openai_api_key=settings.openai_api_key,
+        )
+    except Exception as e:
+        logger.error(f"semantic search service initialization failed: {e}")
+        return None

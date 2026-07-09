@@ -1,7 +1,6 @@
 import csv
 from datetime import datetime, timezone
 from io import StringIO
-from logging import getLogger
 from typing import Any, Dict, Generator, List, Optional, Tuple, TypeAlias, Union
 from urllib.parse import parse_qs as parse_query_string
 from urllib.parse import urlencode
@@ -26,10 +25,7 @@ from birdxplorer_api.openapi_doc import (
     V1DataTopicsDocs,
     V1DataUserEnrollmentsDocs,
 )
-from birdxplorer_api.semantic_search import (
-    SemanticSearchService,
-    SemanticSearchUnavailableError,
-)
+from birdxplorer_api.semantic_search import SemanticSearchService
 from birdxplorer_common.models import (
     BaseModel,
     LanguageCode,
@@ -52,8 +48,6 @@ from birdxplorer_common.models import (
     UserId,
 )
 from birdxplorer_common.storage import CsvExportRow, Storage
-
-logger = getLogger(__name__)
 
 _CSV_EXPORT_JST = ZoneInfo("Asia/Tokyo")
 _CSV_EXPORT_THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
@@ -432,6 +426,12 @@ def gen_router(
     semantic_search: Optional[SemanticSearchService] = None,
 ) -> APIRouter:
     router = APIRouter()
+
+    def _require_semantic_search() -> SemanticSearchService:
+        """セマンティック検索が未設定の場合は503を送出するガードヘルパー"""
+        if semantic_search is None:
+            raise HTTPException(status_code=503, detail="semantic search is not configured")
+        return semantic_search
 
     @router.get(
         "/user-enrollments/{participant_id}",
@@ -985,14 +985,9 @@ def gen_router(
         language: Union[LanguageCode, None] = Query(default=None, **V1DataSearchSemanticDocs.params["language"]),
         limit: int = Query(default=20, ge=1, le=100, **V1DataSearchSemanticDocs.params["limit"]),
     ) -> SemanticSearchResponse:
-        if semantic_search is None:
-            raise HTTPException(status_code=503, detail="semantic search is not configured")
-        try:
-            vector = semantic_search.embed_query(q)
-            hits = semantic_search.knn_search(vector, limit=limit, language=language)
-        except SemanticSearchUnavailableError as e:
-            logger.error(f"semantic search unavailable: {e}")
-            raise HTTPException(status_code=503, detail="semantic search is temporarily unavailable")
+        service = _require_semantic_search()
+        vector = service.embed_query(q)
+        hits = service.knn_search(vector, limit=limit, language=language)
         return _build_semantic_response(hits)
 
     @router.get(
@@ -1004,16 +999,11 @@ def gen_router(
         note_id: NoteId = Path(**V1DataSearchSimilarDocs.params["note_id"]),
         limit: int = Query(default=20, ge=1, le=100, **V1DataSearchSimilarDocs.params["limit"]),
     ) -> SemanticSearchResponse:
-        if semantic_search is None:
-            raise HTTPException(status_code=503, detail="semantic search is not configured")
-        try:
-            vector = semantic_search.get_note_embedding(note_id)
-            if vector is None:
-                raise HTTPException(status_code=404, detail=f"note {note_id} is not indexed")
-            hits = semantic_search.knn_search(vector, limit=limit, exclude_note_id=note_id)
-        except SemanticSearchUnavailableError as e:
-            logger.error(f"semantic search unavailable: {e}")
-            raise HTTPException(status_code=503, detail="semantic search is temporarily unavailable")
+        service = _require_semantic_search()
+        vector = service.get_note_embedding(note_id)
+        if vector is None:
+            raise HTTPException(status_code=404, detail=f"note {note_id} is not indexed")
+        hits = service.knn_search(vector, limit=limit, exclude_note_id=note_id)
         return _build_semantic_response(hits)
 
     return router

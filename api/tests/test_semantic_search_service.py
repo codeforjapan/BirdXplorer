@@ -41,6 +41,20 @@ class TestGenService:
         ):
             assert gen_semantic_search_service(settings) is not None
 
+    def test_returns_none_and_logs_when_initialization_fails(self, caplog: pytest.LogCaptureFixture) -> None:
+        """F1: サービス生成中に例外が発生した場合は None を返しログを記録する"""
+        import logging
+
+        settings = SemanticSearchSettings(opensearch_endpoint="example.com", openai_api_key="key")
+        with (
+            patch("birdxplorer_api.semantic_search.AWSV4SignerAuth", side_effect=RuntimeError("cred error")),
+            patch("birdxplorer_api.semantic_search.boto3"),
+            caplog.at_level(logging.ERROR),
+        ):
+            result = gen_semantic_search_service(settings)
+        assert result is None
+        assert "semantic search service initialization failed" in caplog.text
+
 
 class TestEmbedQuery:
     def test_returns_embedding(self) -> None:
@@ -76,6 +90,13 @@ class TestGetNoteEmbedding:
 
         service, _, os_client = _service_with_mocks()
         os_client.get.side_effect = NotFoundError(404, "not_found", {})
+
+        assert service.get_note_embedding(NoteId.from_str("1" * 19)) is None
+
+    def test_returns_none_when_embedding_field_missing(self) -> None:
+        """F2: _source に embedding フィールドがない場合は KeyError でなく None を返す"""
+        service, _, os_client = _service_with_mocks()
+        os_client.get.return_value = {"_source": {}}
 
         assert service.get_note_embedding(NoteId.from_str("1" * 19)) is None
 
@@ -134,3 +155,19 @@ class TestKnnSearch:
 
         with pytest.raises(SemanticSearchUnavailableError):
             service.knn_search([0.1] * 3, limit=5)
+
+    def test_skips_invalid_note_id_and_returns_valid(self, caplog: pytest.LogCaptureFixture) -> None:
+        """F3: 不正な _id はスキップされ、有効な _id のみ返る"""
+        import logging
+
+        service, _, os_client = _service_with_mocks()
+        valid_id = "1" * 19
+        os_client.search.return_value = {"hits": {"hits": [_hit("abc", 0.99), _hit(valid_id, 0.85)]}}
+
+        with caplog.at_level(logging.WARNING):
+            result = service.knn_search([0.1] * 3, limit=5)
+
+        assert len(result) == 1
+        assert str(result[0][0]) == valid_id
+        assert result[0][1] == 0.85
+        assert "skipping invalid note id from search index: abc" in caplog.text
