@@ -1,9 +1,11 @@
 """セマンティック検索エンドポイントのテスト"""
 
 import json
+import logging
 from typing import List
 from unittest.mock import MagicMock
 
+import pytest
 from fastapi.testclient import TestClient
 
 from birdxplorer_api.semantic_search import SemanticSearchUnavailableError
@@ -56,9 +58,13 @@ def test_semantic_search_validation_errors(client: TestClient) -> None:
     assert client.get("/api/v1/data/search/semantic?q=test&limit=101").status_code == 422
 
 
-def test_semantic_search_returns_503_when_unavailable(client: TestClient, mock_semantic_search: MagicMock) -> None:
+def test_semantic_search_returns_503_when_unavailable(
+    client: TestClient, mock_semantic_search: MagicMock, caplog: pytest.LogCaptureFixture
+) -> None:
     mock_semantic_search.embed_query.side_effect = SemanticSearchUnavailableError("down")
-    assert client.get("/api/v1/data/search/semantic?q=test").status_code == 503
+    with caplog.at_level(logging.ERROR):
+        assert client.get("/api/v1/data/search/semantic?q=test").status_code == 503
+    assert "semantic search unavailable" in caplog.text
 
 
 def test_similar_returns_notes(client: TestClient, mock_semantic_search: MagicMock, note_samples: List[Note]) -> None:

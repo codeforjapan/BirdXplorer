@@ -1,6 +1,7 @@
 import csv
 from datetime import datetime, timezone
 from io import StringIO
+from logging import getLogger
 from typing import Any, Dict, Generator, List, Optional, Tuple, TypeAlias, Union
 from urllib.parse import parse_qs as parse_query_string
 from urllib.parse import urlencode
@@ -51,6 +52,8 @@ from birdxplorer_common.models import (
     UserId,
 )
 from birdxplorer_common.storage import CsvExportRow, Storage
+
+logger = getLogger(__name__)
 
 _CSV_EXPORT_JST = ZoneInfo("Asia/Tokyo")
 _CSV_EXPORT_THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
@@ -987,7 +990,8 @@ def gen_router(
         try:
             vector = semantic_search.embed_query(q)
             hits = semantic_search.knn_search(vector, limit=limit, language=language)
-        except SemanticSearchUnavailableError:
+        except SemanticSearchUnavailableError as e:
+            logger.error(f"semantic search unavailable: {e}")
             raise HTTPException(status_code=503, detail="semantic search is temporarily unavailable")
         return _build_semantic_response(hits)
 
@@ -1007,7 +1011,8 @@ def gen_router(
             if vector is None:
                 raise HTTPException(status_code=404, detail=f"note {note_id} is not indexed")
             hits = semantic_search.knn_search(vector, limit=limit, exclude_note_id=note_id)
-        except SemanticSearchUnavailableError:
+        except SemanticSearchUnavailableError as e:
+            logger.error(f"semantic search unavailable: {e}")
             raise HTTPException(status_code=503, detail="semantic search is temporarily unavailable")
         return _build_semantic_response(hits)
 
