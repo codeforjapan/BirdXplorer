@@ -19,7 +19,6 @@ from .routers.data import gen_router as gen_data_router
 from .routers.graphs import gen_router as gen_graphs_router
 from .routers.system import gen_router as gen_system_router
 from .semantic_search import (
-    SemanticSearchSettings,
     SemanticSearchUnavailableError,
     gen_semantic_search_service,
 )
@@ -52,7 +51,7 @@ class QueryStringFlatteningMiddleware:
 def gen_app(settings: GlobalSettings) -> FastAPI:
     _ = get_logger(level=settings.logger_settings.level)
     storage = gen_storage(settings=settings)
-    semantic_search = gen_semantic_search_service(SemanticSearchSettings())
+    semantic_search = gen_semantic_search_service()
     app = FastAPI()
     app.add_middleware(CORSMiddleware, **settings.cors_settings.model_dump())
     app.add_middleware(QueryStringFlatteningMiddleware)

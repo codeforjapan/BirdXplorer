@@ -36,8 +36,15 @@ ALIAS_NAME = "notes"
 class SemanticSearchSettings(BaseSettings):
     """セマンティック検索の設定(env: BX_OPENSEARCH_ENDPOINT / BX_OPENAI_API_KEY)"""
 
+    # extra="ignore": .env にはGlobalSettings用のキー(bx_storage_settings__* 等)も
+    # 書かれるため、未知キーをエラーにしない(pydantic-settingsは.env内の未知キーを
+    # デフォルトのextra="forbid"でValidationErrorにする)
     model_config = SettingsConfigDict(
-        env_prefix="BX_", env_file=".env", env_file_encoding="utf-8", env_nested_delimiter="__"
+        env_prefix="BX_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_nested_delimiter="__",
+        extra="ignore",
     )
 
     opensearch_endpoint: Optional[str] = None
@@ -120,11 +127,19 @@ class SemanticSearchService:
         return results[:limit]
 
 
-def gen_semantic_search_service(settings: SemanticSearchSettings) -> Optional[SemanticSearchService]:
-    """設定が揃っている場合のみサービスを生成する(ローカル開発等ではNone)"""
-    if not settings.opensearch_endpoint or not settings.openai_api_key:
-        return None
+def gen_semantic_search_service(
+    settings: Optional[SemanticSearchSettings] = None,
+) -> Optional[SemanticSearchService]:
+    """設定が揃っている場合のみサービスを生成する(ローカル開発等ではNone)
+
+    設定の読み込み自体の失敗も含め、いかなる初期化失敗もアプリ起動を
+    クラッシュさせず None(機能無効)に縮退させる。
+    """
     try:
+        if settings is None:
+            settings = SemanticSearchSettings()
+        if not settings.opensearch_endpoint or not settings.openai_api_key:
+            return None
         return SemanticSearchService(
             opensearch_endpoint=settings.opensearch_endpoint,
             openai_api_key=settings.openai_api_key,

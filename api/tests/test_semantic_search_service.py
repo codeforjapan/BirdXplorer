@@ -1,5 +1,6 @@
 """SemanticSearchService のテスト"""
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -171,3 +172,25 @@ class TestKnnSearch:
         assert str(result[0][0]) == valid_id
         assert result[0][1] == 0.85
         assert "skipping invalid note id from search index: abc" in caplog.text
+
+
+class TestSettingsRobustness:
+    def test_env_file_with_unrelated_keys_does_not_raise(self, tmp_path: "Path") -> None:
+        """GlobalSettings用のキーが書かれた.envを読んでもValidationErrorにならない(extra=ignore)"""
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "bx_storage_settings__password=birdxplorer\n"
+            "bx_storage_settings__host=localhost\n"
+            "bx_opensearch_endpoint=example.com\n",
+            encoding="utf-8",
+        )
+        settings = SemanticSearchSettings(_env_file=str(env_file))
+        assert settings.opensearch_endpoint == "example.com"
+
+    def test_factory_degrades_when_settings_load_fails(self) -> None:
+        """設定読み込み自体が失敗してもfactoryはNoneに縮退する(起動クラッシュしない)"""
+        with patch(
+            "birdxplorer_api.semantic_search.SemanticSearchSettings",
+            side_effect=RuntimeError("boom"),
+        ):
+            assert gen_semantic_search_service() is None
