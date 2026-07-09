@@ -66,7 +66,10 @@ class SemanticSearchService:
             use_ssl=True,
             verify_certs=True,
             connection_class=RequestsHttpConnection,
-            timeout=5,
+            # on_disk ベクトル検索はディスク読み込み + リスコアのぶん遅く、
+            # 索引書き込み(バックフィルやリアルタイム抽出)と重なると数秒に達する。
+            # 5秒では間欠的に ReadTimeout で 503 になるため 15秒に緩める。
+            timeout=15,
         )
 
     def embed_query(self, query: str) -> List[float]:
