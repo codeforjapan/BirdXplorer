@@ -1,10 +1,12 @@
 import csv
 import io
+from logging import getLogger
 from urllib.parse import parse_qs as parse_query_string
 from urllib.parse import urlencode as encode_query_string
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic.alias_generators import to_snake
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -16,6 +18,12 @@ from .middlewares import TimingMiddleware
 from .routers.data import gen_router as gen_data_router
 from .routers.graphs import gen_router as gen_graphs_router
 from .routers.system import gen_router as gen_system_router
+from .semantic_search import (
+    SemanticSearchUnavailableError,
+    gen_semantic_search_service,
+)
+
+logger = getLogger(__name__)
 
 
 class QueryStringFlatteningMiddleware:
@@ -43,11 +51,22 @@ class QueryStringFlatteningMiddleware:
 def gen_app(settings: GlobalSettings) -> FastAPI:
     _ = get_logger(level=settings.logger_settings.level)
     storage = gen_storage(settings=settings)
+    semantic_search = gen_semantic_search_service()
     app = FastAPI()
     app.add_middleware(CORSMiddleware, **settings.cors_settings.model_dump())
     app.add_middleware(QueryStringFlatteningMiddleware)
     app.add_middleware(TimingMiddleware)
+
+    @app.exception_handler(SemanticSearchUnavailableError)
+    def handle_semantic_search_unavailable(request: Request, exc: SemanticSearchUnavailableError) -> JSONResponse:
+        """SemanticSearchUnavailableError を 503 に変換するアプリレベルハンドラ"""
+        logger.error(f"semantic search unavailable: {exc}")
+        return JSONResponse(status_code=503, content={"detail": "semantic search is temporarily unavailable"})
+
     app.include_router(gen_system_router(), prefix="/api/v1/system")
-    app.include_router(gen_data_router(storage=storage, export_api_key=settings.export_api_key), prefix="/api/v1/data")
+    app.include_router(
+        gen_data_router(storage=storage, export_api_key=settings.export_api_key, semantic_search=semantic_search),
+        prefix="/api/v1/data",
+    )
     app.include_router(gen_graphs_router(storage=storage), prefix="/api/v1/graphs")
     return app

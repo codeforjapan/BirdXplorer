@@ -23,6 +23,8 @@ logger.setLevel(logging.INFO)
 # v2: ディスクベースベクトル検索(mode: on_disk)に変更。
 # notesテーブルは約293万件あり、in-memoryのHNSW(約19GB)はm6g.largeに収まらないため。
 INDEX_NAME = "notes-v2"
+# 契約: この定数は API 側と一致している必要がある
+# (api/birdxplorer_api/semantic_search.py の ALIAS_NAME)。変更時は両方を同時に更新すること。
 ALIAS_NAME = "notes"
 
 # spec: 2026-07-08-opensearch-phase2-etl-design.md §7
