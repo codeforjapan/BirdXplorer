@@ -21,6 +21,8 @@ from birdxplorer_etl.lib.lambda_handler.common.sqs_handler import SQSHandler
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+# 契約: この定数は API 側と一致している必要がある
+# (api/birdxplorer_api/semantic_search.py の EMBEDDING_MODEL)。変更時は両方を同時に更新すること。
 EMBEDDING_MODEL = "text-embedding-3-small"
 
 _openai_client = None

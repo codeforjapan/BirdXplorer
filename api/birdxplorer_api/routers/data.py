@@ -1,7 +1,7 @@
 import csv
 from datetime import datetime, timezone
 from io import StringIO
-from typing import Any, Dict, Generator, List, Optional, TypeAlias, Union
+from typing import Any, Dict, Generator, List, Optional, Tuple, TypeAlias, Union
 from urllib.parse import parse_qs as parse_query_string
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
@@ -20,9 +20,12 @@ from birdxplorer_api.openapi_doc import (
     V1DataPostsDocs,
     V1DataSearchCountDocs,
     V1DataSearchDocs,
+    V1DataSearchSemanticDocs,
+    V1DataSearchSimilarDocs,
     V1DataTopicsDocs,
     V1DataUserEnrollmentsDocs,
 )
+from birdxplorer_api.semantic_search import SemanticSearchService
 from birdxplorer_common.models import (
     BaseModel,
     LanguageCode,
@@ -381,6 +384,15 @@ class SearchCountResponse(BaseModel):
     total: Annotated[int, PydanticField(description="検索結果の総件数")]
 
 
+class SemanticSearchResult(BaseModel):
+    note: Note
+    score: float
+
+
+class SemanticSearchResponse(BaseModel):
+    data: List[SemanticSearchResult]
+
+
 class NoteRequestListResponse(BaseModel):
     data: Annotated[List[NoteRequest], PydanticField(description="ノートリクエストのリスト")]
     meta: PaginationMeta
@@ -408,8 +420,18 @@ def ensure_twitter_timestamp(t: Union[str, TwitterTimestamp]) -> TwitterTimestam
         raise OverflowError("Timestamp out of range")
 
 
-def gen_router(storage: Storage, export_api_key: Optional[str] = None) -> APIRouter:
+def gen_router(
+    storage: Storage,
+    export_api_key: Optional[str] = None,
+    semantic_search: Optional[SemanticSearchService] = None,
+) -> APIRouter:
     router = APIRouter()
+
+    def _require_semantic_search() -> SemanticSearchService:
+        """セマンティック検索が未設定の場合は503を送出するガードヘルパー"""
+        if semantic_search is None:
+            raise HTTPException(status_code=503, detail="semantic search is not configured")
+        return semantic_search
 
     @router.get(
         "/user-enrollments/{participant_id}",
@@ -937,5 +959,51 @@ def gen_router(storage: Storage, export_api_key: Optional[str] = None) -> APIRou
                 "Cache-Control": "no-store",
             },
         )
+
+    def _build_semantic_response(hits: List[Tuple[NoteId, float]]) -> SemanticSearchResponse:
+        """note_id+scoreの一覧をPGからハイドレートしてスコア順のレスポンスを作る"""
+        note_ids = [note_id for note_id, _ in hits]
+        if not note_ids:
+            return SemanticSearchResponse(data=[])
+        notes_by_id = {note.note_id: note for note in storage.get_notes(note_ids=note_ids, limit=len(note_ids))}
+        # PGに存在しないnote_id(埋め込み先行の整合ズレ)は除外し、スコア順を維持する
+        return SemanticSearchResponse(
+            data=[
+                SemanticSearchResult(note=notes_by_id[note_id], score=score)
+                for note_id, score in hits
+                if note_id in notes_by_id
+            ]
+        )
+
+    @router.get(
+        "/search/semantic",
+        description=V1DataSearchSemanticDocs.description,
+        response_model=SemanticSearchResponse,
+    )
+    def search_semantic(
+        q: str = Query(min_length=1, max_length=1000, **V1DataSearchSemanticDocs.params["q"]),
+        language: Union[LanguageCode, None] = Query(default=None, **V1DataSearchSemanticDocs.params["language"]),
+        limit: int = Query(default=20, ge=1, le=100, **V1DataSearchSemanticDocs.params["limit"]),
+    ) -> SemanticSearchResponse:
+        service = _require_semantic_search()
+        vector = service.embed_query(q)
+        hits = service.knn_search(vector, limit=limit, language=language)
+        return _build_semantic_response(hits)
+
+    @router.get(
+        "/search/similar/{note_id}",
+        description=V1DataSearchSimilarDocs.description,
+        response_model=SemanticSearchResponse,
+    )
+    def search_similar(
+        note_id: NoteId = Path(**V1DataSearchSimilarDocs.params["note_id"]),
+        limit: int = Query(default=20, ge=1, le=100, **V1DataSearchSimilarDocs.params["limit"]),
+    ) -> SemanticSearchResponse:
+        service = _require_semantic_search()
+        vector = service.get_note_embedding(note_id)
+        if vector is None:
+            raise HTTPException(status_code=404, detail=f"note {note_id} is not indexed")
+        hits = service.knn_search(vector, limit=limit, exclude_note_id=note_id)
+        return _build_semantic_response(hits)
 
     return router
