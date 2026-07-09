@@ -30,6 +30,9 @@ dependencies = [
     "starlette",
     "python-dotenv",
     "uvicorn[standard]",
+    "openai",
+    "opensearch-py",
+    "boto3",
 ]
 
 [project.urls]
