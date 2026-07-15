@@ -14,12 +14,14 @@ import boto3  # type: ignore[import-untyped]
 from openai import OpenAI
 from opensearchpy import (
     AWSV4SignerAuth,
+)
+from opensearchpy import ConnectionError as OpenSearchConnectionError
+from opensearchpy import (
     NotFoundError,
     OpenSearch,
     RequestsHttpConnection,
+    TransportError,
 )
-from opensearchpy import ConnectionError as OpenSearchConnectionError
-from opensearchpy import TransportError
 from pydantic import ValidationError
 from pydantic_settings import SettingsConfigDict
 
@@ -32,7 +34,7 @@ logger = getLogger(__name__)
 T = TypeVar("T")
 
 # transient エラー時にリトライする際の固定バックオフ(秒)
-_RETRY_BACKOFF_SECONDS = 0.5
+_RETRY_BACKOFF_SECONDS: float = 0.5
 
 
 def _is_transient_opensearch_error(exc: Exception) -> bool:
