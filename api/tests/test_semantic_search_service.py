@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from birdxplorer_api.semantic_search import (
+    _RETRY_BACKOFF_SECONDS,
     SemanticSearchService,
     SemanticSearchSettings,
     SemanticSearchUnavailableError,
@@ -200,7 +201,7 @@ class TestKnnSearch:
 
         assert result == [("1" * 19, 0.9)]
         assert os_client.search.call_count == 2
-        mock_sleep.assert_called_once()
+        mock_sleep.assert_called_once_with(_RETRY_BACKOFF_SECONDS)
         assert "knn search attempt 1 failed" in caplog.text
 
     def test_retries_exhausted_then_raises(self) -> None:

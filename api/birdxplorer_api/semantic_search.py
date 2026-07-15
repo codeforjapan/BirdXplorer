@@ -133,6 +133,8 @@ class SemanticSearchService:
     def get_note_embedding(self, note_id: NoteId) -> Optional[List[float]]:
         """ノートの保存済みembeddingを取得する(未インデックスならNone)"""
         try:
+            # NOTE: 意図的にリトライしない。search_similar は get_note_embedding→knn_search を直列で呼ぶため、
+            # 両方リトライすると最悪~60秒となり ~30秒予算を超える。リトライするのは knn_search のみ。
             doc = self._opensearch.get(index=ALIAS_NAME, id=str(note_id), _source_includes=["embedding"])
         except NotFoundError:
             return None
