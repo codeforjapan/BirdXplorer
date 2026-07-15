@@ -108,6 +108,15 @@ class TestGetNoteEmbedding:
         with pytest.raises(SemanticSearchUnavailableError):
             service.get_note_embedding(NoteId.from_str("1" * 19))
 
+    def test_transient_error_is_not_retried(self) -> None:
+        from opensearchpy import ConnectionTimeout
+
+        service, _, os_client = _service_with_mocks()
+        os_client.get.side_effect = ConnectionTimeout("N/A", "read timed out", None)
+        with pytest.raises(SemanticSearchUnavailableError):
+            service.get_note_embedding(NoteId.from_str("1" * 19))
+        assert os_client.get.call_count == 1
+
 
 def _hit(note_id: str, score: float) -> dict[str, Any]:
     return {"_id": note_id, "_score": score}
@@ -172,6 +181,61 @@ class TestKnnSearch:
         assert str(result[0][0]) == valid_id
         assert result[0][1] == 0.85
         assert "skipping invalid note id from search index: abc" in caplog.text
+
+    def test_retries_once_on_transient_then_succeeds(self, caplog: pytest.LogCaptureFixture) -> None:
+        import logging
+
+        from opensearchpy import ConnectionTimeout
+
+        service, _, os_client = _service_with_mocks()
+        os_client.search.side_effect = [
+            ConnectionTimeout("N/A", "read timed out", None),
+            {"hits": {"hits": [_hit("1" * 19, 0.9)]}},
+        ]
+        with (
+            patch("birdxplorer_api.semantic_search.time.sleep") as mock_sleep,
+            caplog.at_level(logging.WARNING),
+        ):
+            result = service.knn_search([0.1] * 3, limit=1)
+
+        assert result == [("1" * 19, 0.9)]
+        assert os_client.search.call_count == 2
+        mock_sleep.assert_called_once()
+        assert "knn search attempt 1 failed" in caplog.text
+
+    def test_retries_exhausted_then_raises(self) -> None:
+        from opensearchpy import ConnectionTimeout
+
+        service, _, os_client = _service_with_mocks()
+        os_client.search.side_effect = ConnectionTimeout("N/A", "read timed out", None)
+        with patch("birdxplorer_api.semantic_search.time.sleep"):
+            with pytest.raises(SemanticSearchUnavailableError):
+                service.knn_search([0.1] * 3, limit=5)
+        assert os_client.search.call_count == 2
+
+    def test_5xx_is_retried(self) -> None:
+        from opensearchpy import TransportError
+
+        service, _, os_client = _service_with_mocks()
+        os_client.search.side_effect = [
+            TransportError(503, "unavailable", {}),
+            {"hits": {"hits": []}},
+        ]
+        with patch("birdxplorer_api.semantic_search.time.sleep"):
+            result = service.knn_search([0.1] * 3, limit=5)
+        assert result == []
+        assert os_client.search.call_count == 2
+
+    def test_4xx_is_not_retried(self) -> None:
+        from opensearchpy import TransportError
+
+        service, _, os_client = _service_with_mocks()
+        os_client.search.side_effect = TransportError(400, "bad_request", {})
+        with patch("birdxplorer_api.semantic_search.time.sleep") as mock_sleep:
+            with pytest.raises(SemanticSearchUnavailableError):
+                service.knn_search([0.1] * 3, limit=5)
+        assert os_client.search.call_count == 1
+        mock_sleep.assert_not_called()
 
 
 class TestSettingsRobustness:

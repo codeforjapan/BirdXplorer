@@ -6,8 +6,9 @@ routers/data.py からは gen_router(semantic_search=...) で注入される
 が未設定の場合はサービス自体が生成されず、エンドポイントは503を返す。
 """
 
+import time
 from logging import getLogger
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 import boto3  # type: ignore[import-untyped]
 from openai import OpenAI
@@ -17,6 +18,8 @@ from opensearchpy import (
     OpenSearch,
     RequestsHttpConnection,
 )
+from opensearchpy import ConnectionError as OpenSearchConnectionError
+from opensearchpy import TransportError
 from pydantic import ValidationError
 from pydantic_settings import SettingsConfigDict
 
@@ -25,6 +28,25 @@ from birdxplorer_common.models import LanguageCode, NoteId
 from birdxplorer_common.settings import BaseSettings
 
 logger = getLogger(__name__)
+
+T = TypeVar("T")
+
+# transient エラー時にリトライする際の固定バックオフ(秒)
+_RETRY_BACKOFF_SECONDS = 0.5
+
+
+def _is_transient_opensearch_error(exc: Exception) -> bool:
+    """接続/読取タイムアウト・5xx を transient(再試行対象)とみなす。
+
+    4xx(NotFoundError の 404 を含む)など決定的なエラーは False。
+    """
+    if isinstance(exc, OpenSearchConnectionError):  # ConnectionTimeout を含む
+        return True
+    if isinstance(exc, TransportError):
+        status = exc.status_code
+        return isinstance(status, int) and 500 <= status < 600
+    return False
+
 
 # 契約: この2定数は ETL 側と一致している必要がある
 # (etl/src/birdxplorer_etl/lib/lambda_handler/embedding_lambda.py の EMBEDDING_MODEL /
@@ -78,6 +100,23 @@ class SemanticSearchService:
             timeout=timeout,
         )
 
+    def _run_with_retry(self, operation: Callable[[], T], description: str) -> T:
+        """OpenSearch 呼び出しを実行し、transient エラー時のみ1回だけ再試行する。
+
+        非 transient なエラーは即座に送出する(呼び出し側で
+        SemanticSearchUnavailableError に変換される)。
+        """
+        for attempt in range(2):
+            try:
+                return operation()
+            except Exception as e:  # noqa: BLE001
+                if attempt == 0 and _is_transient_opensearch_error(e):
+                    logger.warning(f"{description} attempt 1 failed, retrying: {e}")
+                    time.sleep(_RETRY_BACKOFF_SECONDS)
+                    continue
+                raise
+        raise AssertionError("unreachable")  # pragma: no cover
+
     def embed_query(self, query: str) -> List[float]:
         """クエリ文をベクトル化する(失敗時は1回だけリトライ)"""
         last_error: Optional[Exception] = None
@@ -118,7 +157,10 @@ class SemanticSearchService:
         body: Dict[str, Any] = {"size": size, "_source": False, "query": {"knn": {"embedding": knn}}}
 
         try:
-            response = self._opensearch.search(index=ALIAS_NAME, body=body)
+            response = self._run_with_retry(
+                lambda: self._opensearch.search(index=ALIAS_NAME, body=body),
+                "knn search",
+            )
         except Exception as e:  # noqa: BLE001
             raise SemanticSearchUnavailableError(f"knn search failed: {e}") from e
 
