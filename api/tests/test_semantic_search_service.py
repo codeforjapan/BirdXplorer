@@ -194,3 +194,32 @@ class TestSettingsRobustness:
             side_effect=RuntimeError("boom"),
         ):
             assert gen_semantic_search_service() is None
+
+
+class TestTimeoutConfig:
+    def test_default_timeout_is_15(self) -> None:
+        settings = SemanticSearchSettings(opensearch_endpoint="example.com", openai_api_key="key")
+        assert settings.opensearch_timeout_seconds == 15
+
+    def test_timeout_passed_to_opensearch_client(self) -> None:
+        with (
+            patch("birdxplorer_api.semantic_search.OpenAI"),
+            patch("birdxplorer_api.semantic_search.OpenSearch") as mock_os_cls,
+            patch("birdxplorer_api.semantic_search.boto3"),
+            patch("birdxplorer_api.semantic_search.AWSV4SignerAuth"),
+        ):
+            SemanticSearchService(opensearch_endpoint="example.com", openai_api_key="key", timeout=25)
+        assert mock_os_cls.call_args.kwargs["timeout"] == 25
+
+    def test_factory_injects_configured_timeout(self) -> None:
+        settings = SemanticSearchSettings(
+            opensearch_endpoint="example.com", openai_api_key="key", opensearch_timeout_seconds=30
+        )
+        with (
+            patch("birdxplorer_api.semantic_search.OpenAI"),
+            patch("birdxplorer_api.semantic_search.OpenSearch") as mock_os_cls,
+            patch("birdxplorer_api.semantic_search.boto3"),
+            patch("birdxplorer_api.semantic_search.AWSV4SignerAuth"),
+        ):
+            gen_semantic_search_service(settings)
+        assert mock_os_cls.call_args.kwargs["timeout"] == 30

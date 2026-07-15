@@ -49,6 +49,7 @@ class SemanticSearchSettings(BaseSettings):
 
     opensearch_endpoint: Optional[str] = None
     openai_api_key: Optional[str] = None
+    opensearch_timeout_seconds: int = 15
 
 
 class SemanticSearchUnavailableError(BaseError):
@@ -56,7 +57,13 @@ class SemanticSearchUnavailableError(BaseError):
 
 
 class SemanticSearchService:
-    def __init__(self, opensearch_endpoint: str, openai_api_key: str, region: str = "ap-northeast-1") -> None:
+    def __init__(
+        self,
+        opensearch_endpoint: str,
+        openai_api_key: str,
+        region: str = "ap-northeast-1",
+        timeout: int = 15,
+    ) -> None:
         self._openai = OpenAI(api_key=openai_api_key)
         credentials = boto3.Session().get_credentials()
         auth = AWSV4SignerAuth(credentials, region, "es")
@@ -66,10 +73,9 @@ class SemanticSearchService:
             use_ssl=True,
             verify_certs=True,
             connection_class=RequestsHttpConnection,
-            # on_disk ベクトル検索はディスク読み込み + リスコアのぶん遅く、
-            # 索引書き込み(バックフィルやリアルタイム抽出)と重なると数秒に達する。
-            # 5秒では間欠的に ReadTimeout で 503 になるため 15秒に緩める。
-            timeout=15,
+            # on_disk ベクトル検索はディスク読み込み + リスコアのぶん遅く、索引書き込みと
+            # 重なると数秒に達する。既定は15秒。ops は BX_OPENSEARCH_TIMEOUT_SECONDS で調整可能。
+            timeout=timeout,
         )
 
     def embed_query(self, query: str) -> List[float]:
@@ -146,6 +152,7 @@ def gen_semantic_search_service(
         return SemanticSearchService(
             opensearch_endpoint=settings.opensearch_endpoint,
             openai_api_key=settings.openai_api_key,
+            timeout=settings.opensearch_timeout_seconds,
         )
     except Exception as e:
         logger.error(f"semantic search service initialization failed: {e}")
