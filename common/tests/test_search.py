@@ -486,19 +486,64 @@ def test_sort_tiebreak_stability(
     note_records_sample: List[NoteRecord],
     post_records_sample: List[PostRecord],
 ) -> None:
-    """Tiebreak: paging over tied impression values must not duplicate or lose note_ids."""
-    _seed_engagement_data(engine_for_test, _ENGAGEMENT_SPECS)
+    """Tiebreak: paging over tied impression values must produce exact deterministic order.
+
+    Seeds 4 notes that ALL share impression_count=77 (value absent from fixture data).
+    For IMPRESSION DESC + note_id DESC tiebreak the expected order is:
+        6300000000000000004, 6300000000000000003, 6300000000000000002, 6300000000000000001
+    Paging with limit=2 must yield exactly that split across two pages with no duplicates
+    or omissions.  If the note_id tiebreak were absent the DB is free to return any order
+    for equal impressions, so the exact-order assertion would fail non-deterministically.
+    """
+    # 4 notes all with identical impression=77 (unique: fixture posts have impression=30)
+    # note_ids chosen so DESC tiebreak order is 004 > 003 > 002 > 001
+    _TIEBREAK_SPECS: List[tuple[str, str, Optional[int], Optional[int], Optional[int], bool]] = [
+        ("6300000000000000001", "6400000000000000001", 77, 1, 1, True),
+        ("6300000000000000002", "6400000000000000002", 77, 1, 1, True),
+        ("6300000000000000003", "6400000000000000003", 77, 1, 1, True),
+        ("6300000000000000004", "6400000000000000004", 77, 1, 1, True),
+    ]
+    _seed_engagement_data(engine_for_test, _TIEBREAK_SPECS)
+
+    _TIEBREAK_IDS = {s[0] for s in _TIEBREAK_SPECS}
+    # Expected note_id order: impression DESC ties broken by note_id DESC
+    expected_order = [
+        "6300000000000000004",
+        "6300000000000000003",
+        "6300000000000000002",
+        "6300000000000000001",
+    ]
+
     storage = Storage(engine=engine_for_test)
-    # impression=50 appears twice (note 002 and 003); use a narrow window to force pagination
-    page1 = storage.search_notes_with_posts(
+
+    # Fetch with a large limit and filter to the seeded ids to isolate from fixture noise
+    all_results = storage.search_notes_with_posts(
+        sort_field=SearchSortField.IMPRESSION_COUNT, sort_order=SortOrder.DESC, limit=200
+    ).items
+    seeded_ids_in_order = [note.note_id for note, _ in all_results if note.note_id in _TIEBREAK_IDS]
+    assert (
+        seeded_ids_in_order == expected_order
+    ), f"Full-page order mismatch.\n  expected: {expected_order}\n  got:      {seeded_ids_in_order}"
+
+    # Now verify pagination stability: page across the tie boundary with limit=2
+    # page1 must be the first 2 expected ids, page2 must be the remaining 2
+    page1_results = storage.search_notes_with_posts(
         sort_field=SearchSortField.IMPRESSION_COUNT, sort_order=SortOrder.DESC, limit=2, offset=0
     ).items
-    page2 = storage.search_notes_with_posts(
+    page1_seeded = [note.note_id for note, _ in page1_results if note.note_id in _TIEBREAK_IDS]
+
+    page2_results = storage.search_notes_with_posts(
         sort_field=SearchSortField.IMPRESSION_COUNT, sort_order=SortOrder.DESC, limit=2, offset=2
     ).items
-    page1_ids = {note.note_id for note, _ in page1}
-    page2_ids = {note.note_id for note, _ in page2}
-    assert page1_ids.isdisjoint(page2_ids), f"Duplicate note_ids across pages: {page1_ids & page2_ids}"
+    page2_seeded = [note.note_id for note, _ in page2_results if note.note_id in _TIEBREAK_IDS]
+
+    combined = page1_seeded + page2_seeded
+    assert (
+        set(combined) == _TIEBREAK_IDS
+    ), f"Duplicate or missing note_ids across pages.\n  page1: {page1_seeded}\n  page2: {page2_seeded}"
+    assert (
+        combined == expected_order
+    ), f"Paginated order mismatch.\n  expected: {expected_order}\n  got:      {combined}"
 
 
 def test_sort_without_post_filters(
