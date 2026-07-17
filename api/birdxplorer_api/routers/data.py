@@ -984,10 +984,26 @@ def gen_router(
         q: str = Query(min_length=1, max_length=1000, **V1DataSearchSemanticDocs.params["q"]),
         language: Union[LanguageCode, None] = Query(default=None, **V1DataSearchSemanticDocs.params["language"]),
         limit: int = Query(default=20, ge=1, le=100, **V1DataSearchSemanticDocs.params["limit"]),
+        note_includes_text: Union[None, List[str]] = Query(
+            default=None, **V1DataSearchSemanticDocs.params["note_includes_text"]
+        ),
+        note_search_mode: TextSearchMode = Query(
+            default=TextSearchMode.OR, **V1DataSearchSemanticDocs.params["note_search_mode"]
+        ),
+        note_excludes_text: Union[str, None] = Query(
+            default=None, **V1DataSearchSemanticDocs.params["note_excludes_text"]
+        ),
     ) -> SemanticSearchResponse:
         service = _require_semantic_search()
         vector = service.embed_query(q)
-        hits = service.knn_search(vector, limit=limit, language=language)
+        hits = service.knn_search(
+            vector,
+            limit=limit,
+            language=language,
+            includes=note_includes_text or None,
+            search_mode=note_search_mode,
+            excludes=[note_excludes_text] if note_excludes_text else None,
+        )
         return _build_semantic_response(hits)
 
     @router.get(

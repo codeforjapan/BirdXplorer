@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from birdxplorer_api.semantic_search import SemanticSearchUnavailableError
-from birdxplorer_common.models import Note
+from birdxplorer_common.models import Note, TextSearchMode
 from birdxplorer_common.settings import GlobalSettings
 
 
@@ -85,6 +85,27 @@ def test_similar_returns_404_when_not_indexed(client: TestClient, mock_semantic_
 
 def test_similar_returns_422_for_invalid_note_id(client: TestClient) -> None:
     assert client.get("/api/v1/data/search/similar/not-a-note-id").status_code == 422
+
+
+def test_semantic_search_passes_keyword_filters(client: TestClient, mock_semantic_search: MagicMock) -> None:
+    response = client.get(
+        "/api/v1/data/search/semantic?q=test"
+        "&note_includes_text=%E5%8C%BB%E7%99%82&note_includes_text=%E6%94%BF%E6%B2%BB"
+        "&note_search_mode=and&note_excludes_text=%E3%83%87%E3%83%9E"
+    )
+    assert response.status_code == 200
+    kwargs = mock_semantic_search.knn_search.call_args.kwargs
+    assert kwargs["includes"] == ["医療", "政治"]
+    assert kwargs["search_mode"] == TextSearchMode.AND
+    assert kwargs["excludes"] == ["デマ"]
+
+
+def test_semantic_search_defaults_no_keywords(client: TestClient, mock_semantic_search: MagicMock) -> None:
+    client.get("/api/v1/data/search/semantic?q=test")
+    kwargs = mock_semantic_search.knn_search.call_args.kwargs
+    assert kwargs["includes"] is None
+    assert kwargs["excludes"] is None
+    assert kwargs["search_mode"] == TextSearchMode.OR
 
 
 def test_semantic_search_returns_503_when_not_configured(

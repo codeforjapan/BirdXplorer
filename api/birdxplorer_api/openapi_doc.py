@@ -692,11 +692,15 @@ v1_data_search_similar_note_id: FastAPIEndpointParamDocs = {"description": "起�
 
 # Get /api/v1/data/search/semantic の OpenAPI ドキュメント
 V1DataSearchSemanticDocs = FastAPIEndpointDocs(
-    "自然文クエリによるセマンティック検索。クエリをベクトル化し、意味的に近いノートを返します。",
+    "自然文クエリによるセマンティック検索。クエリをベクトル化し、意味的に近いノートを返します。"
+    "note_includes_text/note_excludes_text で語単位のキーワード絞り込み(ハードフィルタ)を併用できます。",
     {
         "q": v1_data_search_semantic_q,
         "language": v1_data_search_semantic_language,
         "limit": v1_data_search_semantic_limit,
+        "note_includes_text": v1_data_notes_search_text,
+        "note_excludes_text": v1_data_notes_search_text,
+        "note_search_mode": v1_data_search_note_search_mode,
     },
 )
 
