@@ -455,8 +455,8 @@ def test_search_sort_by_impression(client: TestClient, mock_storage: MagicMock) 
     response = client.get("/api/v1/data/search?sort_field=impression_count&sort_order=desc")
     assert response.status_code == 200
     kwargs = mock_storage.search_notes_with_posts.call_args.kwargs
-    assert str(kwargs["sort_field"].value) == "impression_count"
-    assert str(kwargs["sort_order"].value) == "desc"
+    assert kwargs["sort_field"].value == "impression_count"
+    assert kwargs["sort_order"].value == "desc"
 
 
 def test_search_invalid_sort_field_422(client: TestClient) -> None:

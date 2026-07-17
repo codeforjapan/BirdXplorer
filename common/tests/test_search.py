@@ -5,7 +5,14 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import text
 
-from birdxplorer_common.models import LanguageCode, Note, Post, SearchSortField, SortOrder, TopicId
+from birdxplorer_common.models import (
+    LanguageCode,
+    Note,
+    Post,
+    SearchSortField,
+    SortOrder,
+    TopicId,
+)
 from birdxplorer_common.storage import (
     NoteRecord,
     PostRecord,
