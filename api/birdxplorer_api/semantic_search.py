@@ -62,7 +62,7 @@ def _build_keyword_filter(
     """
 
     def _clause(keyword: str) -> Dict[str, Any]:
-        return {"multi_match": {"query": keyword, "fields": ["text.ja", "text.en"]}}
+        return {"multi_match": {"query": keyword, "fields": ["text.ja", "text.en"], "operator": "and"}}
 
     include_terms = [k for k in (includes or []) if k and k.strip()]
     exclude_terms = [k for k in (excludes or []) if k and k.strip()]

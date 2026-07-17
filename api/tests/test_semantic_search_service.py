@@ -157,7 +157,9 @@ class TestKnnSearch:
         kw_bool = flt["bool"]["filter"][0]["bool"]
         assert "should" not in kw_bool
         assert len(kw_bool["must"]) == 2
-        assert kw_bool["must"][0] == {"multi_match": {"query": "医療", "fields": ["text.ja", "text.en"]}}
+        assert kw_bool["must"][0] == {
+            "multi_match": {"query": "医療", "fields": ["text.ja", "text.en"], "operator": "and"}
+        }
 
     def test_includes_or_mode_builds_should_with_msm(self) -> None:
         service, _, os_client = _service_with_mocks()
@@ -181,7 +183,9 @@ class TestKnnSearch:
         kw_bool = os_client.search.call_args.kwargs["body"]["query"]["knn"]["embedding"]["filter"]["bool"]["filter"][0][
             "bool"
         ]
-        assert kw_bool["must_not"] == [{"multi_match": {"query": "デマ", "fields": ["text.ja", "text.en"]}}]
+        assert kw_bool["must_not"] == [
+            {"multi_match": {"query": "デマ", "fields": ["text.ja", "text.en"], "operator": "and"}}
+        ]
 
     def test_language_and_includes_combined(self) -> None:
         service, _, os_client = _service_with_mocks()
