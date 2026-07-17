@@ -984,9 +984,7 @@ def gen_router(
         q: str = Query(min_length=1, max_length=1000, **V1DataSearchSemanticDocs.params["q"]),
         language: Union[LanguageCode, None] = Query(default=None, **V1DataSearchSemanticDocs.params["language"]),
         limit: int = Query(default=20, ge=1, le=100, **V1DataSearchSemanticDocs.params["limit"]),
-        note_includes_text: List[str] = Query(
-            default=[], **V1DataSearchSemanticDocs.params["note_includes_text"]
-        ),
+        note_includes_text: List[str] = Query(default=[], **V1DataSearchSemanticDocs.params["note_includes_text"]),
         note_search_mode: TextSearchMode = Query(
             default=TextSearchMode.OR, **V1DataSearchSemanticDocs.params["note_search_mode"]
         ),

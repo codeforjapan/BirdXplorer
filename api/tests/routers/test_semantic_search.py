@@ -96,7 +96,7 @@ def test_semantic_search_passes_keyword_filters(client: TestClient, mock_semanti
     assert response.status_code == 200
     kwargs = mock_semantic_search.knn_search.call_args.kwargs
     assert kwargs["includes"] == ["医療", "政治"]
-    assert kwargs["search_mode"].value == "and"
+    assert kwargs["search_mode"] == TextSearchMode.AND
     assert kwargs["excludes"] == ["デマ"]
 
 

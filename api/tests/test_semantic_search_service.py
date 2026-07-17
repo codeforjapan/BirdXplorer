@@ -165,9 +165,9 @@ class TestKnnSearch:
 
         service.knn_search([0.1] * 3, limit=5, includes=["医療", "政治"], search_mode=TextSearchMode.OR)
 
-        kw_bool = os_client.search.call_args.kwargs["body"]["query"]["knn"]["embedding"]["filter"]["bool"]["filter"][
-            0
-        ]["bool"]
+        kw_bool = os_client.search.call_args.kwargs["body"]["query"]["knn"]["embedding"]["filter"]["bool"]["filter"][0][
+            "bool"
+        ]
         assert len(kw_bool["should"]) == 2
         assert kw_bool["minimum_should_match"] == 1
         assert "must" not in kw_bool
@@ -178,9 +178,9 @@ class TestKnnSearch:
 
         service.knn_search([0.1] * 3, limit=5, excludes=["デマ"])
 
-        kw_bool = os_client.search.call_args.kwargs["body"]["query"]["knn"]["embedding"]["filter"]["bool"]["filter"][
-            0
-        ]["bool"]
+        kw_bool = os_client.search.call_args.kwargs["body"]["query"]["knn"]["embedding"]["filter"]["bool"]["filter"][0][
+            "bool"
+        ]
         assert kw_bool["must_not"] == [{"multi_match": {"query": "デマ", "fields": ["text.ja", "text.en"]}}]
 
     def test_language_and_includes_combined(self) -> None:
