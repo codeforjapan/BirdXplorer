@@ -26,7 +26,7 @@ from pydantic import ValidationError
 from pydantic_settings import SettingsConfigDict
 
 from birdxplorer_common.exceptions import BaseError
-from birdxplorer_common.models import LanguageCode, NoteId
+from birdxplorer_common.models import LanguageCode, NoteId, TextSearchMode
 from birdxplorer_common.settings import BaseSettings
 
 logger = getLogger(__name__)
@@ -48,6 +48,38 @@ def _is_transient_opensearch_error(exc: Exception) -> bool:
         status = exc.status_code
         return isinstance(status, int) and 500 <= status < 600
     return False
+
+
+def _build_keyword_filter(
+    includes: Optional[List[str]],
+    search_mode: TextSearchMode,
+    excludes: Optional[List[str]],
+) -> Optional[Dict[str, Any]]:
+    """AND/OR キーワードを OpenSearch の bool フィルタ句に変換する(全て空なら None)。
+
+    各キーワードは text.ja(kuromoji)/text.en への語単位 multi_match。
+    includes: AND → must / OR → should + minimum_should_match=1。excludes: 常に must_not。
+    """
+
+    def _clause(keyword: str) -> Dict[str, Any]:
+        return {"multi_match": {"query": keyword, "fields": ["text.ja", "text.en"]}}
+
+    include_terms = [k for k in (includes or []) if k and k.strip()]
+    exclude_terms = [k for k in (excludes or []) if k and k.strip()]
+    if not include_terms and not exclude_terms:
+        return None
+
+    bool_body: Dict[str, Any] = {}
+    if include_terms:
+        clauses = [_clause(k) for k in include_terms]
+        if search_mode == TextSearchMode.AND:
+            bool_body["must"] = clauses
+        else:
+            bool_body["should"] = clauses
+            bool_body["minimum_should_match"] = 1
+    if exclude_terms:
+        bool_body["must_not"] = [_clause(k) for k in exclude_terms]
+    return {"bool": bool_body}
 
 
 # 契約: この2定数は ETL 側と一致している必要がある
@@ -152,12 +184,23 @@ class SemanticSearchService:
         limit: int,
         language: Optional[LanguageCode] = None,
         exclude_note_id: Optional[NoteId] = None,
+        includes: Optional[List[str]] = None,
+        search_mode: TextSearchMode = TextSearchMode.OR,
+        excludes: Optional[List[str]] = None,
     ) -> List[Tuple[NoteId, float]]:
         """k-NN検索でnote_idとスコアの一覧をスコア降順で返す"""
         size = limit + 1 if exclude_note_id is not None else limit
         knn: Dict[str, Any] = {"vector": vector, "k": size}
+
+        filter_clauses: List[Dict[str, Any]] = []
         if language is not None:
-            knn["filter"] = {"term": {"language": str(language)}}
+            filter_clauses.append({"term": {"language": str(language)}})
+        keyword_filter = _build_keyword_filter(includes, search_mode, excludes)
+        if keyword_filter is not None:
+            filter_clauses.append(keyword_filter)
+        if filter_clauses:
+            knn["filter"] = {"bool": {"filter": filter_clauses}}
+
         body: Dict[str, Any] = {"size": size, "_source": False, "query": {"knn": {"embedding": knn}}}
 
         try:

@@ -13,7 +13,7 @@ from birdxplorer_api.semantic_search import (
     SemanticSearchUnavailableError,
     gen_semantic_search_service,
 )
-from birdxplorer_common.models import LanguageCode, NoteId
+from birdxplorer_common.models import LanguageCode, NoteId, TextSearchMode
 
 
 def _service_with_mocks() -> tuple[SemanticSearchService, MagicMock, MagicMock]:
@@ -145,7 +145,63 @@ class TestKnnSearch:
         service.knn_search([0.1] * 3, limit=5, language=LanguageCode.from_str("ja"))
 
         body = os_client.search.call_args.kwargs["body"]
-        assert body["query"]["knn"]["embedding"]["filter"] == {"term": {"language": "ja"}}
+        assert body["query"]["knn"]["embedding"]["filter"] == {"bool": {"filter": [{"term": {"language": "ja"}}]}}
+
+    def test_includes_and_mode_builds_must(self) -> None:
+        service, _, os_client = _service_with_mocks()
+        os_client.search.return_value = {"hits": {"hits": []}}
+
+        service.knn_search([0.1] * 3, limit=5, includes=["医療", "政治"], search_mode=TextSearchMode.AND)
+
+        flt = os_client.search.call_args.kwargs["body"]["query"]["knn"]["embedding"]["filter"]
+        kw_bool = flt["bool"]["filter"][0]["bool"]
+        assert "should" not in kw_bool
+        assert len(kw_bool["must"]) == 2
+        assert kw_bool["must"][0] == {"multi_match": {"query": "医療", "fields": ["text.ja", "text.en"]}}
+
+    def test_includes_or_mode_builds_should_with_msm(self) -> None:
+        service, _, os_client = _service_with_mocks()
+        os_client.search.return_value = {"hits": {"hits": []}}
+
+        service.knn_search([0.1] * 3, limit=5, includes=["医療", "政治"], search_mode=TextSearchMode.OR)
+
+        kw_bool = os_client.search.call_args.kwargs["body"]["query"]["knn"]["embedding"]["filter"]["bool"]["filter"][
+            0
+        ]["bool"]
+        assert len(kw_bool["should"]) == 2
+        assert kw_bool["minimum_should_match"] == 1
+        assert "must" not in kw_bool
+
+    def test_excludes_builds_must_not(self) -> None:
+        service, _, os_client = _service_with_mocks()
+        os_client.search.return_value = {"hits": {"hits": []}}
+
+        service.knn_search([0.1] * 3, limit=5, excludes=["デマ"])
+
+        kw_bool = os_client.search.call_args.kwargs["body"]["query"]["knn"]["embedding"]["filter"]["bool"]["filter"][
+            0
+        ]["bool"]
+        assert kw_bool["must_not"] == [{"multi_match": {"query": "デマ", "fields": ["text.ja", "text.en"]}}]
+
+    def test_language_and_includes_combined(self) -> None:
+        service, _, os_client = _service_with_mocks()
+        os_client.search.return_value = {"hits": {"hits": []}}
+
+        service.knn_search(
+            [0.1] * 3, limit=5, language=LanguageCode.from_str("ja"), includes=["医療"], search_mode=TextSearchMode.OR
+        )
+
+        clauses = os_client.search.call_args.kwargs["body"]["query"]["knn"]["embedding"]["filter"]["bool"]["filter"]
+        assert {"term": {"language": "ja"}} in clauses
+        assert any("bool" in c for c in clauses)
+
+    def test_empty_keywords_ignored(self) -> None:
+        service, _, os_client = _service_with_mocks()
+        os_client.search.return_value = {"hits": {"hits": []}}
+
+        service.knn_search([0.1] * 3, limit=5, includes=["", "  "], excludes=[""])
+
+        assert "filter" not in os_client.search.call_args.kwargs["body"]["query"]["knn"]["embedding"]
 
     def test_excludes_self(self) -> None:
         """exclude_note_id 指定時は k を1つ増やして取得し、自分自身を除外して limit 件に切り詰める"""
