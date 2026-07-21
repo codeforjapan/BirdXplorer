@@ -1,4 +1,5 @@
 from typing import List, Optional
+from unittest.mock import MagicMock, call
 
 import pytest
 from sqlalchemy.engine import Engine
@@ -759,3 +760,142 @@ def test_engagement_sort_asc_postless_still_last(
     assert imps == sorted(imps), f"Impressions not ascending: {imps}"
     # post-less notes come last
     assert all(p is None for p in posts[first_none:]), "Post-less notes must be last even on ASC sort"
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for Storage._paginate_two_segment (no DB required)
+# ---------------------------------------------------------------------------
+
+
+def _make_query(rows: list, count_val: int = 0) -> MagicMock:
+    """Build a fluent SQLAlchemy-query mock: .offset(x).limit(y).all() → rows, .count() → count_val."""
+    q = MagicMock()
+    q.offset.return_value.limit.return_value.all.return_value = rows
+    q.count.return_value = count_val
+    return q
+
+
+class TestPaginateTwoSegment:
+    """Direct unit tests for Storage._paginate_two_segment branch logic.
+
+    The method signature is:
+        _paginate_two_segment(seg0_ordered, seg0_for_count, seg1_ordered, offset, limit)
+
+    It always calls seg0_ordered.offset(offset).limit(limit+1).all() and:
+      Branch 1 – Full-in-seg0:  len(seg0_ids) == limit+1  → return seg0_ids (no seg1, no count)
+      Branch 2 – seg1 is None:  len(seg0_ids) < limit+1   → return seg0_ids (no seg1, no count)
+      Branch 3 – Spanning:      0 < len(seg0_ids) < limit+1 and seg1 present
+                                 → call seg1.offset(0).limit(need), return seg0+seg1 head (no count)
+      Branch 4 – Count branch:  len(seg0_ids) == 0 and seg1 present
+                                 → call seg0_for_count.count() ONCE,
+                                   call seg1.offset(max(offset-C0, 0)).limit(limit+1)
+    """
+
+    def test_case1_full_in_seg0(self) -> None:
+        """Branch 1: seg0 fills want rows → return as-is, seg1 never touched, count never called."""
+        limit = 3
+        want = limit + 1  # 4 rows
+        seg0_rows = [("a",), ("b",), ("c",), ("d",)]  # exactly want rows
+        assert len(seg0_rows) == want
+
+        seg0 = _make_query(seg0_rows)
+        seg0_for_count = MagicMock()
+        seg1 = _make_query([("x",)])
+
+        result = Storage._paginate_two_segment(seg0, seg0_for_count, seg1, offset=0, limit=limit)
+
+        assert result == ["a", "b", "c", "d"]
+        # seg0 called with correct offset and limit
+        seg0.offset.assert_called_once_with(0)
+        seg0.offset.return_value.limit.assert_called_once_with(want)
+        # seg1 must NOT be called at all
+        seg1.offset.assert_not_called()
+        seg1.limit.assert_not_called()
+        # count must NOT be called
+        seg0_for_count.count.assert_not_called()
+
+    def test_case2_seg1_is_none(self) -> None:
+        """Branch 2: seg0 returns fewer than want, but seg1_ordered is None → return seg0 ids only, no count."""
+        limit = 5
+        want = limit + 1
+        seg0_rows = [("p",), ("q",)]  # fewer than want
+
+        seg0 = _make_query(seg0_rows)
+        seg0_for_count = MagicMock()
+
+        result = Storage._paginate_two_segment(seg0, seg0_for_count, None, offset=2, limit=limit)
+
+        assert result == ["p", "q"]
+        seg0.offset.assert_called_once_with(2)
+        seg0.offset.return_value.limit.assert_called_once_with(want)
+        seg0_for_count.count.assert_not_called()
+
+    def test_case3_spanning_boundary(self) -> None:
+        """Branch 3: seg0 returns k rows (0 < k < want), seg1 provides the rest; count NOT called."""
+        limit = 5
+        want = limit + 1  # 6
+        k = 4
+        seg0_rows = [("s0",), ("s1",), ("s2",), ("s3",)]  # k=4 rows
+        assert len(seg0_rows) == k
+        need = want - k  # 2
+        seg1_rows = [("t0",), ("t1",)]
+
+        seg0 = _make_query(seg0_rows)
+        seg0_for_count = MagicMock()
+        seg1 = _make_query(seg1_rows)
+        # Override seg1's offset(0).limit(need) chain specifically
+        seg1.offset.return_value.limit.return_value.all.return_value = seg1_rows
+
+        result = Storage._paginate_two_segment(seg0, seg0_for_count, seg1, offset=0, limit=limit)
+
+        assert result == ["s0", "s1", "s2", "s3", "t0", "t1"]
+        # seg1 called with offset(0) and limit(need)
+        seg1.offset.assert_called_once_with(0)
+        seg1.offset.return_value.limit.assert_called_once_with(need)
+        # count must NOT be called in the spanning branch
+        seg0_for_count.count.assert_not_called()
+
+    def test_case4_count_branch_positive_offset(self) -> None:
+        """Branch 4: seg0 returns 0 rows → count() IS called; seg1 offset = max(offset - C0, 0)."""
+        limit = 5
+        want = limit + 1  # 6
+        c0 = 10
+        offset = 15  # offset > c0 → seg1_offset = 15 - 10 = 5
+        expected_seg1_offset = offset - c0  # 5
+
+        seg0 = _make_query([])  # zero rows
+        seg0_for_count = MagicMock()
+        seg0_for_count.count.return_value = c0
+        seg1_rows = [("u0",), ("u1",), ("u2",)]
+        seg1 = _make_query(seg1_rows)
+        seg1.offset.return_value.limit.return_value.all.return_value = seg1_rows
+
+        result = Storage._paginate_two_segment(seg0, seg0_for_count, seg1, offset=offset, limit=limit)
+
+        assert result == ["u0", "u1", "u2"]
+        # count() must be called exactly once
+        seg0_for_count.count.assert_called_once()
+        # seg1 called with the adjusted offset
+        seg1.offset.assert_called_once_with(expected_seg1_offset)
+        seg1.offset.return_value.limit.assert_called_once_with(want)
+
+    def test_case4_count_branch_clamps_to_zero(self) -> None:
+        """Branch 4 edge: offset < C0 → seg1_offset clamped to 0 via max(offset - C0, 0)."""
+        limit = 5
+        want = limit + 1
+        c0 = 20
+        offset = 5  # offset < c0 → max(5-20, 0) = 0
+
+        seg0 = _make_query([])
+        seg0_for_count = MagicMock()
+        seg0_for_count.count.return_value = c0
+        seg1_rows = [("v0",)]
+        seg1 = _make_query(seg1_rows)
+        seg1.offset.return_value.limit.return_value.all.return_value = seg1_rows
+
+        result = Storage._paginate_two_segment(seg0, seg0_for_count, seg1, offset=offset, limit=limit)
+
+        assert result == ["v0"]
+        seg0_for_count.count.assert_called_once()
+        # seg1 must be called with offset=0 (clamped)
+        seg1.offset.assert_called_once_with(0)
