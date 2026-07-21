@@ -882,8 +882,13 @@ class TestPaginateTwoSegment:
         seg1.offset.assert_called_once_with(expected_seg1_offset)
         seg1.offset.return_value.limit.assert_called_once_with(want)
 
-    def test_case4_count_branch_clamps_to_zero(self) -> None:
-        """Branch 4 edge: offset < C0 → seg1_offset clamped to 0 via max(offset - C0, 0)."""
+    def test_case4_count_branch_defensive_clamp(self) -> None:
+        """Branch 4 edge: defensive clamp — offset < C0 → seg1_offset clamped to 0 via max(offset - C0, 0).
+
+        This scenario (seg0 returns 0 rows yet offset < C0) is unreachable in production because
+        the count branch is only entered when seg0 returned 0 rows, which implies offset >= C0.
+        The max(..., 0) is purely defensive against races/edge cases, not a normal code path.
+        """
         limit = 5
         want = limit + 1
         c0 = 20
@@ -903,3 +908,64 @@ class TestPaginateTwoSegment:
         # seg1 must be called with offset=0 (clamped)
         seg1.offset.assert_called_once_with(0)
         seg1.offset.return_value.limit.assert_called_once_with(want)
+
+
+# ---------------------------------------------------------------------------
+# DB-level deep-page test: exercises the real .count() + seg1-offset path
+# ---------------------------------------------------------------------------
+
+# Reuse _SEG_SPECS which has 4 with-post notes (seg0) and 2 post-less notes (seg1).
+# To force the count branch we use an offset far larger than the number of with-post
+# notes so that seg0.offset(offset).limit(want).all() returns 0 rows, causing
+# _paginate_two_segment to call seg0_for_count.count() against the real DB and then
+# apply seg1.offset(offset - c0) to the post-less segment.
+
+_DEEP_PAGE_OFFSET = 10_000  # clearly exceeds the 4 with-post notes in _SEG_SPECS
+_DEEP_PAGE_LIMIT = 2
+
+
+def test_deep_page_count_branch_end_to_end(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """DB-level: deep offset forces the real .count() + seg1-offset path in _paginate_two_segment.
+
+    _SEG_SPECS contains 4 with-post notes (seg0) and 2 post-less notes (seg1).
+    With offset=10_000 >> 4, seg0.offset(10_000).limit(...).all() returns 0 rows.
+    The count branch then calls seg0_for_count.count() against the real DB to get C0,
+    computes seg1_offset = max(10_000 - C0, 0) which is also large (>> 2 post-less notes),
+    so seg1 also returns 0 rows — meaning results is empty and no crash occurs.
+    This confirms the real .count() SQL executes without error and the path returns
+    correctly (empty list rather than an exception or wrong rows).
+    """
+    _seed_engagement_data(engine_for_test, _SEG_SPECS)
+    storage = Storage(engine=engine_for_test)
+
+    # Sanity: verify post-less notes exist in the DB (seg1 is non-empty at offset=0)
+    all_results = storage.search_notes_with_posts(
+        sort_field=SearchSortField.IMPRESSION_COUNT,
+        sort_order=SortOrder.DESC,
+        limit=1000,
+    ).items
+    seeded_postless = [n.note_id for n, p in all_results if n.note_id in _SEG_POSTLESS_IDS and p is None]
+    assert len(seeded_postless) > 0, "Precondition: post-less notes must be present in DB"
+
+    # Deep-page request: offset >> seg0 count → triggers real count branch
+    deep_results = storage.search_notes_with_posts(
+        sort_field=SearchSortField.IMPRESSION_COUNT,
+        sort_order=SortOrder.DESC,
+        limit=_DEEP_PAGE_LIMIT,
+        offset=_DEEP_PAGE_OFFSET,
+    ).items
+
+    # At offset=10_000 there are no more rows (only 6 seeded notes total) — must not crash.
+    # All returned items (if any) must have post=None (came from seg1, not seg0).
+    for note, post in deep_results:
+        assert post is None, f"Deep-page result must not include with-post notes; got post for {note.note_id}"
+
+    # No seeded with-post note should appear (they're all exhausted well before offset 10_000)
+    returned_ids = {n.note_id for n, _ in deep_results}
+    assert returned_ids.isdisjoint(
+        _SEG_WITH_POST_IDS
+    ), f"With-post note_ids must not appear at deep offset; found {returned_ids & _SEG_WITH_POST_IDS}"

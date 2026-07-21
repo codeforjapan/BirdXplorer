@@ -1925,6 +1925,8 @@ class Storage:
 
         # seg0が0件 = offsetがseg0を越えている → C0を計算して seg1 offset を出す
         c0 = seg0_for_count.count()
+        # Defensive: this branch is reached only when seg0 returned 0 rows (offset >= C0),
+        # so offset - c0 is normally >= 0.  The max(..., 0) guards against races/edge cases.
         seg1_offset = max(offset - c0, 0)
         return [r[0] for r in seg1_ordered.offset(seg1_offset).limit(want).all()]
 
