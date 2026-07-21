@@ -11,6 +11,7 @@ from sqlalchemy import (
     case,
     create_engine,
     distinct,
+    exists,
     func,
     or_,
     select,
@@ -1801,6 +1802,132 @@ class Storage:
             query = query.filter(NoteRecord.created_at <= note_created_at_to)
         return query
 
+    def _build_post_sort_segments(
+        self,
+        sess: Session,
+        order_expr: Any,
+        tiebreak: Any,
+        has_post_filters: bool,
+        note_includes_texts: Union[List[str], None],
+        note_excludes_text: Union[str, None],
+        post_includes_texts: Union[List[str], None],
+        post_excludes_text: Union[str, None],
+        language: Union[LanguageCode, None],
+        topic_ids: Union[List[TopicId], None],
+        note_status: Union[List[str], None],
+        note_created_at_from: Union[TwitterTimestamp, None],
+        note_created_at_to: Union[TwitterTimestamp, None],
+        x_user_names: Union[List[str], None],
+        x_user_followers_count_from: Union[int, None],
+        x_user_follow_count_from: Union[int, None],
+        post_like_count_from: Union[int, None],
+        post_repost_count_from: Union[int, None],
+        post_impression_count_from: Union[int, None],
+        post_includes_media: Union[bool, None],
+        note_search_mode: TextSearchMode,
+        post_search_mode: TextSearchMode,
+    ) -> Tuple[Any, Any, Optional[Any]]:
+        """post系ソート用に seg0(ポスト有り・INNER JOIN)と seg1(ポスト無し)のnote_idクエリを組む。
+
+        戻り値: (seg0_ordered, seg0_for_count, seg1_ordered or None)
+        seg1 は post系フィルタがある場合は None(=ポスト無しは元々除外されるため)。
+        """
+        # seg0: notes INNER JOIN posts
+        seg0 = (
+            sess.query(NoteRecord.note_id)
+            .select_from(NoteRecord)
+            .join(PostRecord, NoteRecord.post_id == PostRecord.post_id)
+        )
+        if has_post_filters:
+            seg0 = seg0.outerjoin(XUserRecord, PostRecord.user_id == XUserRecord.user_id)
+            seg0 = self._apply_filters(
+                seg0,
+                note_includes_texts,
+                note_excludes_text,
+                post_includes_texts,
+                post_excludes_text,
+                language,
+                topic_ids,
+                note_status,
+                note_created_at_from,
+                note_created_at_to,
+                x_user_names,
+                x_user_followers_count_from,
+                x_user_follow_count_from,
+                post_like_count_from,
+                post_repost_count_from,
+                post_impression_count_from,
+                post_includes_media,
+                note_search_mode,
+                post_search_mode,
+            )
+        else:
+            seg0 = self._apply_note_only_filters(
+                seg0,
+                note_includes_texts,
+                note_excludes_text,
+                language,
+                topic_ids,
+                note_status,
+                note_created_at_from,
+                note_created_at_to,
+                note_search_mode,
+            )
+        seg0_ordered = seg0.order_by(order_expr, tiebreak)
+
+        if has_post_filters:
+            # post系フィルタありなら post無しノートは元々除外 → seg1不要
+            return seg0_ordered, seg0, None
+
+        # seg1: post無しノート(NOT EXISTS)
+        seg1 = (
+            sess.query(NoteRecord.note_id)
+            .select_from(NoteRecord)
+            .filter(~exists().where(PostRecord.post_id == NoteRecord.post_id))
+        )
+        seg1 = self._apply_note_only_filters(
+            seg1,
+            note_includes_texts,
+            note_excludes_text,
+            language,
+            topic_ids,
+            note_status,
+            note_created_at_from,
+            note_created_at_to,
+            note_search_mode,
+        )
+        seg1_ordered = seg1.order_by(tiebreak)
+        return seg0_ordered, seg0, seg1_ordered
+
+    @staticmethod
+    def _paginate_two_segment(
+        seg0_ordered: Any,
+        seg0_for_count: Any,
+        seg1_ordered: Optional[Any],
+        offset: int,
+        limit: int,
+    ) -> List[NoteId]:
+        """seg0(先)→seg1(後)の連結リストの [offset, offset+limit+1) の note_id を返す。
+
+        カウント(seg0全件)は offset が seg1 完全内(seg0が0件)の時だけ実行する。
+        """
+        want = limit + 1
+        seg0_ids: List[NoteId] = [r[0] for r in seg0_ordered.offset(offset).limit(want).all()]
+
+        if len(seg0_ids) == want or seg1_ordered is None:
+            return seg0_ids
+
+        if len(seg0_ids) > 0:
+            # 境界跨ぎ: seg0末尾 + seg1先頭
+            need = want - len(seg0_ids)
+            seg1_ids: List[NoteId] = [r[0] for r in seg1_ordered.offset(0).limit(need).all()]
+            return seg0_ids + seg1_ids
+
+        # seg0が0件 = offsetがseg0を越えている → C0を計算して seg1 offset を出す
+        c0 = seg0_for_count.count()
+        seg1_offset = max(offset - c0, 0)
+        return [r[0] for r in seg1_ordered.offset(seg1_offset).limit(want).all()]
+
     def search_notes_with_posts(
         self,
         note_includes_texts: Union[List[str], None] = None,
@@ -1849,15 +1976,13 @@ class Storage:
                 # Deterministic secondary sort key to stabilise pagination on tied values
                 tiebreak = NoteRecord.note_id.asc() if sort_order == SortOrder.ASC else NoteRecord.note_id.desc()
 
-                if has_post_filters:
-                    # Phase 1: note_id only with full JOINs for filtering
-                    id_query = (
-                        sess.query(NoteRecord.note_id)
-                        .outerjoin(PostRecord, NoteRecord.post_id == PostRecord.post_id)
-                        .outerjoin(XUserRecord, PostRecord.user_id == XUserRecord.user_id)
-                    )
-                    id_query = self._apply_filters(
-                        id_query,
+                if sort_field in self._POST_SORT_FIELDS:
+                    # 2セグメント: seg0(ポスト有り・索引駆動 INNER JOIN) + seg1(ポスト無し・末尾)
+                    seg0_ordered, seg0_for_count, seg1_ordered = self._build_post_sort_segments(
+                        sess,
+                        order_expr,
+                        tiebreak,
+                        has_post_filters,
                         note_includes_texts,
                         note_excludes_text,
                         post_includes_texts,
@@ -1877,32 +2002,68 @@ class Storage:
                         note_search_mode,
                         post_search_mode,
                     )
-                else:
-                    # Phase 1: note_id only. Post-based sort fields require a PostRecord join even without filters.
-                    id_query = sess.query(NoteRecord.note_id).select_from(NoteRecord)
-                    if sort_field in self._POST_SORT_FIELDS:
-                        id_query = id_query.outerjoin(PostRecord, NoteRecord.post_id == PostRecord.post_id)
-                    id_query = self._apply_note_only_filters(
-                        id_query,
-                        note_includes_texts,
-                        note_excludes_text,
-                        language,
-                        topic_ids,
-                        note_status,
-                        note_created_at_from,
-                        note_created_at_to,
-                        note_search_mode,
+                    page_ids = self._paginate_two_segment(seg0_ordered, seg0_for_count, seg1_ordered, offset, limit)
+                    # Phase 2: order_expr(nullslast)+tiebreak が seg0→seg1 の結合順を再現する
+                    query = (
+                        sess.query(NoteRecord, PostRecord)
+                        .outerjoin(PostRecord, NoteRecord.post_id == PostRecord.post_id)
+                        .filter(NoteRecord.note_id.in_(page_ids))
+                        .order_by(order_expr, tiebreak)
                     )
+                else:
+                    # note_created_at 等: 既存の2段クエリ(挙動不変)
+                    if has_post_filters:
+                        # Phase 1: note_id only with full JOINs for filtering
+                        id_query = (
+                            sess.query(NoteRecord.note_id)
+                            .outerjoin(PostRecord, NoteRecord.post_id == PostRecord.post_id)
+                            .outerjoin(XUserRecord, PostRecord.user_id == XUserRecord.user_id)
+                        )
+                        id_query = self._apply_filters(
+                            id_query,
+                            note_includes_texts,
+                            note_excludes_text,
+                            post_includes_texts,
+                            post_excludes_text,
+                            language,
+                            topic_ids,
+                            note_status,
+                            note_created_at_from,
+                            note_created_at_to,
+                            x_user_names,
+                            x_user_followers_count_from,
+                            x_user_follow_count_from,
+                            post_like_count_from,
+                            post_repost_count_from,
+                            post_impression_count_from,
+                            post_includes_media,
+                            note_search_mode,
+                            post_search_mode,
+                        )
+                    else:
+                        # Phase 1: note_id only (no post join needed for note_created_at sort)
+                        id_query = sess.query(NoteRecord.note_id).select_from(NoteRecord)
+                        id_query = self._apply_note_only_filters(
+                            id_query,
+                            note_includes_texts,
+                            note_excludes_text,
+                            language,
+                            topic_ids,
+                            note_status,
+                            note_created_at_from,
+                            note_created_at_to,
+                            note_search_mode,
+                        )
 
-                note_subq = id_query.order_by(order_expr, tiebreak).offset(offset).limit(limit + 1).subquery()
+                    note_subq = id_query.order_by(order_expr, tiebreak).offset(offset).limit(limit + 1).subquery()
 
-                # Phase 2: fetch full data for matched note_ids only
-                query = (
-                    sess.query(NoteRecord, PostRecord)
-                    .join(note_subq, NoteRecord.note_id == note_subq.c.note_id)
-                    .outerjoin(PostRecord, NoteRecord.post_id == PostRecord.post_id)
-                    .order_by(order_expr, tiebreak)
-                )
+                    # Phase 2: fetch full data for matched note_ids only
+                    query = (
+                        sess.query(NoteRecord, PostRecord)
+                        .join(note_subq, NoteRecord.note_id == note_subq.c.note_id)
+                        .outerjoin(PostRecord, NoteRecord.post_id == PostRecord.post_id)
+                        .order_by(order_expr, tiebreak)
+                    )
             else:
                 # No sorting: standard path
                 query = (

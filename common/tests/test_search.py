@@ -561,3 +561,201 @@ def test_sort_without_post_filters(
     # Should not raise; impressions of non-null posts must be non-increasing
     impressions = [post.impression_count for _, post in results if post is not None]
     assert impressions == sorted(impressions, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Two-segment engagement sort tests (seg0=with-post INNER JOIN, seg1=post-less last)
+# ---------------------------------------------------------------------------
+
+# Engagement specs with distinct values and post-less notes:
+# impression=[100, 50, 50, 10] for with-post notes; 2 post-less notes
+_SEG_SPECS: List[tuple[str, str, Optional[int], Optional[int], Optional[int], bool]] = [
+    ("7100000000000000001", "7200000000000000001", 100, 5, 3, True),
+    ("7100000000000000002", "7200000000000000002", 50, 20, 1, True),
+    ("7100000000000000003", "7200000000000000003", 50, 20, 1, True),
+    ("7100000000000000004", "7200000000000000004", 10, 1, 2, True),
+    ("7100000000000000005", "7200000000000000005", 0, 0, 0, False),  # post-less
+    ("7100000000000000006", "7200000000000000006", 0, 0, 0, False),  # post-less
+]
+
+_SEG_NOTE_IDS = {s[0] for s in _SEG_SPECS}
+_SEG_WITH_POST_IDS = {s[0] for s in _SEG_SPECS if s[5]}
+_SEG_POSTLESS_IDS = {s[0] for s in _SEG_SPECS if not s[5]}
+
+
+def test_engagement_sort_with_post_desc_then_postless_last(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """seg0(impression DESC) の後ろに seg1(post無し) が必ず末尾に来る／全ノートが含まれる"""
+    _seed_engagement_data(engine_for_test, _SEG_SPECS)
+    storage = Storage(engine=engine_for_test)
+    results = storage.search_notes_with_posts(
+        sort_field=SearchSortField.IMPRESSION_COUNT, sort_order=SortOrder.DESC, limit=1000
+    ).items
+    # Filter to only our seeded notes
+    seeded = [(n, p) for n, p in results if n.note_id in _SEG_NOTE_IDS]
+    assert len(seeded) == len(_SEG_SPECS), f"Expected {len(_SEG_SPECS)} seeded notes, got {len(seeded)}"
+    posts = [p for _, p in seeded]
+    # All with-post notes come before all post-less notes
+    first_none = next((i for i, p in enumerate(posts) if p is None), len(posts))
+    assert all(p is not None for p in posts[:first_none]), "Non-null posts must all precede nulls"
+    assert all(p is None for p in posts[first_none:]), "Null posts must all come after non-nulls"
+    # with-post portion is impression descending
+    imps = [p.impression_count for p in posts[:first_none]]
+    assert imps == sorted(imps, reverse=True), f"Impressions not descending: {imps}"
+
+
+def test_engagement_sort_pagination_across_boundary(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """境界を跨いでも重複・欠落が無く、全ページ連結で全ノートを一意に網羅する"""
+    _seed_engagement_data(engine_for_test, _SEG_SPECS)
+    storage = Storage(engine=engine_for_test)
+    seen: List[str] = []
+    offset = 0
+    page_size = 2
+    while True:
+        res = storage.search_notes_with_posts(
+            sort_field=SearchSortField.IMPRESSION_COUNT,
+            sort_order=SortOrder.DESC,
+            limit=page_size,
+            offset=offset,
+        )
+        # collect only our seeded note ids
+        seen.extend(str(n.note_id) for n, _ in res.items if n.note_id in _SEG_NOTE_IDS)
+        if not res.has_next:
+            break
+        offset += page_size
+        assert offset < 10_000  # infinite-loop guard
+    assert len(seen) == len(set(seen)), f"Duplicate note_ids across pages: {seen}"
+    assert set(seen) == _SEG_NOTE_IDS, f"Missing or extra note_ids: {seen}"
+
+
+def test_engagement_sort_with_note_filter(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """note側フィルタ(language=ja)併用でも seg0/seg1 双方が絞られ順序が正しい"""
+    # Seed ja-language version of seg specs
+    _JA_SEG_SPECS: List[tuple[str, str, Optional[int], Optional[int], Optional[int], bool]] = [
+        ("7500000000000000001", "7600000000000000001", 200, 10, 5, True),
+        ("7500000000000000002", "7600000000000000002", 80, 30, 2, True),
+        ("7500000000000000003", "7600000000000000003", 0, 0, 0, False),  # post-less ja
+    ]
+    _ja_note_ids = {s[0] for s in _JA_SEG_SPECS}
+
+    with Session(engine_for_test) as sess:
+        sess.execute(
+            text(
+                "INSERT INTO x_users (user_id, name, profile_image, followers_count, following_count) "
+                "VALUES (:user_id, :name, :profile_image, :followers_count, :following_count) "
+                "ON CONFLICT (user_id) DO NOTHING"
+            ),
+            {
+                "user_id": _ENGAGEMENT_USER_ID,
+                "name": "EngagementTestUser",
+                "profile_image": "https://pbs.twimg.com/profile_images/engagement_test/img_normal.jpg",
+                "followers_count": 0,
+                "following_count": 0,
+            },
+        )
+        sess.commit()
+    with Session(engine_for_test) as sess:
+        for note_id, post_id, impression, like, repost, with_post in _JA_SEG_SPECS:
+            if with_post:
+                sess.execute(
+                    text(
+                        "INSERT INTO posts (post_id, user_id, text, created_at, aggregated_at, "
+                        "like_count, repost_count, impression_count) "
+                        "VALUES (:post_id, :user_id, :text, :created_at, :aggregated_at, "
+                        ":like_count, :repost_count, :impression_count) "
+                        "ON CONFLICT (post_id) DO NOTHING"
+                    ),
+                    {
+                        "post_id": post_id,
+                        "user_id": _ENGAGEMENT_USER_ID,
+                        "text": f"ja filter test post {post_id}",
+                        "created_at": 1152921600000,
+                        "aggregated_at": 1152921600000,
+                        "like_count": like if like is not None else 0,
+                        "repost_count": repost if repost is not None else 0,
+                        "impression_count": impression if impression is not None else 0,
+                    },
+                )
+            sess.execute(
+                text(
+                    "INSERT INTO notes (note_id, post_id, summary, language, created_at) "
+                    "VALUES (:note_id, :post_id, :summary, :language, :created_at) "
+                    "ON CONFLICT (note_id) DO NOTHING"
+                ),
+                {
+                    "note_id": note_id,
+                    "post_id": post_id if with_post else "9999999999999999001",
+                    "summary": f"ja filter test note {note_id}",
+                    "language": "ja",
+                    "created_at": 1152921600000,
+                },
+            )
+        sess.commit()
+
+    storage = Storage(engine=engine_for_test)
+    results = storage.search_notes_with_posts(
+        language=LanguageCode("ja"),
+        sort_field=SearchSortField.LIKE_COUNT,
+        sort_order=SortOrder.DESC,
+        limit=1000,
+    ).items
+    ja_seeded = [(n, p) for n, p in results if n.note_id in _ja_note_ids]
+    assert all(n.language == LanguageCode("ja") for n, _ in ja_seeded)
+    posts = [p for _, p in ja_seeded]
+    first_none = next((i for i, p in enumerate(posts) if p is None), len(posts))
+    # with-post notes are like-count descending
+    likes = [p.like_count for p in posts[:first_none]]
+    assert likes == sorted(likes, reverse=True), f"Likes not descending: {likes}"
+    # post-less notes come last
+    assert all(p is None for p in posts[first_none:])
+
+
+def test_engagement_sort_with_post_filter_excludes_postless(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """post系フィルタ併用時は post無しノートが結果に出ない（seg1が空）"""
+    _seed_engagement_data(engine_for_test, _SEG_SPECS)
+    storage = Storage(engine=engine_for_test)
+    results = storage.search_notes_with_posts(
+        post_impression_count_from=1,
+        sort_field=SearchSortField.IMPRESSION_COUNT,
+        sort_order=SortOrder.DESC,
+        limit=1000,
+    ).items
+    # All returned results must have a post (no post-less notes)
+    seeded = [(n, p) for n, p in results if n.note_id in _SEG_NOTE_IDS]
+    assert all(p is not None for _, p in seeded), "Post filter must exclude post-less notes"
+
+
+def test_engagement_sort_asc_postless_still_last(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """昇順でも post無しノートは末尾"""
+    _seed_engagement_data(engine_for_test, _SEG_SPECS)
+    storage = Storage(engine=engine_for_test)
+    results = storage.search_notes_with_posts(
+        sort_field=SearchSortField.IMPRESSION_COUNT, sort_order=SortOrder.ASC, limit=1000
+    ).items
+    seeded = [(n, p) for n, p in results if n.note_id in _SEG_NOTE_IDS]
+    posts = [p for _, p in seeded]
+    first_none = next((i for i, p in enumerate(posts) if p is None), len(posts))
+    # with-post portion is impression ascending
+    imps = [p.impression_count for p in posts[:first_none]]
+    assert imps == sorted(imps), f"Impressions not ascending: {imps}"
+    # post-less notes come last
+    assert all(p is None for p in posts[first_none:]), "Post-less notes must be last even on ASC sort"
