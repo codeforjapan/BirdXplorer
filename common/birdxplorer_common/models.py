@@ -748,6 +748,9 @@ class SearchSortField(str, Enum):
     """Fields available for sorting search results"""
 
     NOTE_CREATED_AT = "note_created_at"
+    IMPRESSION_COUNT = "impression_count"
+    LIKE_COUNT = "like_count"
+    REPOST_COUNT = "repost_count"
 
 
 class TextSearchMode(str, Enum):

@@ -568,11 +568,24 @@ v1_data_post_includes_media = FastAPIEndpointParamDocs(
 )
 
 v1_data_search_sort_field = FastAPIEndpointParamDocs(
-    description="ソート対象のフィールド。",
+    description="ソート対象のフィールド。note_created_at のほか、"
+    "impression_count / like_count / repost_count（エンゲージメント降順で注目度順に取得）が指定可能。",
     openapi_examples={
         "note_created_at": {
             "summary": "ノート作成日時でソート",
             "value": "note_created_at",
+        },
+        "impression_count": {
+            "summary": "インプレッション数でソート（注目度順）",
+            "value": "impression_count",
+        },
+        "like_count": {
+            "summary": "いいね数でソート",
+            "value": "like_count",
+        },
+        "repost_count": {
+            "summary": "リポスト数でソート",
+            "value": "repost_count",
         },
     },
 )

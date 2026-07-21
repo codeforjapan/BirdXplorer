@@ -1,5 +1,5 @@
 import re
-from typing import Any, Generator, List, NamedTuple, Optional, Tuple, Union
+from typing import Any, Callable, Generator, List, NamedTuple, Optional, Tuple, Union
 
 from psycopg2.extensions import AsIs, register_adapter
 from pydantic import AnyUrl, HttpUrl
@@ -1720,9 +1720,20 @@ class Storage:
 
         return query
 
-    _SEARCH_SORT_FIELD_MAP = {
+    _SEARCH_SORT_FIELD_MAP: dict[SearchSortField, Callable[[], Any]] = {
         SearchSortField.NOTE_CREATED_AT: lambda: NoteRecord.created_at,
+        SearchSortField.IMPRESSION_COUNT: lambda: PostRecord.impression_count,
+        SearchSortField.LIKE_COUNT: lambda: PostRecord.like_count,
+        SearchSortField.REPOST_COUNT: lambda: PostRecord.repost_count,
     }
+
+    _POST_SORT_FIELDS: frozenset[SearchSortField] = frozenset(
+        {
+            SearchSortField.IMPRESSION_COUNT,
+            SearchSortField.LIKE_COUNT,
+            SearchSortField.REPOST_COUNT,
+        }
+    )
 
     @staticmethod
     def _has_post_filters(
@@ -1832,6 +1843,11 @@ class Storage:
                 # Two-phase query: collect note_ids first (lightweight), then fetch full data
                 column = self._SEARCH_SORT_FIELD_MAP[sort_field]()
                 order_expr = column.asc() if sort_order == SortOrder.ASC else column.desc()
+                if sort_field in self._POST_SORT_FIELDS:
+                    # Notes with no linked post (NULL engagement) must not float to the top on DESC
+                    order_expr = order_expr.nullslast()
+                # Deterministic secondary sort key to stabilise pagination on tied values
+                tiebreak = NoteRecord.note_id.asc() if sort_order == SortOrder.ASC else NoteRecord.note_id.desc()
 
                 if has_post_filters:
                     # Phase 1: note_id only with full JOINs for filtering
@@ -1862,8 +1878,10 @@ class Storage:
                         post_search_mode,
                     )
                 else:
-                    # Phase 1: note_id only, no JOINs needed
+                    # Phase 1: note_id only. Post-based sort fields require a PostRecord join even without filters.
                     id_query = sess.query(NoteRecord.note_id).select_from(NoteRecord)
+                    if sort_field in self._POST_SORT_FIELDS:
+                        id_query = id_query.outerjoin(PostRecord, NoteRecord.post_id == PostRecord.post_id)
                     id_query = self._apply_note_only_filters(
                         id_query,
                         note_includes_texts,
@@ -1876,14 +1894,14 @@ class Storage:
                         note_search_mode,
                     )
 
-                note_subq = id_query.order_by(order_expr).offset(offset).limit(limit + 1).subquery()
+                note_subq = id_query.order_by(order_expr, tiebreak).offset(offset).limit(limit + 1).subquery()
 
                 # Phase 2: fetch full data for matched note_ids only
                 query = (
                     sess.query(NoteRecord, PostRecord)
                     .join(note_subq, NoteRecord.note_id == note_subq.c.note_id)
                     .outerjoin(PostRecord, NoteRecord.post_id == PostRecord.post_id)
-                    .order_by(order_expr)
+                    .order_by(order_expr, tiebreak)
                 )
             else:
                 # No sorting: standard path
