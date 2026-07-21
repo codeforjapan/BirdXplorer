@@ -1,5 +1,5 @@
-from typing import List, Optional
-from unittest.mock import MagicMock, call
+from typing import Any, List, Optional
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy.engine import Engine
@@ -604,7 +604,8 @@ def test_engagement_sort_with_post_desc_then_postless_last(
     assert all(p is not None for p in posts[:first_none]), "Non-null posts must all precede nulls"
     assert all(p is None for p in posts[first_none:]), "Null posts must all come after non-nulls"
     # with-post portion is impression descending
-    imps = [p.impression_count for p in posts[:first_none]]
+    with_post = [p for p in posts[:first_none] if p is not None]
+    imps = [p.impression_count for p in with_post]
     assert imps == sorted(imps, reverse=True), f"Impressions not descending: {imps}"
 
 
@@ -716,7 +717,8 @@ def test_engagement_sort_with_note_filter(
     posts = [p for _, p in ja_seeded]
     first_none = next((i for i, p in enumerate(posts) if p is None), len(posts))
     # with-post notes are like-count descending
-    likes = [p.like_count for p in posts[:first_none]]
+    with_post_ja = [p for p in posts[:first_none] if p is not None]
+    likes = [p.like_count for p in with_post_ja]
     assert likes == sorted(likes, reverse=True), f"Likes not descending: {likes}"
     # post-less notes come last
     assert all(p is None for p in posts[first_none:])
@@ -756,7 +758,8 @@ def test_engagement_sort_asc_postless_still_last(
     posts = [p for _, p in seeded]
     first_none = next((i for i, p in enumerate(posts) if p is None), len(posts))
     # with-post portion is impression ascending
-    imps = [p.impression_count for p in posts[:first_none]]
+    with_post_asc = [p for p in posts[:first_none] if p is not None]
+    imps = [p.impression_count for p in with_post_asc]
     assert imps == sorted(imps), f"Impressions not ascending: {imps}"
     # post-less notes come last
     assert all(p is None for p in posts[first_none:]), "Post-less notes must be last even on ASC sort"
@@ -767,7 +770,7 @@ def test_engagement_sort_asc_postless_still_last(
 # ---------------------------------------------------------------------------
 
 
-def _make_query(rows: list, count_val: int = 0) -> MagicMock:
+def _make_query(rows: list[Any], count_val: int = 0) -> MagicMock:
     """Build a fluent SQLAlchemy-query mock: .offset(x).limit(y).all() → rows, .count() → count_val."""
     q = MagicMock()
     q.offset.return_value.limit.return_value.all.return_value = rows
@@ -899,3 +902,4 @@ class TestPaginateTwoSegment:
         seg0_for_count.count.assert_called_once()
         # seg1 must be called with offset=0 (clamped)
         seg1.offset.assert_called_once_with(0)
+        seg1.offset.return_value.limit.assert_called_once_with(want)
