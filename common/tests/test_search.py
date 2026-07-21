@@ -1,4 +1,5 @@
-from typing import List, Optional
+from typing import Any, List, Optional
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy.engine import Engine
@@ -561,3 +562,410 @@ def test_sort_without_post_filters(
     # Should not raise; impressions of non-null posts must be non-increasing
     impressions = [post.impression_count for _, post in results if post is not None]
     assert impressions == sorted(impressions, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Two-segment engagement sort tests (seg0=with-post INNER JOIN, seg1=post-less last)
+# ---------------------------------------------------------------------------
+
+# Engagement specs with distinct values and post-less notes:
+# impression=[100, 50, 50, 10] for with-post notes; 2 post-less notes
+_SEG_SPECS: List[tuple[str, str, Optional[int], Optional[int], Optional[int], bool]] = [
+    ("7100000000000000001", "7200000000000000001", 100, 5, 3, True),
+    ("7100000000000000002", "7200000000000000002", 50, 20, 1, True),
+    ("7100000000000000003", "7200000000000000003", 50, 20, 1, True),
+    ("7100000000000000004", "7200000000000000004", 10, 1, 2, True),
+    ("7100000000000000005", "7200000000000000005", 0, 0, 0, False),  # post-less
+    ("7100000000000000006", "7200000000000000006", 0, 0, 0, False),  # post-less
+]
+
+_SEG_NOTE_IDS = {s[0] for s in _SEG_SPECS}
+_SEG_WITH_POST_IDS = {s[0] for s in _SEG_SPECS if s[5]}
+_SEG_POSTLESS_IDS = {s[0] for s in _SEG_SPECS if not s[5]}
+
+
+def test_engagement_sort_with_post_desc_then_postless_last(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """seg0(impression DESC) の後ろに seg1(post無し) が必ず末尾に来る／全ノートが含まれる"""
+    _seed_engagement_data(engine_for_test, _SEG_SPECS)
+    storage = Storage(engine=engine_for_test)
+    results = storage.search_notes_with_posts(
+        sort_field=SearchSortField.IMPRESSION_COUNT, sort_order=SortOrder.DESC, limit=1000
+    ).items
+    # Filter to only our seeded notes
+    seeded = [(n, p) for n, p in results if n.note_id in _SEG_NOTE_IDS]
+    assert len(seeded) == len(_SEG_SPECS), f"Expected {len(_SEG_SPECS)} seeded notes, got {len(seeded)}"
+    posts = [p for _, p in seeded]
+    # All with-post notes come before all post-less notes
+    first_none = next((i for i, p in enumerate(posts) if p is None), len(posts))
+    assert all(p is not None for p in posts[:first_none]), "Non-null posts must all precede nulls"
+    assert all(p is None for p in posts[first_none:]), "Null posts must all come after non-nulls"
+    # with-post portion is impression descending
+    with_post = [p for p in posts[:first_none] if p is not None]
+    imps = [p.impression_count for p in with_post]
+    assert imps == sorted(imps, reverse=True), f"Impressions not descending: {imps}"
+
+
+def test_engagement_sort_pagination_across_boundary(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """境界を跨いでも重複・欠落が無く、全ページ連結で全ノートを一意に網羅する"""
+    _seed_engagement_data(engine_for_test, _SEG_SPECS)
+    storage = Storage(engine=engine_for_test)
+    seen: List[str] = []
+    offset = 0
+    page_size = 2
+    while True:
+        res = storage.search_notes_with_posts(
+            sort_field=SearchSortField.IMPRESSION_COUNT,
+            sort_order=SortOrder.DESC,
+            limit=page_size,
+            offset=offset,
+        )
+        # collect only our seeded note ids
+        seen.extend(str(n.note_id) for n, _ in res.items if n.note_id in _SEG_NOTE_IDS)
+        if not res.has_next:
+            break
+        offset += page_size
+        assert offset < 10_000  # infinite-loop guard
+    assert len(seen) == len(set(seen)), f"Duplicate note_ids across pages: {seen}"
+    assert set(seen) == _SEG_NOTE_IDS, f"Missing or extra note_ids: {seen}"
+
+
+def test_engagement_sort_with_note_filter(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """note側フィルタ(language=ja)併用でも seg0/seg1 双方が絞られ順序が正しい"""
+    # Seed ja-language version of seg specs
+    _JA_SEG_SPECS: List[tuple[str, str, Optional[int], Optional[int], Optional[int], bool]] = [
+        ("7500000000000000001", "7600000000000000001", 200, 10, 5, True),
+        ("7500000000000000002", "7600000000000000002", 80, 30, 2, True),
+        ("7500000000000000003", "7600000000000000003", 0, 0, 0, False),  # post-less ja
+    ]
+    _ja_note_ids = {s[0] for s in _JA_SEG_SPECS}
+
+    with Session(engine_for_test) as sess:
+        sess.execute(
+            text(
+                "INSERT INTO x_users (user_id, name, profile_image, followers_count, following_count) "
+                "VALUES (:user_id, :name, :profile_image, :followers_count, :following_count) "
+                "ON CONFLICT (user_id) DO NOTHING"
+            ),
+            {
+                "user_id": _ENGAGEMENT_USER_ID,
+                "name": "EngagementTestUser",
+                "profile_image": "https://pbs.twimg.com/profile_images/engagement_test/img_normal.jpg",
+                "followers_count": 0,
+                "following_count": 0,
+            },
+        )
+        sess.commit()
+    with Session(engine_for_test) as sess:
+        for note_id, post_id, impression, like, repost, with_post in _JA_SEG_SPECS:
+            if with_post:
+                sess.execute(
+                    text(
+                        "INSERT INTO posts (post_id, user_id, text, created_at, aggregated_at, "
+                        "like_count, repost_count, impression_count) "
+                        "VALUES (:post_id, :user_id, :text, :created_at, :aggregated_at, "
+                        ":like_count, :repost_count, :impression_count) "
+                        "ON CONFLICT (post_id) DO NOTHING"
+                    ),
+                    {
+                        "post_id": post_id,
+                        "user_id": _ENGAGEMENT_USER_ID,
+                        "text": f"ja filter test post {post_id}",
+                        "created_at": 1152921600000,
+                        "aggregated_at": 1152921600000,
+                        "like_count": like if like is not None else 0,
+                        "repost_count": repost if repost is not None else 0,
+                        "impression_count": impression if impression is not None else 0,
+                    },
+                )
+            sess.execute(
+                text(
+                    "INSERT INTO notes (note_id, post_id, summary, language, created_at) "
+                    "VALUES (:note_id, :post_id, :summary, :language, :created_at) "
+                    "ON CONFLICT (note_id) DO NOTHING"
+                ),
+                {
+                    "note_id": note_id,
+                    "post_id": post_id if with_post else "9999999999999999001",
+                    "summary": f"ja filter test note {note_id}",
+                    "language": "ja",
+                    "created_at": 1152921600000,
+                },
+            )
+        sess.commit()
+
+    storage = Storage(engine=engine_for_test)
+    results = storage.search_notes_with_posts(
+        language=LanguageCode("ja"),
+        sort_field=SearchSortField.LIKE_COUNT,
+        sort_order=SortOrder.DESC,
+        limit=1000,
+    ).items
+    ja_seeded = [(n, p) for n, p in results if n.note_id in _ja_note_ids]
+    assert all(n.language == LanguageCode("ja") for n, _ in ja_seeded)
+    posts = [p for _, p in ja_seeded]
+    first_none = next((i for i, p in enumerate(posts) if p is None), len(posts))
+    # with-post notes are like-count descending
+    with_post_ja = [p for p in posts[:first_none] if p is not None]
+    likes = [p.like_count for p in with_post_ja]
+    assert likes == sorted(likes, reverse=True), f"Likes not descending: {likes}"
+    # post-less notes come last
+    assert all(p is None for p in posts[first_none:])
+
+
+def test_engagement_sort_with_post_filter_excludes_postless(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """post系フィルタ併用時は post無しノートが結果に出ない（seg1が空）"""
+    _seed_engagement_data(engine_for_test, _SEG_SPECS)
+    storage = Storage(engine=engine_for_test)
+    results = storage.search_notes_with_posts(
+        post_impression_count_from=1,
+        sort_field=SearchSortField.IMPRESSION_COUNT,
+        sort_order=SortOrder.DESC,
+        limit=1000,
+    ).items
+    # All returned results must have a post (no post-less notes)
+    seeded = [(n, p) for n, p in results if n.note_id in _SEG_NOTE_IDS]
+    assert all(p is not None for _, p in seeded), "Post filter must exclude post-less notes"
+
+
+def test_engagement_sort_asc_postless_still_last(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """昇順でも post無しノートは末尾"""
+    _seed_engagement_data(engine_for_test, _SEG_SPECS)
+    storage = Storage(engine=engine_for_test)
+    results = storage.search_notes_with_posts(
+        sort_field=SearchSortField.IMPRESSION_COUNT, sort_order=SortOrder.ASC, limit=1000
+    ).items
+    seeded = [(n, p) for n, p in results if n.note_id in _SEG_NOTE_IDS]
+    posts = [p for _, p in seeded]
+    first_none = next((i for i, p in enumerate(posts) if p is None), len(posts))
+    # with-post portion is impression ascending
+    with_post_asc = [p for p in posts[:first_none] if p is not None]
+    imps = [p.impression_count for p in with_post_asc]
+    assert imps == sorted(imps), f"Impressions not ascending: {imps}"
+    # post-less notes come last
+    assert all(p is None for p in posts[first_none:]), "Post-less notes must be last even on ASC sort"
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for Storage._paginate_two_segment (no DB required)
+# ---------------------------------------------------------------------------
+
+
+def _make_query(rows: list[Any], count_val: int = 0) -> MagicMock:
+    """Build a fluent SQLAlchemy-query mock: .offset(x).limit(y).all() → rows, .count() → count_val."""
+    q = MagicMock()
+    q.offset.return_value.limit.return_value.all.return_value = rows
+    q.count.return_value = count_val
+    return q
+
+
+class TestPaginateTwoSegment:
+    """Direct unit tests for Storage._paginate_two_segment branch logic.
+
+    The method signature is:
+        _paginate_two_segment(seg0_ordered, seg0_for_count, seg1_ordered, offset, limit)
+
+    It always calls seg0_ordered.offset(offset).limit(limit+1).all() and:
+      Branch 1 – Full-in-seg0:  len(seg0_ids) == limit+1  → return seg0_ids (no seg1, no count)
+      Branch 2 – seg1 is None:  len(seg0_ids) < limit+1   → return seg0_ids (no seg1, no count)
+      Branch 3 – Spanning:      0 < len(seg0_ids) < limit+1 and seg1 present
+                                 → call seg1.offset(0).limit(need), return seg0+seg1 head (no count)
+      Branch 4 – Count branch:  len(seg0_ids) == 0 and seg1 present
+                                 → call seg0_for_count.count() ONCE,
+                                   call seg1.offset(max(offset-C0, 0)).limit(limit+1)
+    """
+
+    def test_case1_full_in_seg0(self) -> None:
+        """Branch 1: seg0 fills want rows → return as-is, seg1 never touched, count never called."""
+        limit = 3
+        want = limit + 1  # 4 rows
+        seg0_rows = [("a",), ("b",), ("c",), ("d",)]  # exactly want rows
+        assert len(seg0_rows) == want
+
+        seg0 = _make_query(seg0_rows)
+        seg0_for_count = MagicMock()
+        seg1 = _make_query([("x",)])
+
+        result = Storage._paginate_two_segment(seg0, seg0_for_count, seg1, offset=0, limit=limit)
+
+        assert result == ["a", "b", "c", "d"]
+        # seg0 called with correct offset and limit
+        seg0.offset.assert_called_once_with(0)
+        seg0.offset.return_value.limit.assert_called_once_with(want)
+        # seg1 must NOT be called at all
+        seg1.offset.assert_not_called()
+        seg1.limit.assert_not_called()
+        # count must NOT be called
+        seg0_for_count.count.assert_not_called()
+
+    def test_case2_seg1_is_none(self) -> None:
+        """Branch 2: seg0 returns fewer than want, but seg1_ordered is None → return seg0 ids only, no count."""
+        limit = 5
+        want = limit + 1
+        seg0_rows = [("p",), ("q",)]  # fewer than want
+
+        seg0 = _make_query(seg0_rows)
+        seg0_for_count = MagicMock()
+
+        result = Storage._paginate_two_segment(seg0, seg0_for_count, None, offset=2, limit=limit)
+
+        assert result == ["p", "q"]
+        seg0.offset.assert_called_once_with(2)
+        seg0.offset.return_value.limit.assert_called_once_with(want)
+        seg0_for_count.count.assert_not_called()
+
+    def test_case3_spanning_boundary(self) -> None:
+        """Branch 3: seg0 returns k rows (0 < k < want), seg1 provides the rest; count NOT called."""
+        limit = 5
+        want = limit + 1  # 6
+        k = 4
+        seg0_rows = [("s0",), ("s1",), ("s2",), ("s3",)]  # k=4 rows
+        assert len(seg0_rows) == k
+        need = want - k  # 2
+        seg1_rows = [("t0",), ("t1",)]
+
+        seg0 = _make_query(seg0_rows)
+        seg0_for_count = MagicMock()
+        seg1 = _make_query(seg1_rows)
+        # Override seg1's offset(0).limit(need) chain specifically
+        seg1.offset.return_value.limit.return_value.all.return_value = seg1_rows
+
+        result = Storage._paginate_two_segment(seg0, seg0_for_count, seg1, offset=0, limit=limit)
+
+        assert result == ["s0", "s1", "s2", "s3", "t0", "t1"]
+        # seg1 called with offset(0) and limit(need)
+        seg1.offset.assert_called_once_with(0)
+        seg1.offset.return_value.limit.assert_called_once_with(need)
+        # count must NOT be called in the spanning branch
+        seg0_for_count.count.assert_not_called()
+
+    def test_case4_count_branch_positive_offset(self) -> None:
+        """Branch 4: seg0 returns 0 rows → count() IS called; seg1 offset = max(offset - C0, 0)."""
+        limit = 5
+        want = limit + 1  # 6
+        c0 = 10
+        offset = 15  # offset > c0 → seg1_offset = 15 - 10 = 5
+        expected_seg1_offset = offset - c0  # 5
+
+        seg0 = _make_query([])  # zero rows
+        seg0_for_count = MagicMock()
+        seg0_for_count.count.return_value = c0
+        seg1_rows = [("u0",), ("u1",), ("u2",)]
+        seg1 = _make_query(seg1_rows)
+        seg1.offset.return_value.limit.return_value.all.return_value = seg1_rows
+
+        result = Storage._paginate_two_segment(seg0, seg0_for_count, seg1, offset=offset, limit=limit)
+
+        assert result == ["u0", "u1", "u2"]
+        # count() must be called exactly once
+        seg0_for_count.count.assert_called_once()
+        # seg1 called with the adjusted offset
+        seg1.offset.assert_called_once_with(expected_seg1_offset)
+        seg1.offset.return_value.limit.assert_called_once_with(want)
+
+    def test_case4_count_branch_defensive_clamp(self) -> None:
+        """Branch 4 edge: defensive clamp — offset < C0 → seg1_offset clamped to 0 via max(offset - C0, 0).
+
+        This scenario (seg0 returns 0 rows yet offset < C0) is unreachable in production because
+        the count branch is only entered when seg0 returned 0 rows, which implies offset >= C0.
+        The max(..., 0) is purely defensive against races/edge cases, not a normal code path.
+        """
+        limit = 5
+        want = limit + 1
+        c0 = 20
+        offset = 5  # offset < c0 → max(5-20, 0) = 0
+
+        seg0 = _make_query([])
+        seg0_for_count = MagicMock()
+        seg0_for_count.count.return_value = c0
+        seg1_rows = [("v0",)]
+        seg1 = _make_query(seg1_rows)
+        seg1.offset.return_value.limit.return_value.all.return_value = seg1_rows
+
+        result = Storage._paginate_two_segment(seg0, seg0_for_count, seg1, offset=offset, limit=limit)
+
+        assert result == ["v0"]
+        seg0_for_count.count.assert_called_once()
+        # seg1 must be called with offset=0 (clamped)
+        seg1.offset.assert_called_once_with(0)
+        seg1.offset.return_value.limit.assert_called_once_with(want)
+
+
+# ---------------------------------------------------------------------------
+# DB-level deep-page test: exercises the real .count() + seg1-offset path
+# ---------------------------------------------------------------------------
+
+# Reuse _SEG_SPECS which has 4 with-post notes (seg0) and 2 post-less notes (seg1).
+# To force the count branch we use an offset far larger than the number of with-post
+# notes so that seg0.offset(offset).limit(want).all() returns 0 rows, causing
+# _paginate_two_segment to call seg0_for_count.count() against the real DB and then
+# apply seg1.offset(offset - c0) to the post-less segment.
+
+_DEEP_PAGE_OFFSET = 10_000  # clearly exceeds the 4 with-post notes in _SEG_SPECS
+_DEEP_PAGE_LIMIT = 2
+
+
+def test_deep_page_count_branch_end_to_end(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """DB-level: deep offset forces the real .count() + seg1-offset path in _paginate_two_segment.
+
+    _SEG_SPECS contains 4 with-post notes (seg0) and 2 post-less notes (seg1).
+    With offset=10_000 >> 4, seg0.offset(10_000).limit(...).all() returns 0 rows.
+    The count branch then calls seg0_for_count.count() against the real DB to get C0,
+    computes seg1_offset = max(10_000 - C0, 0) which is also large (>> 2 post-less notes),
+    so seg1 also returns 0 rows — meaning results is empty and no crash occurs.
+    This confirms the real .count() SQL executes without error and the path returns
+    correctly (empty list rather than an exception or wrong rows).
+    """
+    _seed_engagement_data(engine_for_test, _SEG_SPECS)
+    storage = Storage(engine=engine_for_test)
+
+    # Sanity: verify post-less notes exist in the DB (seg1 is non-empty at offset=0)
+    all_results = storage.search_notes_with_posts(
+        sort_field=SearchSortField.IMPRESSION_COUNT,
+        sort_order=SortOrder.DESC,
+        limit=1000,
+    ).items
+    seeded_postless = [n.note_id for n, p in all_results if n.note_id in _SEG_POSTLESS_IDS and p is None]
+    assert len(seeded_postless) > 0, "Precondition: post-less notes must be present in DB"
+
+    # Deep-page request: offset >> seg0 count → triggers real count branch
+    deep_results = storage.search_notes_with_posts(
+        sort_field=SearchSortField.IMPRESSION_COUNT,
+        sort_order=SortOrder.DESC,
+        limit=_DEEP_PAGE_LIMIT,
+        offset=_DEEP_PAGE_OFFSET,
+    ).items
+
+    # At offset=10_000 there are no more rows (only 6 seeded notes total) — must not crash.
+    # All returned items (if any) must have post=None (came from seg1, not seg0).
+    for note, post in deep_results:
+        assert post is None, f"Deep-page result must not include with-post notes; got post for {note.note_id}"
+
+    # No seeded with-post note should appear (they're all exhausted well before offset 10_000)
+    returned_ids = {n.note_id for n, _ in deep_results}
+    assert returned_ids.isdisjoint(
+        _SEG_WITH_POST_IDS
+    ), f"With-post note_ids must not appear at deep offset; found {returned_ids & _SEG_WITH_POST_IDS}"
