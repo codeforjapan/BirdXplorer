@@ -448,6 +448,21 @@ def test_search_count_accepts_non_enum_language(client: TestClient, mock_storage
     assert call_kwargs.kwargs["language"] == "zh"
 
 
+def test_search_sort_by_impression(client: TestClient, mock_storage: MagicMock) -> None:
+    mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[], has_next=False)
+    mock_storage.count_search_results.return_value = 0
+
+    response = client.get("/api/v1/data/search?sort_field=impression_count&sort_order=desc")
+    assert response.status_code == 200
+    kwargs = mock_storage.search_notes_with_posts.call_args.kwargs
+    assert kwargs["sort_field"].value == "impression_count"
+    assert kwargs["sort_order"].value == "desc"
+
+
+def test_search_invalid_sort_field_422(client: TestClient) -> None:
+    assert client.get("/api/v1/data/search?sort_field=not_a_field").status_code == 422
+
+
 def test_search_returns_non_enum_language(client: TestClient, mock_storage: MagicMock) -> None:
     """検索結果に enum 外の言語コード(zh)が含まれていてもシリアライズできる。"""
     timestamp = TwitterTimestamp.from_int(int(datetime(2023, 1, 1, tzinfo=timezone.utc).timestamp() * 1000))

@@ -1,11 +1,18 @@
-from typing import List
+from typing import List, Optional
 
 import pytest
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import text
 
-from birdxplorer_common.models import LanguageCode, Note, Post, TopicId
+from birdxplorer_common.models import (
+    LanguageCode,
+    Note,
+    Post,
+    SearchSortField,
+    SortOrder,
+    TopicId,
+)
 from birdxplorer_common.storage import (
     NoteRecord,
     PostRecord,
@@ -336,3 +343,221 @@ def test_search_notes_language_normalization(
     assert len(results) == 1
     note, _ = results[0]
     assert note.language == expected_language
+
+
+# ---------------------------------------------------------------------------
+# Engagement-sort helpers and tests
+# ---------------------------------------------------------------------------
+
+_ENGAGEMENT_USER_ID = "8888888888888888881"
+
+
+def _seed_engagement_data(
+    engine: Engine,
+    specs: List[tuple[str, str, Optional[int], Optional[int], Optional[int], bool]],
+) -> None:
+    """Seed notes and posts with varying engagement values.
+
+    specs = [(note_id, post_id, impression, like, repost, with_post), ...]
+    If with_post is False the PostRecord is omitted so engagement is NULL for that note.
+    An x_user row with _ENGAGEMENT_USER_ID is inserted once as required FK for PostRecord.
+    """
+    with Session(engine) as sess:
+        # Insert a dedicated x_user for these posts (ignore conflict if already exists)
+        sess.execute(
+            text(
+                "INSERT INTO x_users (user_id, name, profile_image, followers_count, following_count) "
+                "VALUES (:user_id, :name, :profile_image, :followers_count, :following_count) "
+                "ON CONFLICT (user_id) DO NOTHING"
+            ),
+            {
+                "user_id": _ENGAGEMENT_USER_ID,
+                "name": "EngagementTestUser",
+                "profile_image": "https://pbs.twimg.com/profile_images/engagement_test/img_normal.jpg",
+                "followers_count": 0,
+                "following_count": 0,
+            },
+        )
+        sess.commit()
+
+    with Session(engine) as sess:
+        for note_id, post_id, impression, like, repost, with_post in specs:
+            if with_post:
+                sess.execute(
+                    text(
+                        "INSERT INTO posts (post_id, user_id, text, created_at, aggregated_at, "
+                        "like_count, repost_count, impression_count) "
+                        "VALUES (:post_id, :user_id, :text, :created_at, :aggregated_at, "
+                        ":like_count, :repost_count, :impression_count) "
+                        "ON CONFLICT (post_id) DO NOTHING"
+                    ),
+                    {
+                        "post_id": post_id,
+                        "user_id": _ENGAGEMENT_USER_ID,
+                        "text": f"engagement test post {post_id}",
+                        "created_at": 1152921600000,
+                        "aggregated_at": 1152921600000,
+                        "like_count": like if like is not None else 0,
+                        "repost_count": repost if repost is not None else 0,
+                        "impression_count": impression if impression is not None else 0,
+                    },
+                )
+            sess.execute(
+                text(
+                    "INSERT INTO notes (note_id, post_id, summary, language, created_at) "
+                    "VALUES (:note_id, :post_id, :summary, :language, :created_at) "
+                    "ON CONFLICT (note_id) DO NOTHING"
+                ),
+                {
+                    "note_id": note_id,
+                    "post_id": post_id if with_post else "9999999999999999000",
+                    "summary": f"engagement sort test note {note_id}",
+                    "language": "en",
+                    "created_at": 1152921600000,
+                },
+            )
+        sess.commit()
+
+
+# Specs shared across several tests:
+# impression=[100, 50, 50, 10, None], like=[5, 20, 20, 1, None], repost=[3, 1, 1, 2, None]
+# note_id ordering chosen so ties are distinguishable: note A < B < C < D, and E has no post
+_ENGAGEMENT_SPECS: List[tuple[str, str, Optional[int], Optional[int], Optional[int], bool]] = [
+    ("6100000000000000001", "6200000000000000001", 100, 5, 3, True),
+    ("6100000000000000002", "6200000000000000002", 50, 20, 1, True),
+    ("6100000000000000003", "6200000000000000003", 50, 20, 1, True),
+    ("6100000000000000004", "6200000000000000004", 10, 1, 2, True),
+    ("6100000000000000005", "6200000000000000005", 0, 0, 0, False),  # no post → NULL engagement
+]
+
+
+def test_sort_by_impression_desc(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """Impression DESC: posts with known data should appear in descending order."""
+    _seed_engagement_data(engine_for_test, _ENGAGEMENT_SPECS)
+    storage = Storage(engine=engine_for_test)
+    results = storage.search_notes_with_posts(
+        sort_field=SearchSortField.IMPRESSION_COUNT, sort_order=SortOrder.DESC, limit=100
+    ).items
+    impressions = [post.impression_count for _, post in results if post is not None]
+    assert impressions == sorted(impressions, reverse=True)
+
+
+def test_sort_by_like_asc(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """Like ASC: posts with known data should appear in ascending order."""
+    _seed_engagement_data(engine_for_test, _ENGAGEMENT_SPECS)
+    storage = Storage(engine=engine_for_test)
+    results = storage.search_notes_with_posts(
+        sort_field=SearchSortField.LIKE_COUNT, sort_order=SortOrder.ASC, limit=100
+    ).items
+    likes = [post.like_count for _, post in results if post is not None]
+    assert likes == sorted(likes)
+
+
+def test_sort_nulls_last(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """Notes with no linked post (NULL impression) must appear at the end on DESC sort."""
+    _seed_engagement_data(engine_for_test, _ENGAGEMENT_SPECS)
+    storage = Storage(engine=engine_for_test)
+    results = storage.search_notes_with_posts(
+        sort_field=SearchSortField.IMPRESSION_COUNT, sort_order=SortOrder.DESC, limit=100
+    ).items
+    # The note with no post should be last among the seeded notes
+    seeded_note_ids = {s[0] for s in _ENGAGEMENT_SPECS}
+    seeded_results = [(note, post) for note, post in results if note.note_id in seeded_note_ids]
+    assert len(seeded_results) == len(_ENGAGEMENT_SPECS)
+    # The last seeded result must be the one with no post
+    last_note, last_post = seeded_results[-1]
+    assert last_post is None, f"Expected NULL-post note last, got post with impression {last_post}"
+
+
+def test_sort_tiebreak_stability(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """Tiebreak: paging over tied impression values must produce exact deterministic order.
+
+    Seeds 4 notes that ALL share impression_count=77 (value absent from fixture data).
+    For IMPRESSION DESC + note_id DESC tiebreak the expected order is:
+        6300000000000000004, 6300000000000000003, 6300000000000000002, 6300000000000000001
+    Paging with limit=2 must yield exactly that split across two pages with no duplicates
+    or omissions.  If the note_id tiebreak were absent the DB is free to return any order
+    for equal impressions, so the exact-order assertion would fail non-deterministically.
+    """
+    # 4 notes all with identical impression=77 (unique: fixture posts have impression=30)
+    # note_ids chosen so DESC tiebreak order is 004 > 003 > 002 > 001
+    _TIEBREAK_SPECS: List[tuple[str, str, Optional[int], Optional[int], Optional[int], bool]] = [
+        ("6300000000000000001", "6400000000000000001", 77, 1, 1, True),
+        ("6300000000000000002", "6400000000000000002", 77, 1, 1, True),
+        ("6300000000000000003", "6400000000000000003", 77, 1, 1, True),
+        ("6300000000000000004", "6400000000000000004", 77, 1, 1, True),
+    ]
+    _seed_engagement_data(engine_for_test, _TIEBREAK_SPECS)
+
+    _TIEBREAK_IDS = {s[0] for s in _TIEBREAK_SPECS}
+    # Expected note_id order: impression DESC ties broken by note_id DESC
+    expected_order = [
+        "6300000000000000004",
+        "6300000000000000003",
+        "6300000000000000002",
+        "6300000000000000001",
+    ]
+
+    storage = Storage(engine=engine_for_test)
+
+    # Fetch with a large limit and filter to the seeded ids to isolate from fixture noise
+    all_results = storage.search_notes_with_posts(
+        sort_field=SearchSortField.IMPRESSION_COUNT, sort_order=SortOrder.DESC, limit=200
+    ).items
+    seeded_ids_in_order = [note.note_id for note, _ in all_results if note.note_id in _TIEBREAK_IDS]
+    assert (
+        seeded_ids_in_order == expected_order
+    ), f"Full-page order mismatch.\n  expected: {expected_order}\n  got:      {seeded_ids_in_order}"
+
+    # Now verify pagination stability: page across the tie boundary with limit=2
+    # page1 must be the first 2 expected ids, page2 must be the remaining 2
+    page1_results = storage.search_notes_with_posts(
+        sort_field=SearchSortField.IMPRESSION_COUNT, sort_order=SortOrder.DESC, limit=2, offset=0
+    ).items
+    page1_seeded = [note.note_id for note, _ in page1_results if note.note_id in _TIEBREAK_IDS]
+
+    page2_results = storage.search_notes_with_posts(
+        sort_field=SearchSortField.IMPRESSION_COUNT, sort_order=SortOrder.DESC, limit=2, offset=2
+    ).items
+    page2_seeded = [note.note_id for note, _ in page2_results if note.note_id in _TIEBREAK_IDS]
+
+    combined = page1_seeded + page2_seeded
+    assert (
+        set(combined) == _TIEBREAK_IDS
+    ), f"Duplicate or missing note_ids across pages.\n  page1: {page1_seeded}\n  page2: {page2_seeded}"
+    assert (
+        combined == expected_order
+    ), f"Paginated order mismatch.\n  expected: {expected_order}\n  got:      {combined}"
+
+
+def test_sort_without_post_filters(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """Post-sort without post-side filters must not raise and must return DESC order."""
+    _seed_engagement_data(engine_for_test, _ENGAGEMENT_SPECS)
+    storage = Storage(engine=engine_for_test)
+    # No post filter params supplied → exercises the else-branch with post join
+    results = storage.search_notes_with_posts(
+        sort_field=SearchSortField.IMPRESSION_COUNT, sort_order=SortOrder.DESC, limit=100
+    ).items
+    # Should not raise; impressions of non-null posts must be non-increasing
+    impressions = [post.impression_count for _, post in results if post is not None]
+    assert impressions == sorted(impressions, reverse=True)
