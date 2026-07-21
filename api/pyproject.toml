@@ -63,6 +63,8 @@ dev=[
     "httpx2",
 ]
 prod=[
+    # cache-bust 2026-07-21: force Docker pip-layer rebuild to pull common@main
+    # (engagement-sort enum/storage in common; see Issue #131 / PR #267)
     "birdxplorer_common @ git+https://github.com/codeforjapan/BirdXplorer.git@main#subdirectory=common",
     "psycopg2",
     "gunicorn",
