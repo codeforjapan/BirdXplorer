@@ -2,6 +2,10 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# build-arg COMMON_CACHEBUST を consume して未使用警告を抑止する（このイメージは COPY で
+# common をローカル取り込みするため機能的には不要。RUN では参照せず挙動不変）。
+ARG COMMON_CACHEBUST=unset
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev gcc \
     && rm -rf /var/lib/apt/lists/*
