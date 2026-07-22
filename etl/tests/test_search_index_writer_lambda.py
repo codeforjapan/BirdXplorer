@@ -96,6 +96,39 @@ class TestEnsureIndex:
         assert {"remove": {"index": "*", "alias": "notes"}} in actions
         assert {"add": {"index": "notes-v3", "alias": "notes"}} in actions
 
+    def test_does_not_move_alias_to_empty_index(self) -> None:
+        """v3 が空のうちは alias を付け替えない(空indexにaliasを向ける事故防止)"""
+        client = MagicMock()
+        client.indices.exists.return_value = True
+        client.count.return_value = {"count": 0}  # v3 は空
+
+        def _exists_alias(**kwargs: object) -> bool:
+            return "index" not in kwargs  # alias は存在するが v3 は向いていない
+
+        client.indices.exists_alias.side_effect = _exists_alias
+
+        writer._ensure_index(client)
+
+        client.indices.update_aliases.assert_not_called()
+        client.indices.put_alias.assert_not_called()
+
+    def test_moves_alias_when_index_non_empty(self) -> None:
+        """v3 に投入済み(非空)なら従来どおり付け替える"""
+        client = MagicMock()
+        client.indices.exists.return_value = True
+        client.count.return_value = {"count": 5}  # v3 は非空
+
+        def _exists_alias(**kwargs: object) -> bool:
+            return "index" not in kwargs
+
+        client.indices.exists_alias.side_effect = _exists_alias
+
+        writer._ensure_index(client)
+
+        client.indices.update_aliases.assert_called_once()
+        actions = client.indices.update_aliases.call_args.kwargs["body"]["actions"]
+        assert {"add": {"index": "notes-v3", "alias": "notes"}} in actions
+
     def test_second_call_is_cached(self) -> None:
         client = MagicMock()
         client.indices.exists.return_value = True

@@ -102,11 +102,21 @@ def _get_client() -> OpenSearch:
     return _client
 
 
+def _index_has_docs(client: OpenSearch, index_name: str) -> bool:
+    """インデックスにドキュメントが存在するか(count>0)。失敗時は False。"""
+    try:
+        return int(client.count(index=index_name).get("count", 0)) > 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _ensure_index(client: OpenSearch) -> None:
     """インデックスとnotesエイリアスがなければ作成する(冪等)
 
     エイリアスが旧バージョンのインデックスを向いている場合は付け替える
     (マッピング変更時のゼロダウン移行。旧インデックスは削除せず残す)。
+    alias の付け替えは INDEX_NAME に投入済みドキュメントがある場合のみ行う
+    (reindex 前の空インデックスに alias を向けて検索を全滅させる事故を防ぐ)。
     """
     global _index_ensured
     if _index_ensured:
@@ -116,18 +126,24 @@ def _ensure_index(client: OpenSearch) -> None:
         client.indices.create(index=INDEX_NAME, body=INDEX_BODY)
         logger.info(f"Created index {INDEX_NAME}")
     if not client.indices.exists_alias(name=ALIAS_NAME):
+        # 初回: alias が全く無い → 空でも付与(初期構築を妨げない)
         client.indices.put_alias(index=INDEX_NAME, name=ALIAS_NAME)
         logger.info(f"Created alias {ALIAS_NAME} -> {INDEX_NAME}")
     elif not client.indices.exists_alias(index=INDEX_NAME, name=ALIAS_NAME):
-        client.indices.update_aliases(
-            body={
-                "actions": [
-                    {"remove": {"index": "*", "alias": ALIAS_NAME}},
-                    {"add": {"index": INDEX_NAME, "alias": ALIAS_NAME}},
-                ]
-            }
-        )
-        logger.info(f"Moved alias {ALIAS_NAME} -> {INDEX_NAME}")
+        # 既存 alias が別 index を向く → INDEX_NAME が非空の時だけ付け替える
+        # (reindex 前の空 v3 に alias を向けて検索を全滅させる事故を防ぐ)
+        if _index_has_docs(client, INDEX_NAME):
+            client.indices.update_aliases(
+                body={
+                    "actions": [
+                        {"remove": {"index": "*", "alias": ALIAS_NAME}},
+                        {"add": {"index": INDEX_NAME, "alias": ALIAS_NAME}},
+                    ]
+                }
+            )
+            logger.info(f"Moved alias {ALIAS_NAME} -> {INDEX_NAME}")
+        else:
+            logger.info(f"Skip moving alias to empty index {INDEX_NAME}")
 
     _index_ensured = True
 
