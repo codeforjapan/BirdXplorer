@@ -1971,10 +1971,12 @@ class Storage:
             if sort_field is not None:
                 # Two-phase query: collect note_ids first (lightweight), then fetch full data
                 column = self._SEARCH_SORT_FIELD_MAP[sort_field]()
-                order_expr = column.asc() if sort_order == SortOrder.ASC else column.desc()
+                seg0_order_expr = column.asc() if sort_order == SortOrder.ASC else column.desc()
+                order_expr = seg0_order_expr
                 if sort_field in self._POST_SORT_FIELDS:
-                    # Notes with no linked post (NULL engagement) must not float to the top on DESC
-                    order_expr = order_expr.nullslast()
+                    # Phase 2 outer-joins posts: post-less (NULL engagement) notes must sort last
+                    # seg0 is INNER JOIN so NULLs are impossible there — do not use nullslast on seg0
+                    order_expr = seg0_order_expr.nullslast()
                 # Deterministic secondary sort key to stabilise pagination on tied values
                 tiebreak = NoteRecord.note_id.asc() if sort_order == SortOrder.ASC else NoteRecord.note_id.desc()
 
@@ -1982,7 +1984,7 @@ class Storage:
                     # 2セグメント: seg0(ポスト有り・索引駆動 INNER JOIN) + seg1(ポスト無し・末尾)
                     seg0_ordered, seg0_for_count, seg1_ordered = self._build_post_sort_segments(
                         sess,
-                        order_expr,
+                        seg0_order_expr,
                         tiebreak,
                         has_post_filters,
                         note_includes_texts,
