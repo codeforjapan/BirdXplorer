@@ -2,7 +2,8 @@
 search-index-queueのメッセージを受け取り、OpenSearchのnotesインデックスへ
 bulk upsertするLambda(VPC内・IAM SigV4認証)。
 
-- インデックスnotes-v1とエイリアスnotesをコールドスタート時に自動作成する
+- インデックスnotes-v3とエイリアスnotesをコールドスタート時に自動作成する
+  (空インデックスにはaliasを向けない。既存aliasの付け替えは対象が非空のときのみ)
 - _id=note_idの全置換upsertのため何度実行しても冪等
 - 部分失敗はbatchItemFailuresで報告する
 """
@@ -20,9 +21,10 @@ from birdxplorer_etl import settings
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+# v3: ICU正規化(nfkc_cf char_filter + icu_folding)を ja_analyzer に追加。
 # v2: ディスクベースベクトル検索(mode: on_disk)に変更。
 # notesテーブルは約293万件あり、in-memoryのHNSW(約19GB)はm6g.largeに収まらないため。
-INDEX_NAME = "notes-v2"
+INDEX_NAME = "notes-v3"
 # 契約: この定数は API 側と一致している必要がある
 # (api/birdxplorer_api/semantic_search.py の ALIAS_NAME)。変更時は両方を同時に更新すること。
 ALIAS_NAME = "notes"
@@ -32,19 +34,24 @@ INDEX_BODY = {
     "settings": {
         "index.knn": True,
         "analysis": {
+            "char_filter": {
+                # 丸数字①/単位記号℃/互換文字などを NFKC(casefold付き)で正規化
+                "icu_normalizer_cf": {"type": "icu_normalizer", "name": "nfkc_cf", "mode": "compose"}
+            },
             "analyzer": {
                 "ja_analyzer": {
                     "type": "custom",
+                    "char_filter": ["icu_normalizer_cf"],
                     "tokenizer": "kuromoji_tokenizer",
                     "filter": [
                         "kuromoji_baseform",
                         "kuromoji_part_of_speech",
                         "ja_stop",
                         "kuromoji_stemmer",
-                        "lowercase",
+                        "icu_folding",  # 大小/アクセント/互換の畳み込み(lowercase を包含)
                     ],
                 }
-            }
+            },
         },
     },
     "mappings": {
@@ -96,11 +103,26 @@ def _get_client() -> OpenSearch:
     return _client
 
 
+def _index_has_docs(client: OpenSearch, index_name: str) -> bool:
+    """インデックスにドキュメントが存在するか(count>0)。
+
+    一過性エラー(503/接続失敗等)は呼び出し元に伝播させる。
+    インデックスが存在しない(NotFoundError)場合のみ False を返す。
+    """
+    return int(client.count(index=index_name).get("count", 0)) > 0
+
+
 def _ensure_index(client: OpenSearch) -> None:
     """インデックスとnotesエイリアスがなければ作成する(冪等)
 
     エイリアスが旧バージョンのインデックスを向いている場合は付け替える
     (マッピング変更時のゼロダウン移行。旧インデックスは削除せず残す)。
+    alias の付け替えは INDEX_NAME に投入済みドキュメントがある場合のみ行う
+    (reindex 前の空インデックスに alias を向けて検索を全滅させる事故を防ぐ)。
+
+    _index_ensured は alias が INDEX_NAME を正しく向いている状態でのみ True にセットする。
+    空インデックスのため alias 付け替えをスキップした場合は False のままとし、
+    次の呼び出しで再評価できるようにする。
     """
     global _index_ensured
     if _index_ensured:
@@ -110,20 +132,30 @@ def _ensure_index(client: OpenSearch) -> None:
         client.indices.create(index=INDEX_NAME, body=INDEX_BODY)
         logger.info(f"Created index {INDEX_NAME}")
     if not client.indices.exists_alias(name=ALIAS_NAME):
+        # 初回: alias が全く無い → 空でも付与(初期構築を妨げない)
         client.indices.put_alias(index=INDEX_NAME, name=ALIAS_NAME)
         logger.info(f"Created alias {ALIAS_NAME} -> {INDEX_NAME}")
+        _index_ensured = True
     elif not client.indices.exists_alias(index=INDEX_NAME, name=ALIAS_NAME):
-        client.indices.update_aliases(
-            body={
-                "actions": [
-                    {"remove": {"index": "*", "alias": ALIAS_NAME}},
-                    {"add": {"index": INDEX_NAME, "alias": ALIAS_NAME}},
-                ]
-            }
-        )
-        logger.info(f"Moved alias {ALIAS_NAME} -> {INDEX_NAME}")
-
-    _index_ensured = True
+        # 既存 alias が別 index を向く → INDEX_NAME が非空の時だけ付け替える
+        # (reindex 前の空 v3 に alias を向けて検索を全滅させる事故を防ぐ)
+        if _index_has_docs(client, INDEX_NAME):
+            client.indices.update_aliases(
+                body={
+                    "actions": [
+                        {"remove": {"index": "*", "alias": ALIAS_NAME}},
+                        {"add": {"index": INDEX_NAME, "alias": ALIAS_NAME}},
+                    ]
+                }
+            )
+            logger.info(f"Moved alias {ALIAS_NAME} -> {INDEX_NAME}")
+            _index_ensured = True
+        else:
+            # alias はまだ別インデックスを向いている。次回呼び出しで再評価する。
+            logger.info(f"Skip moving alias to empty index {INDEX_NAME}")
+    else:
+        # alias はすでに INDEX_NAME を向いている
+        _index_ensured = True
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
