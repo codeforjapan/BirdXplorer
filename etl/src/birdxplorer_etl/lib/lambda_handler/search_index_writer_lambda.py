@@ -20,9 +20,10 @@ from birdxplorer_etl import settings
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+# v3: ICU正規化(nfkc_cf char_filter + icu_folding)を ja_analyzer に追加。
 # v2: ディスクベースベクトル検索(mode: on_disk)に変更。
 # notesテーブルは約293万件あり、in-memoryのHNSW(約19GB)はm6g.largeに収まらないため。
-INDEX_NAME = "notes-v2"
+INDEX_NAME = "notes-v3"
 # 契約: この定数は API 側と一致している必要がある
 # (api/birdxplorer_api/semantic_search.py の ALIAS_NAME)。変更時は両方を同時に更新すること。
 ALIAS_NAME = "notes"
@@ -32,19 +33,24 @@ INDEX_BODY = {
     "settings": {
         "index.knn": True,
         "analysis": {
+            "char_filter": {
+                # 丸数字①/単位記号℃/互換文字などを NFKC(casefold付き)で正規化
+                "icu_normalizer_cf": {"type": "icu_normalizer", "name": "nfkc_cf", "mode": "compose"}
+            },
             "analyzer": {
                 "ja_analyzer": {
                     "type": "custom",
+                    "char_filter": ["icu_normalizer_cf"],
                     "tokenizer": "kuromoji_tokenizer",
                     "filter": [
                         "kuromoji_baseform",
                         "kuromoji_part_of_speech",
                         "ja_stop",
                         "kuromoji_stemmer",
-                        "lowercase",
+                        "icu_folding",  # 大小/アクセント/互換の畳み込み(lowercase を包含)
                     ],
                 }
-            }
+            },
         },
     },
     "mappings": {

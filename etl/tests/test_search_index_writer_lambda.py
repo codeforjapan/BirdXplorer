@@ -43,8 +43,9 @@ class TestEnsureIndex:
 
         client.indices.create.assert_called_once()
         create_kwargs = client.indices.create.call_args.kwargs
-        assert create_kwargs["index"] == "notes-v2"
-        mappings = create_kwargs["body"]["mappings"]["properties"]
+        assert create_kwargs["index"] == "notes-v3"
+        body = create_kwargs["body"]
+        mappings = body["mappings"]["properties"]
         assert mappings["embedding"]["type"] == "knn_vector"
         assert mappings["embedding"]["dimension"] == 1536
         # ディスクベースベクトル検索(約293万ノートをm6g.largeのメモリに収めるため)
@@ -53,7 +54,15 @@ class TestEnsureIndex:
         assert mappings["embedding"]["space_type"] == "innerproduct"
         assert "method" not in mappings["embedding"]
         assert mappings["text"]["fields"]["ja"]["analyzer"] == "ja_analyzer"
-        client.indices.put_alias.assert_called_once_with(index="notes-v2", name="notes")
+        # ICU 追加の検証
+        analysis = body["settings"]["analysis"]
+        assert "icu_normalizer_cf" in analysis["char_filter"]
+        assert analysis["char_filter"]["icu_normalizer_cf"]["type"] == "icu_normalizer"
+        ja = analysis["analyzer"]["ja_analyzer"]
+        assert ja["char_filter"] == ["icu_normalizer_cf"]
+        assert "icu_folding" in ja["filter"]
+        assert "lowercase" not in ja["filter"]  # icu_folding が内包
+        client.indices.put_alias.assert_called_once_with(index="notes-v3", name="notes")
 
     def test_skips_when_index_exists(self) -> None:
         client = MagicMock()
@@ -67,13 +76,14 @@ class TestEnsureIndex:
         client.indices.update_aliases.assert_not_called()
 
     def test_moves_alias_from_old_index(self) -> None:
-        """エイリアスが旧インデックス(notes-v1)を向いている場合は notes-v2 に付け替える"""
+        """エイリアスが旧インデックスを向いている場合は notes-v3 に付け替える"""
         client = MagicMock()
         client.indices.exists.return_value = True
+        client.count.return_value = {"count": 5}
 
         def _exists_alias(**kwargs: object) -> bool:
             # name のみ指定(エイリアス自体の存在確認)は True、
-            # index 付き指定(notes-v2 を向いているかの確認)は False を返す
+            # index 付き指定(notes-v3 を向いているかの確認)は False を返す
             return "index" not in kwargs
 
         client.indices.exists_alias.side_effect = _exists_alias
@@ -84,7 +94,7 @@ class TestEnsureIndex:
         client.indices.update_aliases.assert_called_once()
         actions = client.indices.update_aliases.call_args.kwargs["body"]["actions"]
         assert {"remove": {"index": "*", "alias": "notes"}} in actions
-        assert {"add": {"index": "notes-v2", "alias": "notes"}} in actions
+        assert {"add": {"index": "notes-v3", "alias": "notes"}} in actions
 
     def test_second_call_is_cached(self) -> None:
         client = MagicMock()
