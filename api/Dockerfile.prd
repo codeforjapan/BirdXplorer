@@ -20,7 +20,12 @@ RUN if [ "${ENVIRONMENT}" = "prod" ]; then \
     && rm -rf /var/lib/apt/lists/*; \
     fi
 
+# common@main を確実に取り込むためのキャッシュバスト。CI が common/ の内容ハッシュを
+# COMMON_CACHEBUST に注入し、common が変わった時だけこの層を再実行する。
+# build-arg 未指定(ローカル等)ではデフォルト値のまま＝現状どおりのキャッシュ挙動。
+ARG COMMON_CACHEBUST=unset
 RUN python -m pip install --no-cache-dir --upgrade pip && \
+    echo "common-cachebust: ${COMMON_CACHEBUST}" && \
     pip install --no-cache-dir -e ".[${ENVIRONMENT}]"
 
 FROM python:${PYTHON_VERSION_CODE}-slim-bookworm AS runner
