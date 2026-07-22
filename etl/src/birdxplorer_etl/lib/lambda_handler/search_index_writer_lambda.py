@@ -2,7 +2,8 @@
 search-index-queueのメッセージを受け取り、OpenSearchのnotesインデックスへ
 bulk upsertするLambda(VPC内・IAM SigV4認証)。
 
-- インデックスnotes-v1とエイリアスnotesをコールドスタート時に自動作成する
+- インデックスnotes-v3とエイリアスnotesをコールドスタート時に自動作成する
+  (空インデックスにはaliasを向けない。既存aliasの付け替えは対象が非空のときのみ)
 - _id=note_idの全置換upsertのため何度実行しても冪等
 - 部分失敗はbatchItemFailuresで報告する
 """
