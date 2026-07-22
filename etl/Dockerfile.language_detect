@@ -10,7 +10,11 @@ RUN dnf update -y && \
 
 COPY etl/. .
 
+# common@main を確実に取り込むためのキャッシュバスト。CI が common/ の内容ハッシュを
+# COMMON_CACHEBUST に注入し、common が変わった時だけこの層を再実行する。未指定時は現状どおり。
+ARG COMMON_CACHEBUST=unset
 RUN python -m pip install --no-cache-dir --upgrade pip && \
+    echo "common-cachebust: ${COMMON_CACHEBUST}" && \
     pip install --no-cache-dir -e .[prod]
 
 RUN curl -Lo ${LAMBDA_TASK_ROOT}/lid.176.ftz \
