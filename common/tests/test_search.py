@@ -1,5 +1,5 @@
 from typing import Any, List, Optional
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy.engine import Engine
@@ -969,3 +969,52 @@ def test_deep_page_count_branch_end_to_end(
     assert returned_ids.isdisjoint(
         _SEG_WITH_POST_IDS
     ), f"With-post note_ids must not appear at deep offset; found {returned_ids & _SEG_WITH_POST_IDS}"
+
+
+# ---------------------------------------------------------------------------
+# Regression guard: seg0 order_expr must NOT contain NULLS LAST
+# Bug: search_notes_with_posts was passing nullslast() order_expr to
+# _build_post_sort_segments, preventing Postgres from using ix_posts_* btree
+# index (DESC scan is NULLS FIRST, so NULLS LAST forces Seq Scan + Sort).
+# seg0 is an INNER JOIN so NULLs are impossible; nullslast is both wrong and
+# harmful there.  Phase 2 outer-join MUST still use nullslast (to sort
+# post-less notes last), which is NOT tested here but verified by the
+# behavioral tests above (test_engagement_sort_with_post_desc_then_postless_last,
+# test_sort_nulls_last, etc.).
+# ---------------------------------------------------------------------------
+
+
+def test_seg0_order_expr_has_no_nulls_last(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """Regression guard: the order_expr passed to _build_post_sort_segments must NOT
+    contain NULLS LAST, so Postgres can use the ix_posts_* btree index on seg0.
+
+    Intercepts the call to _build_post_sort_segments, captures order_expr, compiles
+    it to SQL, and asserts 'NULLS LAST' is absent.  RED before the fix (caller was
+    passing the nullslast()-annotated expr); GREEN after (caller passes the plain
+    desc()/asc() expr, reserving nullslast for Phase 2 only).
+    """
+    storage = Storage(engine=engine_for_test)
+    captured: list[Any] = []
+
+    real_build = storage._build_post_sort_segments
+
+    def capturing_build(sess: Any, order_expr: Any, *args: Any, **kwargs: Any) -> Any:
+        captured.append(order_expr)
+        return real_build(sess, order_expr, *args, **kwargs)
+
+    with patch.object(storage, "_build_post_sort_segments", side_effect=capturing_build):
+        storage.search_notes_with_posts(
+            sort_field=SearchSortField.IMPRESSION_COUNT,
+            sort_order=SortOrder.DESC,
+            limit=10,
+        )
+
+    assert len(captured) == 1, "Expected _build_post_sort_segments to be called exactly once"
+    compiled_sql = str(captured[0].compile()).upper()
+    assert "NULLS LAST" not in compiled_sql, (
+        f"seg0 order_expr must NOT contain NULLS LAST (prevents ix_posts_* index use); " f"got: {compiled_sql}"
+    )
