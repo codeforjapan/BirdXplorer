@@ -48,6 +48,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
+          build-args: |
+            COMMON_CACHEBUST=${{ hashFiles('common/**') }}
 
   build-push-etl:
     needs: release
