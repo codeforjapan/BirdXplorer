@@ -104,11 +104,12 @@ def _get_client() -> OpenSearch:
 
 
 def _index_has_docs(client: OpenSearch, index_name: str) -> bool:
-    """インデックスにドキュメントが存在するか(count>0)。失敗時は False。"""
-    try:
-        return int(client.count(index=index_name).get("count", 0)) > 0
-    except Exception:  # noqa: BLE001
-        return False
+    """インデックスにドキュメントが存在するか(count>0)。
+
+    一過性エラー(503/接続失敗等)は呼び出し元に伝播させる。
+    インデックスが存在しない(NotFoundError)場合のみ False を返す。
+    """
+    return int(client.count(index=index_name).get("count", 0)) > 0
 
 
 def _ensure_index(client: OpenSearch) -> None:
@@ -118,6 +119,10 @@ def _ensure_index(client: OpenSearch) -> None:
     (マッピング変更時のゼロダウン移行。旧インデックスは削除せず残す)。
     alias の付け替えは INDEX_NAME に投入済みドキュメントがある場合のみ行う
     (reindex 前の空インデックスに alias を向けて検索を全滅させる事故を防ぐ)。
+
+    _index_ensured は alias が INDEX_NAME を正しく向いている状態でのみ True にセットする。
+    空インデックスのため alias 付け替えをスキップした場合は False のままとし、
+    次の呼び出しで再評価できるようにする。
     """
     global _index_ensured
     if _index_ensured:
@@ -130,6 +135,7 @@ def _ensure_index(client: OpenSearch) -> None:
         # 初回: alias が全く無い → 空でも付与(初期構築を妨げない)
         client.indices.put_alias(index=INDEX_NAME, name=ALIAS_NAME)
         logger.info(f"Created alias {ALIAS_NAME} -> {INDEX_NAME}")
+        _index_ensured = True
     elif not client.indices.exists_alias(index=INDEX_NAME, name=ALIAS_NAME):
         # 既存 alias が別 index を向く → INDEX_NAME が非空の時だけ付け替える
         # (reindex 前の空 v3 に alias を向けて検索を全滅させる事故を防ぐ)
@@ -143,10 +149,13 @@ def _ensure_index(client: OpenSearch) -> None:
                 }
             )
             logger.info(f"Moved alias {ALIAS_NAME} -> {INDEX_NAME}")
+            _index_ensured = True
         else:
+            # alias はまだ別インデックスを向いている。次回呼び出しで再評価する。
             logger.info(f"Skip moving alias to empty index {INDEX_NAME}")
-
-    _index_ensured = True
+    else:
+        # alias はすでに INDEX_NAME を向いている
+        _index_ensured = True
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
