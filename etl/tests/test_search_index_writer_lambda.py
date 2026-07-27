@@ -257,3 +257,91 @@ class TestLambdaHandler:
     def test_empty_event_returns_no_failures(self) -> None:
         result = writer.lambda_handler({"Records": []}, None)
         assert result == {"batchItemFailures": []}
+
+    @patch("birdxplorer_etl.lib.lambda_handler.search_index_writer_lambda.time.sleep")
+    @patch.object(writer, "_ensure_index")
+    @patch.object(writer, "_get_client")
+    def test_transient_429_is_retried_then_succeeds(
+        self, mock_get_client: MagicMock, mock_ensure: MagicMock, mock_sleep: MagicMock
+    ) -> None:
+        """429 の item は再送され、2 回目で成功すれば失敗ゼロ"""
+        client = mock_get_client.return_value
+        client.bulk.side_effect = [
+            {
+                "errors": True,
+                "items": [{"index": {"_id": "n1", "status": 429, "error": {"type": "too_many_requests"}}}],
+            },
+            {"errors": False, "items": [{"index": {"_id": "n1", "status": 200}}]},
+        ]
+
+        result = writer.lambda_handler(_sqs_event([_doc_body("n1")]), None)
+
+        assert result == {"batchItemFailures": []}
+        assert client.bulk.call_count == 2
+        mock_sleep.assert_called_once()
+
+    @patch("birdxplorer_etl.lib.lambda_handler.search_index_writer_lambda.time.sleep")
+    @patch.object(writer, "_ensure_index")
+    @patch.object(writer, "_get_client")
+    def test_transient_503_exhausts_retries_then_fails(
+        self, mock_get_client: MagicMock, mock_ensure: MagicMock, mock_sleep: MagicMock
+    ) -> None:
+        """503 が続く場合は MAX_BULK_RETRIES+1 回試行して最終的に失敗扱い"""
+        client = mock_get_client.return_value
+        client.bulk.return_value = {
+            "errors": True,
+            "items": [{"index": {"_id": "n1", "status": 503, "error": {"type": "unavailable"}}}],
+        }
+
+        result = writer.lambda_handler(_sqs_event([_doc_body("n1")]), None)
+
+        assert result == {"batchItemFailures": [{"itemIdentifier": "mid-0"}]}
+        assert client.bulk.call_count == writer.MAX_BULK_RETRIES + 1
+
+    @patch("birdxplorer_etl.lib.lambda_handler.search_index_writer_lambda.time.sleep")
+    @patch.object(writer, "_ensure_index")
+    @patch.object(writer, "_get_client")
+    def test_cluster_block_403_is_retried(
+        self, mock_get_client: MagicMock, mock_ensure: MagicMock, mock_sleep: MagicMock
+    ) -> None:
+        """403 cluster_block(read-only ブロック)は一過性として再送される"""
+        client = mock_get_client.return_value
+        client.bulk.side_effect = [
+            {
+                "errors": True,
+                "items": [{"index": {"_id": "n1", "status": 403, "error": {"type": "cluster_block_exception"}}}],
+            },
+            {"errors": False, "items": [{"index": {"_id": "n1", "status": 200}}]},
+        ]
+
+        result = writer.lambda_handler(_sqs_event([_doc_body("n1")]), None)
+
+        assert result == {"batchItemFailures": []}
+        assert client.bulk.call_count == 2
+
+    @patch("birdxplorer_etl.lib.lambda_handler.search_index_writer_lambda.time.sleep")
+    @patch.object(writer, "_ensure_index")
+    @patch.object(writer, "_get_client")
+    def test_permanent_400_not_retried_only_transient_resent(
+        self, mock_get_client: MagicMock, mock_ensure: MagicMock, mock_sleep: MagicMock
+    ) -> None:
+        """400(恒久)は即失敗、429(一過性)のみ再送。再送 bulk には n2 のみ含む"""
+        client = mock_get_client.return_value
+        client.bulk.side_effect = [
+            {
+                "errors": True,
+                "items": [
+                    {"index": {"_id": "n1", "status": 400, "error": {"type": "mapper_parsing_exception"}}},
+                    {"index": {"_id": "n2", "status": 429, "error": {"type": "too_many_requests"}}},
+                ],
+            },
+            {"errors": False, "items": [{"index": {"_id": "n2", "status": 200}}]},
+        ]
+
+        result = writer.lambda_handler(_sqs_event([_doc_body("n1"), _doc_body("n2")]), None)
+
+        assert result == {"batchItemFailures": [{"itemIdentifier": "mid-0"}]}
+        assert client.bulk.call_count == 2
+        second_bulk_body = client.bulk.call_args_list[1].kwargs["body"]
+        assert len(second_bulk_body) == 2  # 1 件分(action + doc)
+        assert second_bulk_body[0] == {"index": {"_index": "notes", "_id": "n2"}}

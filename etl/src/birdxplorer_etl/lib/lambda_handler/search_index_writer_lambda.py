@@ -11,7 +11,8 @@ bulk upsertするLambda(VPC内・IAM SigV4認証)。
 import json
 import logging
 import os
-from typing import Any, Dict, List
+import time
+from typing import Any, Dict, List, Tuple
 
 import boto3
 from opensearchpy import AWSV4SignerAuth, OpenSearch, RequestsHttpConnection
@@ -28,6 +29,11 @@ INDEX_NAME = "notes-v3"
 # 契約: この定数は API 側と一致している必要がある
 # (api/birdxplorer_api/semantic_search.py の ALIAS_NAME)。変更時は両方を同時に更新すること。
 ALIAS_NAME = "notes"
+
+# 一過性エラー(リトライで回復しうる)の分類。詳細は _is_transient_item_error 参照。
+TRANSIENT_STATUSES = {429, 503}
+MAX_BULK_RETRIES = 3
+BACKOFF_BASE_SECONDS = 0.5
 
 # spec: 2026-07-08-opensearch-phase2-etl-design.md §7
 INDEX_BODY = {
@@ -158,6 +164,71 @@ def _ensure_index(client: OpenSearch) -> None:
         _index_ensured = True
 
 
+def _is_transient_item_error(item_result: Dict[str, Any]) -> bool:
+    """bulk item のエラーが一過性(リトライで回復しうる)かを判定する。
+
+    - 429(too_many_requests) / 503(unavailable): 一時的 → 一過性
+    - 403 かつ cluster_block 系(ディスク枯渇による read-only ブロック等) → 一過性
+    - それ以外(400 mapping/parse 等) → 恒久
+    """
+    status = item_result.get("status")
+    if status in TRANSIENT_STATUSES:
+        return True
+    if status == 403:
+        error_type = (item_result.get("error") or {}).get("type", "") or ""
+        return "cluster_block" in error_type
+    return False
+
+
+def _bulk_index_docs(client: OpenSearch, docs: List[Tuple[str, str, Dict[str, Any]]]) -> List[str]:
+    """docs を bulk index し、恒久失敗した message_id を返す。
+
+    一過性エラーの item は指数バックオフで最大 MAX_BULK_RETRIES 回再送する。
+    リトライを使い切っても失敗する item・恒久エラーの item の message_id を返す
+    (呼び出し元が batchItemFailures として SQS 再配信させる)。
+    """
+    pending = docs
+    failed: List[str] = []
+
+    for attempt in range(MAX_BULK_RETRIES + 1):
+        bulk_body: List[Dict[str, Any]] = []
+        for _, note_id, doc in pending:
+            bulk_body.append({"index": {"_index": ALIAS_NAME, "_id": note_id}})
+            bulk_body.append(doc)
+
+        response = client.bulk(body=bulk_body)
+
+        if not response.get("errors"):
+            return failed
+
+        items = response.get("items", [])
+        if len(items) != len(pending):
+            # 想定外のbulkレスポンス: 対象全件をSQSに再配信させる
+            logger.error(f"Bulk items count mismatch: expected {len(pending)}, got {len(items)}")
+            failed.extend(message_id for message_id, _, _ in pending)
+            return failed
+
+        retryable: List[Tuple[str, str, Dict[str, Any]]] = []
+        for (message_id, note_id, doc), item in zip(pending, items):
+            result = item.get("index", {})
+            error = result.get("error")
+            if not error:
+                continue
+            if _is_transient_item_error(result) and attempt < MAX_BULK_RETRIES:
+                retryable.append((message_id, note_id, doc))
+            else:
+                logger.error(f"Bulk index error for note {note_id}: {error}")
+                failed.append(message_id)
+
+        if not retryable:
+            return failed
+
+        pending = retryable
+        time.sleep(BACKOFF_BASE_SECONDS * (2**attempt))
+
+    return failed
+
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     records = event.get("Records", [])
     if not records:
@@ -165,7 +236,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return {"batchItemFailures": []}
 
     batch_item_failures: List[Dict[str, str]] = []
-    docs: List[tuple] = []  # (message_id, note_id, doc)
+    docs: List[Tuple[str, str, Dict[str, Any]]] = []
 
     for record in records:
         message_id = record.get("messageId")
@@ -190,27 +261,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     try:
         client = _get_client()
         _ensure_index(client)
-
-        bulk_body: List[Dict[str, Any]] = []
-        for _, note_id, doc in docs:
-            bulk_body.append({"index": {"_index": ALIAS_NAME, "_id": note_id}})
-            bulk_body.append(doc)
-
-        response = client.bulk(body=bulk_body)
-
-        if response.get("errors"):
-            items = response.get("items", [])
-            if len(items) != len(docs):
-                # 想定外のbulkレスポンス: 全件をSQSに再配信させる
-                logger.error(f"Bulk items count mismatch: expected {len(docs)}, got {len(items)}")
-                batch_item_failures.extend({"itemIdentifier": message_id} for message_id, _, _ in docs)
-            else:
-                for (message_id, note_id, _), item in zip(docs, items):
-                    error = item.get("index", {}).get("error")
-                    if error:
-                        logger.error(f"Bulk index error for note {note_id}: {error}")
-                        batch_item_failures.append({"itemIdentifier": message_id})
-
+        batch_item_failures.extend({"itemIdentifier": message_id} for message_id in _bulk_index_docs(client, docs))
     except Exception as e:
         # 接続エラー等の全体失敗: 対象全件をSQSに再配信させる
         logger.error(f"OpenSearch bulk indexing failed: {e}")
