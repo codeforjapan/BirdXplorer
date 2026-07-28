@@ -30,12 +30,18 @@ from birdxplorer_common.models import (
     BaseModel,
     LanguageCode,
     LongHttpUrl,
-    Note,
+)
+from birdxplorer_common.models import Note
+from birdxplorer_common.models import Note as NoteModel
+from birdxplorer_common.models import (
     NoteId,
     NoteRequest,
     PaginationMeta,
     ParticipantId,
-    Post,
+)
+from birdxplorer_common.models import Post
+from birdxplorer_common.models import Post as PostModel
+from birdxplorer_common.models import (
     PostId,
     SearchSortField,
     SortOrder,
@@ -418,6 +424,56 @@ def ensure_twitter_timestamp(t: Union[str, TwitterTimestamp]) -> TwitterTimestam
         return timestamp
     except OverflowError:
         raise OverflowError("Timestamp out of range")
+
+
+def _build_search_response(
+    items: List[Tuple[NoteModel, Optional[PostModel]]],
+    has_next: bool,
+    total: Optional[int],
+    request: Request,
+    offset: int,
+    limit: int,
+) -> SearchResponse:
+    results = []
+    for note, post in items:
+        results.append(
+            SearchedNote(
+                noteId=note.note_id,
+                noteAuthorParticipantId=note.note_author_participant_id,
+                language=note.language,
+                topics=note.topics,
+                postId=note.post_id,
+                summary=note.summary,
+                current_status=note.current_status,
+                created_at=note.created_at,
+                has_been_helpfuled=note.has_been_helpfuled,
+                rate_count=note.rate_count,
+                helpful_count=note.helpful_count,
+                not_helpful_count=note.not_helpful_count,
+                somewhat_helpful_count=note.somewhat_helpful_count,
+                current_status_history=[
+                    {"status": history.status, "date": history.date} for history in note.current_status_history
+                ],
+                post=post,
+            )
+        )
+
+    base_url = str(request.url).split("?")[0]
+    query_params = parse_query_string(request.url.query)
+
+    next_url = None
+    if has_next:
+        query_params["offset"] = [str(offset + limit)]
+        query_params["limit"] = [str(limit)]
+        next_url = f"{base_url}?{urlencode(query_params, doseq=True)}"
+
+    prev_url = None
+    if offset > 0:
+        query_params["offset"] = [str(max(offset - limit, 0))]
+        query_params["limit"] = [str(limit)]
+        prev_url = f"{base_url}?{urlencode(query_params, doseq=True)}"
+
+    return SearchResponse(data=results, meta=PaginationMeta(next=next_url, prev=prev_url, total=total))
 
 
 def gen_router(
@@ -824,30 +880,6 @@ def gen_router(
             post_search_mode=post_search_mode,
         )
 
-        results = []
-        for note, post in page.items:
-            results.append(
-                SearchedNote(
-                    noteId=note.note_id,
-                    noteAuthorParticipantId=note.note_author_participant_id,
-                    language=note.language,
-                    topics=note.topics,
-                    postId=note.post_id,
-                    summary=note.summary,
-                    current_status=note.current_status,
-                    created_at=note.created_at,
-                    has_been_helpfuled=note.has_been_helpfuled,
-                    rate_count=note.rate_count,
-                    helpful_count=note.helpful_count,
-                    not_helpful_count=note.not_helpful_count,
-                    somewhat_helpful_count=note.somewhat_helpful_count,
-                    current_status_history=[
-                        {"status": history.status, "date": history.date} for history in note.current_status_history
-                    ],
-                    post=post,
-                )
-            )
-
         # include_total=True のときはCOUNTクエリで総件数を取得（後方互換性のため）
         total_count = None
         if include_total:
@@ -872,28 +904,9 @@ def gen_router(
                 post_search_mode=post_search_mode,
             )
 
-        # ページネーションURL生成
-        base_url = str(request.url).split("?")[0]
-        raw_query = request.url.query
-        query_params = parse_query_string(raw_query)
-
-        next_url = None
         # include_total時はCOUNTベースで判定（従来互換）、それ以外はlimit+1ベース
         has_next = (offset + limit < total_count) if total_count is not None else page.has_next
-        if has_next:
-            next_offset = offset + limit
-            query_params["offset"] = [str(next_offset)]
-            query_params["limit"] = [str(limit)]
-            next_url = f"{base_url}?{urlencode(query_params, doseq=True)}"
-
-        prev_url = None
-        if offset > 0:
-            prev_offset = max(offset - limit, 0)
-            query_params["offset"] = [str(prev_offset)]
-            query_params["limit"] = [str(limit)]
-            prev_url = f"{base_url}?{urlencode(query_params, doseq=True)}"
-
-        return SearchResponse(data=results, meta=PaginationMeta(next=next_url, prev=prev_url, total=total_count))
+        return _build_search_response(page.items, has_next, total_count, request, offset, limit)
 
     @router.get(
         "/export/csv",
