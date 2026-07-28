@@ -1930,6 +1930,59 @@ class Storage:
         seg1_offset = max(offset - c0, 0)
         return [r[0] for r in seg1_ordered.offset(seg1_offset).limit(want).all()]
 
+    def _note_record_to_model(self, note_record: NoteRecord) -> NoteModel:
+        return NoteModel(
+            note_id=note_record.note_id,
+            note_author_participant_id=note_record.note_author_participant_id,
+            post_id=_normalize_post_id(note_record.post_id),
+            topics=[
+                TopicModel(topic_id=topic.topic_id, label=topic.topic.label, reference_count=0)
+                for topic in note_record.topics
+            ],
+            language=(LanguageCode(note_record.language) if note_record.language else LanguageCode("other")),
+            summary=note_record.summary,
+            current_status=note_record.current_status,
+            created_at=note_record.created_at,
+            has_been_helpfuled=(
+                note_record.has_been_helpfuled if note_record.has_been_helpfuled is not None else False
+            ),
+            rate_count=note_record.rate_count if note_record.rate_count is not None else 0,
+            helpful_count=note_record.helpful_count if note_record.helpful_count is not None else 0,
+            not_helpful_count=(note_record.not_helpful_count if note_record.not_helpful_count is not None else 0),
+            somewhat_helpful_count=(
+                note_record.somewhat_helpful_count if note_record.somewhat_helpful_count is not None else 0
+            ),
+            current_status_history=self._parse_status_history(note_record.current_status_history),
+        )
+
+    def hydrate_notes_with_posts(
+        self,
+        note_ids: List[NoteId],
+        sort_order: SortOrder = SortOrder.DESC,
+    ) -> List[Tuple[NoteModel, Optional[PostModel]]]:
+        """note_id 群を (NoteModel, PostModel) に本体化する。created_at, note_id で並べる。"""
+        if not note_ids:
+            return []
+        with Session(self.engine) as sess:
+            order_expr = NoteRecord.created_at.asc() if sort_order == SortOrder.ASC else NoteRecord.created_at.desc()
+            tiebreak = NoteRecord.note_id.asc() if sort_order == SortOrder.ASC else NoteRecord.note_id.desc()
+            query = (
+                sess.query(NoteRecord, PostRecord)
+                .outerjoin(PostRecord, NoteRecord.post_id == PostRecord.post_id)
+                .filter(NoteRecord.note_id.in_(note_ids))
+                .order_by(order_expr, tiebreak)
+            )
+            items: List[Tuple[NoteModel, Optional[PostModel]]] = []
+            for note_record, post_record in query.all():
+                try:
+                    note = self._note_record_to_model(note_record)
+                    post = self._post_record_to_model(post_record, with_media=None) if post_record else None
+                    items.append((note, post))
+                except Exception as e:  # noqa: BLE001
+                    get_logger().warning(f"Skipping invalid note/post record (note_id={note_record.note_id}): {str(e)}")
+                    continue
+            return items
+
     def search_notes_with_posts(
         self,
         note_includes_texts: Union[List[str], None] = None,
@@ -2108,37 +2161,7 @@ class Storage:
             items: List[Tuple[NoteModel, Optional[PostModel]]] = []
             for note_record, post_record in results[:limit]:
                 try:
-                    note = NoteModel(
-                        note_id=note_record.note_id,
-                        note_author_participant_id=note_record.note_author_participant_id,
-                        post_id=_normalize_post_id(note_record.post_id),
-                        topics=[
-                            TopicModel(
-                                topic_id=topic.topic_id,
-                                label=topic.topic.label,
-                                reference_count=0,
-                            )
-                            for topic in note_record.topics
-                        ],
-                        language=(
-                            LanguageCode(note_record.language) if note_record.language else LanguageCode("other")
-                        ),
-                        summary=note_record.summary,
-                        current_status=note_record.current_status,
-                        created_at=note_record.created_at,
-                        has_been_helpfuled=(
-                            note_record.has_been_helpfuled if note_record.has_been_helpfuled is not None else False
-                        ),
-                        rate_count=note_record.rate_count if note_record.rate_count is not None else 0,
-                        helpful_count=note_record.helpful_count if note_record.helpful_count is not None else 0,
-                        not_helpful_count=(
-                            note_record.not_helpful_count if note_record.not_helpful_count is not None else 0
-                        ),
-                        somewhat_helpful_count=(
-                            note_record.somewhat_helpful_count if note_record.somewhat_helpful_count is not None else 0
-                        ),
-                        current_status_history=self._parse_status_history(note_record.current_status_history),
-                    )
+                    note = self._note_record_to_model(note_record)
 
                     post = (
                         self._post_record_to_model(post_record, with_media=post_includes_media) if post_record else None
