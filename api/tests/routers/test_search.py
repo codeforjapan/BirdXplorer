@@ -509,3 +509,33 @@ def test_search_returns_non_enum_language(client: TestClient, mock_storage: Magi
     assert response.status_code == 200
     result = response.json()["data"][0]
     assert result["language"] == "zh"
+
+
+def test_search_keyword_uses_opensearch(
+    client: TestClient, mock_semantic_search: MagicMock, mock_storage: MagicMock
+) -> None:
+    res = client.get("/api/v1/data/search/keyword?note_includes_text=ワクチン&include_total=true")
+    assert res.status_code == 200
+    body = res.json()
+    assert mock_semantic_search.keyword_search.called
+    assert mock_storage.hydrate_notes_with_posts.called
+    assert not mock_storage.search_notes_with_posts.called  # フォールバックしていない
+    assert body["meta"]["total"] == 2
+    assert len(body["data"]) == 2
+
+
+def test_search_keyword_requires_note_text(client: TestClient) -> None:
+    res = client.get("/api/v1/data/search/keyword")
+    assert res.status_code == 422
+
+
+def test_search_keyword_falls_back_to_postgres_on_opensearch_error(
+    client: TestClient, mock_semantic_search: MagicMock, mock_storage: MagicMock
+) -> None:
+    from birdxplorer_api.semantic_search import SemanticSearchUnavailableError
+
+    mock_semantic_search.keyword_search.side_effect = SemanticSearchUnavailableError("boom")
+    mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[], has_next=False)
+    res = client.get("/api/v1/data/search/keyword?note_includes_text=ワクチン&include_total=false")
+    assert res.status_code == 200
+    assert mock_storage.search_notes_with_posts.called  # Postgres 経路に落ちた

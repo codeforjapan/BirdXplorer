@@ -25,7 +25,11 @@ from birdxplorer_api.openapi_doc import (
     V1DataTopicsDocs,
     V1DataUserEnrollmentsDocs,
 )
-from birdxplorer_api.semantic_search import SemanticSearchService
+from birdxplorer_api.semantic_search import (
+    SemanticSearchService,
+    SemanticSearchUnavailableError,
+)
+from birdxplorer_common.logger import get_logger
 from birdxplorer_common.models import (
     BaseModel,
     LanguageCode,
@@ -907,6 +911,88 @@ def gen_router(
         # include_total時はCOUNTベースで判定（従来互換）、それ以外はlimit+1ベース
         has_next = (offset + limit < total_count) if total_count is not None else page.has_next
         return _build_search_response(page.items, has_next, total_count, request, offset, limit)
+
+    @router.get("/search/keyword", description="広域 note テキスト検索（OpenSearch）", response_model=SearchResponse)
+    def search_keyword(
+        request: Request,
+        note_includes_text: List[str] = Query(..., **V1DataSearchDocs.params["note_includes_text"]),
+        note_excludes_text: Union[None, str] = Query(default=None, **V1DataSearchDocs.params["note_excludes_text"]),
+        language: Union[LanguageCode, None] = Query(default=None, **V1DataSearchDocs.params["language"]),
+        note_created_at_from: Union[None, TwitterTimestamp, str] = Query(
+            default=None, **V1DataSearchDocs.params["note_created_at_from"]
+        ),
+        note_created_at_to: Union[None, TwitterTimestamp, str] = Query(
+            default=None, **V1DataSearchDocs.params["note_created_at_to"]
+        ),
+        sort_field: Union[SearchSortField, None] = Query(default=None, **V1DataSearchDocs.params["sort_field"]),
+        sort_order: SortOrder = Query(default=SortOrder.DESC, **V1DataSearchDocs.params["sort_order"]),
+        offset: int = Query(default=0, ge=0, **V1DataSearchDocs.params["offset"]),
+        limit: int = Query(default=100, gt=0, le=1000, **V1DataSearchDocs.params["limit"]),
+        include_total: bool = Query(default=True, **V1DataSearchDocs.params["include_total"]),
+        note_search_mode: TextSearchMode = Query(
+            default=TextSearchMode.OR, **V1DataSearchDocs.params["note_search_mode"]
+        ),
+    ) -> SearchResponse:
+        # sort_field はエンゲージメント系を拒否（note_created_at のみ許可）
+        if sort_field is not None and sort_field != SearchSortField.NOTE_CREATED_AT:
+            raise HTTPException(status_code=422, detail="sort_field must be note_created_at for keyword search")
+
+        try:
+            if note_created_at_from is not None and isinstance(note_created_at_from, str):
+                note_created_at_from = ensure_twitter_timestamp(note_created_at_from)
+            if note_created_at_to is not None and isinstance(note_created_at_to, str):
+                note_created_at_to = ensure_twitter_timestamp(note_created_at_to)
+        except OverflowError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+        excludes = [note_excludes_text] if note_excludes_text else None
+
+        # OpenSearch 経路（未設定/失敗時は Postgres にフォールバック）
+        if semantic_search is not None:
+            try:
+                note_ids, total = semantic_search.keyword_search(
+                    includes=note_includes_text,
+                    search_mode=note_search_mode,
+                    excludes=excludes,
+                    language=language,
+                    created_at_from=int(note_created_at_from) if note_created_at_from is not None else None,
+                    created_at_to=int(note_created_at_to) if note_created_at_to is not None else None,
+                    sort_order=sort_order.value,
+                    offset=offset,
+                    limit=limit,
+                    track_total=include_total,
+                )
+                has_next = (offset + limit < total) if total is not None else (len(note_ids) > limit)
+                items = storage.hydrate_notes_with_posts(note_ids[:limit], sort_order=sort_order)
+                return _build_search_response(items, has_next, total, request, offset, limit)
+            except SemanticSearchUnavailableError:
+                get_logger().warning("keyword search fell back to postgres")
+
+        # フォールバック: Postgres LIKE
+        page = storage.search_notes_with_posts(
+            note_includes_texts=note_includes_text,
+            note_excludes_text=note_excludes_text,
+            language=language,
+            note_created_at_from=note_created_at_from,
+            note_created_at_to=note_created_at_to,
+            offset=offset,
+            limit=limit,
+            sort_field=sort_field,
+            sort_order=sort_order,
+            note_search_mode=note_search_mode,
+        )
+        total = None
+        if include_total:
+            total = storage.count_search_results(
+                note_includes_texts=note_includes_text,
+                note_excludes_text=note_excludes_text,
+                language=language,
+                note_created_at_from=note_created_at_from,
+                note_created_at_to=note_created_at_to,
+                note_search_mode=note_search_mode,
+            )
+        has_next = (offset + limit < total) if total is not None else page.has_next
+        return _build_search_response(page.items, has_next, total, request, offset, limit)
 
     @router.get(
         "/export/csv",
