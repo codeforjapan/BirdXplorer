@@ -224,6 +224,69 @@ class SemanticSearchService:
             results.append((note_id, float(hit["_score"])))
         return results[:limit]
 
+    def keyword_search(
+        self,
+        includes: List[str],
+        search_mode: TextSearchMode = TextSearchMode.OR,
+        excludes: Optional[List[str]] = None,
+        language: Optional[LanguageCode] = None,
+        created_at_from: Optional[int] = None,
+        created_at_to: Optional[int] = None,
+        sort_order: str = "desc",
+        offset: int = 0,
+        limit: int = 100,
+        track_total: bool = True,
+    ) -> Tuple[List[NoteId], Optional[int]]:
+        """OpenSearch のトークン一致で note_id を created_at, note_id 順に返す。"""
+        keyword_filter = _build_keyword_filter(includes, search_mode, excludes)
+        bool_body: Dict[str, Any] = dict(keyword_filter["bool"]) if keyword_filter else {}
+        filters: List[Dict[str, Any]] = list(bool_body.get("filter", []))
+        if language is not None:
+            filters.append({"term": {"language": str(language)}})
+        if created_at_from is not None or created_at_to is not None:
+            rng: Dict[str, int] = {}
+            if created_at_from is not None:
+                rng["gte"] = int(created_at_from)
+            if created_at_to is not None:
+                rng["lte"] = int(created_at_to)
+            filters.append({"range": {"created_at": rng}})
+        if filters:
+            bool_body["filter"] = filters
+
+        body: Dict[str, Any] = {
+            "size": limit + 1,
+            "from": offset,
+            "_source": False,
+            "track_total_hits": bool(track_total),
+            "query": {"bool": bool_body},
+            "sort": [{"created_at": {"order": sort_order}}, {"note_id": {"order": sort_order}}],
+        }
+
+        try:
+            response = self._run_with_retry(
+                lambda: self._opensearch.search(index=ALIAS_NAME, body=body),
+                "keyword search",
+            )
+        except Exception as e:  # noqa: BLE001
+            raise SemanticSearchUnavailableError(f"keyword search failed: {e}") from e
+
+        note_ids: List[NoteId] = []
+        for hit in response["hits"]["hits"]:
+            try:
+                note_ids.append(NoteId.from_str(hit["_id"]))
+            except ValidationError:
+                logger.warning(f"skipping invalid note id from search index: {hit['_id']}")
+                continue
+
+        total: Optional[int] = None
+        if track_total:
+            total_obj = response["hits"].get("total")
+            if isinstance(total_obj, dict):
+                total = int(total_obj.get("value", 0))
+            elif isinstance(total_obj, int):
+                total = int(total_obj)
+        return note_ids, total
+
 
 def gen_semantic_search_service(
     settings: Optional[SemanticSearchSettings] = None,

@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import List
+from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
 import pytest
@@ -122,3 +122,129 @@ def test_semantic_search_returns_503_when_not_configured(
         app = gen_app(settings=settings_for_test)
         no_service_client = TestClient(app)
     assert no_service_client.get("/api/v1/data/search/semantic?q=test").status_code == 503
+
+
+def test_keyword_search_builds_query_and_parses_hits(monkeypatch: pytest.MonkeyPatch) -> None:
+    from birdxplorer_api.semantic_search import SemanticSearchService
+    from birdxplorer_common.models import TextSearchMode
+
+    captured: Dict[str, Any] = {}
+
+    class FakeOS:
+        def search(self, index: str, body: Dict[str, Any]) -> Dict[str, Any]:
+            captured["index"] = index
+            captured["body"] = body
+            return {
+                "hits": {
+                    "total": {"value": 42, "relation": "eq"},
+                    "hits": [
+                        {"_id": "1234567890123456789"},
+                    ],
+                }
+            }
+
+    svc = SemanticSearchService.__new__(SemanticSearchService)
+    svc._opensearch = FakeOS()  # type: ignore[assignment]
+    # _run_with_retry をそのまま使う（operation を1回実行するだけ）
+    note_ids, total = svc.keyword_search(
+        includes=["ワクチン", "河川"],
+        search_mode=TextSearchMode.OR,
+        language=None,
+        created_at_from=1000,
+        created_at_to=2000,
+        sort_order="desc",
+        offset=0,
+        limit=20,
+        track_total=True,
+    )
+    body = captured["body"]
+    assert body["from"] == 0
+    assert body["size"] == 21  # limit + 1
+    assert body["track_total_hits"] is True
+    assert body["_source"] is False
+    assert body["sort"] == [{"created_at": {"order": "desc"}}, {"note_id": {"order": "desc"}}]
+    # OR → should + minimum_should_match
+    assert body["query"]["bool"]["should"]
+    assert body["query"]["bool"]["minimum_should_match"] == 1
+    # created_at range が filter に入る
+    assert {"range": {"created_at": {"gte": 1000, "lte": 2000}}} in body["query"]["bool"]["filter"]
+    assert total == 42
+    assert len(note_ids) == 1
+
+
+def test_keyword_search_no_total_when_track_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    from birdxplorer_api.semantic_search import SemanticSearchService
+
+    class FakeOS:
+        def search(self, index: str, body: Dict[str, Any]) -> Dict[str, Any]:
+            return {"hits": {"hits": []}}
+
+    svc = SemanticSearchService.__new__(SemanticSearchService)
+    svc._opensearch = FakeOS()  # type: ignore[assignment]
+    note_ids, total = svc.keyword_search(includes=["x"], track_total=False)
+    assert note_ids == []
+    assert total is None
+
+
+def test_keyword_search_and_mode_uses_must_not_should(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AND モードでは should ではなく must 句を使う。"""
+    from birdxplorer_api.semantic_search import SemanticSearchService
+    from birdxplorer_common.models import TextSearchMode
+
+    captured: Dict[str, Any] = {}
+
+    class FakeOS:
+        def search(self, index: str, body: Dict[str, Any]) -> Dict[str, Any]:
+            captured["body"] = body
+            return {"hits": {"hits": []}}
+
+    svc = SemanticSearchService.__new__(SemanticSearchService)
+    svc._opensearch = FakeOS()  # type: ignore[assignment]
+    svc.keyword_search(includes=["ワクチン", "河川"], search_mode=TextSearchMode.AND)
+
+    bool_body = captured["body"]["query"]["bool"]
+    assert "must" in bool_body
+    assert len(bool_body["must"]) == 2
+    assert "should" not in bool_body
+    assert "minimum_should_match" not in bool_body
+
+
+def test_keyword_search_excludes_builds_must_not(monkeypatch: pytest.MonkeyPatch) -> None:
+    """excludes は常に must_not 句になる。"""
+    from birdxplorer_api.semantic_search import SemanticSearchService
+
+    captured: Dict[str, Any] = {}
+
+    class FakeOS:
+        def search(self, index: str, body: Dict[str, Any]) -> Dict[str, Any]:
+            captured["body"] = body
+            return {"hits": {"hits": []}}
+
+    svc = SemanticSearchService.__new__(SemanticSearchService)
+    svc._opensearch = FakeOS()  # type: ignore[assignment]
+    svc.keyword_search(includes=["ワクチン"], excludes=["デマ"])
+
+    bool_body = captured["body"]["query"]["bool"]
+    assert bool_body["must_not"] == [
+        {"multi_match": {"query": "デマ", "fields": ["text.ja", "text.en"], "operator": "and"}}
+    ]
+
+
+def test_keyword_search_language_builds_term_filter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """language を渡すと term フィルタが filter 句に入る。"""
+    from birdxplorer_api.semantic_search import SemanticSearchService
+    from birdxplorer_common.models import LanguageCode
+
+    captured: Dict[str, Any] = {}
+
+    class FakeOS:
+        def search(self, index: str, body: Dict[str, Any]) -> Dict[str, Any]:
+            captured["body"] = body
+            return {"hits": {"hits": []}}
+
+    svc = SemanticSearchService.__new__(SemanticSearchService)
+    svc._opensearch = FakeOS()  # type: ignore[assignment]
+    svc.keyword_search(includes=["ワクチン"], language=LanguageCode.from_str("ja"))
+
+    bool_body = captured["body"]["query"]["bool"]
+    assert {"term": {"language": "ja"}} in bool_body["filter"]
