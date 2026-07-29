@@ -917,6 +917,9 @@ class Post(BaseModel):
     x_user_id: Annotated[UserId, PydanticField(description="Post を投稿したユーザーの ID。`xUser.userId` と同じ")]
     x_user: Annotated[XUser, PydanticField(description="Post を投稿したユーザーの情報")]
     text: Annotated[str, PydanticField(description="Post の本文")]
+    language: Annotated[
+        Optional[LanguageCode], PydanticField(default=None, description="Post 本文の言語 (ISO 639-1 or 'other')")
+    ]
     media_details: Annotated[
         MediaDetails, PydanticField(default_factory=lambda: [], description="Post に含まれるメディア情報のリスト")
     ]

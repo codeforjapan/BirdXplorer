@@ -200,6 +200,7 @@ class PostRecord(Base):
     user_id: Mapped[UserId] = mapped_column(ForeignKey("x_users.user_id"), nullable=False)
     user: Mapped[XUserRecord] = relationship(lazy="selectin")
     text: Mapped[SummaryString] = mapped_column(nullable=False)
+    language: Mapped[Optional[LanguageCode]] = mapped_column(nullable=True)
     media_details: Mapped[List[PostMediaAssociation]] = relationship()
     created_at: Mapped[TwitterTimestamp] = mapped_column(nullable=False)
     aggregated_at: Mapped[TwitterTimestamp] = mapped_column(nullable=True)
@@ -1315,6 +1316,7 @@ class Storage:
                 following_count=post_record.user.following_count,
             ),
             text=post_record.text,
+            language=post_record.language,
             media_details=media_details,
             created_at=created_at,
             aggregated_at=aggregated_at,
@@ -1478,6 +1480,7 @@ class Storage:
         end: Union[TwitterTimestamp, None] = None,
         search_text: Union[str, None] = None,
         search_url: Union[LongHttpUrl, None] = None,
+        language_filter: Optional[List[str]] = None,
         offset: Union[int, None] = None,
         limit: int = 100,
         with_media: bool = True,
@@ -1507,6 +1510,8 @@ class Storage:
                     .join(LinkRecord, LinkRecord.link_id == PostLinkAssociation.link_id)
                     .filter(LinkRecord.url == search_url)
                 )
+            if language_filter:
+                query = query.filter(PostRecord.language.in_(language_filter))
             if offset is not None:
                 query = query.offset(offset)
             query = query.limit(limit)
@@ -1522,6 +1527,7 @@ class Storage:
         end: Union[TwitterTimestamp, None] = None,
         search_text: Union[str, None] = None,
         search_url: Union[LongHttpUrl, None] = None,
+        language_filter: Optional[List[str]] = None,
     ) -> int:
         with Session(self.engine) as sess:
             query = sess.query(PostRecord)
@@ -1548,6 +1554,8 @@ class Storage:
                     .join(LinkRecord, LinkRecord.link_id == PostLinkAssociation.link_id)
                     .filter(LinkRecord.url == search_url)
                 )
+            if language_filter:
+                query = query.filter(PostRecord.language.in_(language_filter))
             return query.count()
 
     def _note_request_record_to_model(
