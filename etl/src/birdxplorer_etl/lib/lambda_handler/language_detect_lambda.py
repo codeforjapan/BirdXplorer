@@ -41,6 +41,9 @@ def lambda_handler(event, context):
         note_id = None
         summary = None
         existing_language = None
+        entity_type = "note"
+        post_id = None
+        text = None
 
         # SQSイベントの場合
         if "Records" in event:
@@ -55,6 +58,12 @@ def lambda_handler(event, context):
                     logger.info(f"Processing type: {processing_type}")
 
                     if processing_type == "language_detect":
+                        entity_type = message_body.get("entity_type", "note")
+                        if entity_type == "post":
+                            post_id = message_body.get("post_id")
+                            text = message_body.get("text")
+                            logger.info(f"Found language_detect message for post_id: {post_id}")
+                            break
                         note_id = message_body.get("note_id")
                         summary = message_body.get("summary")
                         existing_language = message_body.get("language")
@@ -72,6 +81,38 @@ def lambda_handler(event, context):
             note_id = event.get("note_id")
             summary = event.get("summary")
             logger.info(f"Direct invocation for note_id: {note_id}")
+
+        if entity_type == "post":
+            if not (post_id and text):
+                logger.info(f"[SKIP] Empty text or missing post_id for post {post_id}")
+                return {"statusCode": 200, "body": json.dumps({"skipped": True})}
+
+            fasttext_result = detect_language_fasttext(text)
+            if fasttext_result is not None:
+                logger.info(f"[FASTTEXT_HIT] post {post_id}: {fasttext_result} (skipped OpenAI)")
+                detected_language = fasttext_result
+            else:
+                ai_service = get_ai_service()
+                logger.info("[PROCESSING] Calling AI service for language detection...")
+                detected_language = call_ai_api_with_retry(
+                    ai_service.detect_language, text, max_retries=3, initial_delay=1.0
+                )
+
+            db_write_queue_url = os.getenv("DB_WRITE_QUEUE_URL")
+            if not db_write_queue_url:
+                raise Exception("DB_WRITE_QUEUE_URL not configured")
+            message_id = sqs_handler.send_message(
+                queue_url=db_write_queue_url,
+                message_body={
+                    "operation": "update_post_language",
+                    "post_id": post_id,
+                    "data": {"language": detected_language},
+                },
+            )
+            if not message_id:
+                raise Exception(f"Failed to send post language update for post {post_id}")
+            logger.info(f"[SQS_SUCCESS] Sent post language update to db-write queue, messageId={message_id}")
+            return {"statusCode": 200, "body": json.dumps({"post_id": post_id, "language": detected_language})}
 
         if note_id and summary:
             logger.info(f"[START] Detecting language for note: {note_id}")

@@ -1,7 +1,12 @@
 import json
 from unittest.mock import MagicMock, patch
 
-from birdxplorer_etl.lib.lambda_handler.db_writer_lambda import lambda_handler
+import pytest
+
+from birdxplorer_etl.lib.lambda_handler.db_writer_lambda import (
+    lambda_handler,
+    process_update_post_language,
+)
 
 
 def _make_post_data(
@@ -152,3 +157,44 @@ class TestMediaAndUrlCombined:
 
         # user UPSERT(1) + post UPSERT(1) + media bulk(1) + URL bulk(1) = 4
         assert mock_session.execute.call_count == 4
+
+
+class TestProcessUpdatePostLanguage:
+    """process_update_post_language が posts.language を更新することを検証"""
+
+    def test_process_update_post_language_executes_update(self) -> None:
+        mock_session = MagicMock()
+
+        process_update_post_language(mock_session, "1234567890", {"language": "ja"})
+
+        assert mock_session.execute.call_count == 1
+
+    def test_process_update_post_language_missing_language_raises(self) -> None:
+        mock_session = MagicMock()
+
+        with pytest.raises(ValueError):
+            process_update_post_language(mock_session, "1234567890", {})
+
+
+class TestUpdatePostLanguageDispatch:
+    """update_post_language 操作が note_id なしで拒否されないことを検証"""
+
+    @patch("birdxplorer_etl.lib.lambda_handler.db_writer_lambda.init_postgresql")
+    def test_update_post_language_not_rejected_without_note_id(self, mock_init_pg: MagicMock) -> None:
+        mock_session = MagicMock()
+        mock_init_pg.return_value = mock_session
+
+        event = {
+            "Records": [
+                {
+                    "messageId": "m1",
+                    "body": json.dumps(
+                        {"operation": "update_post_language", "post_id": "1234567890", "data": {"language": "en"}}
+                    ),
+                }
+            ]
+        }
+        result = lambda_handler(event, {})
+
+        assert result["batchItemFailures"] == []
+        assert mock_session.execute.call_count == 1

@@ -588,6 +588,7 @@ def gen_router(
         search_text: Union[None, str] = Query(default=None, **V1DataPostsDocs.params["search_text"]),
         search_url: Union[None, LongHttpUrl] = Query(default=None, **V1DataPostsDocs.params["search_url"]),
         media: bool = Query(default=True, **V1DataPostsDocs.params["media"]),
+        language: Union[LanguageCode, None] = Query(default=None, **V1DataPostsDocs.params["language"]),
     ) -> PostListResponse:
         try:
             if created_at_from is not None and isinstance(created_at_from, str):
@@ -596,6 +597,8 @@ def gen_router(
                 created_at_to = ensure_twitter_timestamp(created_at_to)
         except OverflowError as e:
             raise HTTPException(status_code=422, detail=str(e))
+
+        language_filter: Union[List[str], None] = [language] if language is not None else None
 
         posts = list(
             storage.get_posts(
@@ -609,6 +612,7 @@ def gen_router(
                 offset=offset,
                 limit=limit,
                 with_media=media,
+                language_filter=language_filter,
             )
         )
 
@@ -620,6 +624,7 @@ def gen_router(
             end=created_at_to,
             search_text=search_text,
             search_url=search_url,
+            language_filter=language_filter,
         )
 
         base_url = str(request.url).split("?")[0]

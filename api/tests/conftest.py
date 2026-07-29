@@ -282,6 +282,7 @@ def post_samples(
 新しいプロジェクトがついに公開されました！詳細はこちら👉
 
 https://t.co/xxxxxxxxxxx/ #プロジェクト #新発売 #Tech""",
+            language="ja",
             media_details=[],
             created_at=1152921600000,
             aggregated_at=1152921600000,
@@ -476,6 +477,7 @@ def mock_storage(
         offset: Union[int, None] = None,
         limit: Union[int, None] = None,
         with_media: bool = True,
+        language_filter: Union[List[str], None] = None,
     ) -> Generator[Post, None, None]:
         gen_count = 0
         actual_gen_count = 0
@@ -503,6 +505,8 @@ def mock_storage(
                 continue
             if search_url is not None and url_id not in [link.link_id for link in post.links]:
                 continue
+            if language_filter is not None and post.language not in language_filter:
+                continue
             gen_count += 1
             if offset is not None and gen_count <= offset:
                 continue
@@ -523,8 +527,15 @@ def mock_storage(
         end: Union[TwitterTimestamp, None] = None,
         search_text: Union[str, None] = None,
         search_url: Union[LongHttpUrl, None] = None,
+        language_filter: Union[List[str], None] = None,
     ) -> int:
-        return len(list(_get_posts(post_ids, note_ids, user_ids, start, end, search_text, search_url)))
+        return len(
+            list(
+                _get_posts(
+                    post_ids, note_ids, user_ids, start, end, search_text, search_url, language_filter=language_filter
+                )
+            )
+        )
 
     mock.get_number_of_posts.side_effect = _get_number_of_posts
 
