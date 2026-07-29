@@ -218,21 +218,6 @@ Post に紐づいた画像や動画などのメディア情報を取得するか
     },
 }
 
-V1DataPostsDocs = FastAPIEndpointDocs(
-    "Post のデータを取得するエンドポイント",
-    {
-        "post_id": v1_data_posts_post_id,
-        "note_id": v1_data_posts_note_id,
-        "created_at_from": v1_data_posts_created_at_from,
-        "created_at_to": v1_data_posts_created_at_to,
-        "offset": v1_data_posts_offset,
-        "limit": v1_data_posts_limit,
-        "search_text": v1_data_posts_search_text,
-        "search_url": v1_data_posts_search_url,
-        "media": v1_data_posts_media,
-    },
-)
-
 v1_data_notes_note_ids: FastAPIEndpointParamDocs = {
     "description": """
 データを取得する X のコミュニティノートの ID。
@@ -437,6 +422,22 @@ ISO 639-1 に準拠した 2 文字の言語コードを指定することで、�
         },
     },
 }
+
+V1DataPostsDocs = FastAPIEndpointDocs(
+    "Post のデータを取得するエンドポイント",
+    {
+        "post_id": v1_data_posts_post_id,
+        "note_id": v1_data_posts_note_id,
+        "created_at_from": v1_data_posts_created_at_from,
+        "created_at_to": v1_data_posts_created_at_to,
+        "offset": v1_data_posts_offset,
+        "limit": v1_data_posts_limit,
+        "search_text": v1_data_posts_search_text,
+        "search_url": v1_data_posts_search_url,
+        "media": v1_data_posts_media,
+        "language": v1_data_notes_language,
+    },
+)
 
 v1_data_notes_search_text: FastAPIEndpointParamDocs = {
     "description": """

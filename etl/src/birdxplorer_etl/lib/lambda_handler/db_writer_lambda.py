@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from birdxplorer_common.storage import (
     NoteTopicAssociation,
+    PostRecord,
     RowNoteRecord,
     RowPostEmbedURLRecord,
     RowPostMediaRecord,
@@ -61,6 +62,17 @@ def process_update_language(postgresql: Any, note_id: str, data: dict) -> None:
     logger.info(f"[DB_UPDATE] Updating language to '{language}' for note {note_id}")
     postgresql.execute(update(RowNoteRecord).where(RowNoteRecord.note_id == note_id).values(language=language))
     logger.info(f"[STAGED] Language update for note {note_id} staged for commit")
+
+
+def process_update_post_language(postgresql: Any, post_id: str, data: dict) -> None:
+    """post言語更新処理"""
+    language = data.get("language")
+    if not language:
+        raise ValueError(f"Missing language in data: {data}")
+
+    logger.info(f"[DB_UPDATE] Updating language to '{language}' for post {post_id}")
+    postgresql.execute(update(PostRecord).where(PostRecord.post_id == post_id).values(language=language))
+    logger.info(f"[STAGED] Language update for post {post_id} staged for commit")
 
 
 def process_update_topics(postgresql: Any, note_id: str, data: dict) -> None:
@@ -206,12 +218,18 @@ def lambda_handler(event: dict, context: Any) -> dict:
         "Records": [{
             "messageId": "xxx",
             "body": "{
-                \"operation\": \"insert_note\" | \"update_language\" | \"update_topics\" | \"save_post_data\",
-                \"note_id\": \"xxx\",  # insert_note, update_language, update_topicsの場合
-                \"data\": { ... }
+                \"operation\": \"insert_note\" | \"update_language\" | \"update_topics\"
+                              | \"save_post_data\" | \"update_post_language\",
+                \"note_id\": \"xxx\",  # insert_note, update_language, update_topicsの場合に必須
+                \"post_id\": \"xxx\",  # update_post_languageの場合に必須
+                \"data\": { ... }      # update_post_languageの場合は {"language": "xxx"}
             }"
         }]
     }
+
+    save_post_data と update_post_language は note_id を必要としない
+    （save_post_data は data 内に post_id を含む。update_post_language は
+    上記の通り post_id をトップレベルで受け取る）。
     """
     logger.info("=" * 80)
     logger.info("DB Writer Lambda started (batch mode)")
@@ -236,6 +254,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
 
                 operation = message_body.get("operation")
                 note_id = message_body.get("note_id")
+                post_id = message_body.get("post_id")
                 data = message_body.get("data", {})
 
                 if not operation:
@@ -243,8 +262,8 @@ def lambda_handler(event: dict, context: Any) -> dict:
                     batch_item_failures.append({"itemIdentifier": message_id})
                     continue
 
-                # save_post_data以外はnote_idが必須
-                if operation != "save_post_data" and not note_id:
+                # save_post_data と update_post_language 以外は note_id が必須
+                if operation not in ("save_post_data", "update_post_language") and not note_id:
                     logger.error(f"[ERROR] Missing note_id for operation {operation} in message {message_id}")
                     batch_item_failures.append({"itemIdentifier": message_id})
                     continue
@@ -258,6 +277,8 @@ def lambda_handler(event: dict, context: Any) -> dict:
                     process_update_topics(postgresql, note_id, data)
                 elif operation == "save_post_data":
                     process_save_post_data(postgresql, data)
+                elif operation == "update_post_language":
+                    process_update_post_language(postgresql, post_id, data)
                 else:
                     logger.error(f"[ERROR] Unknown operation: {operation} in message {message_id}")
                     batch_item_failures.append({"itemIdentifier": message_id})
