@@ -25,17 +25,27 @@ from birdxplorer_api.openapi_doc import (
     V1DataTopicsDocs,
     V1DataUserEnrollmentsDocs,
 )
-from birdxplorer_api.semantic_search import SemanticSearchService
+from birdxplorer_api.semantic_search import (
+    SemanticSearchService,
+    SemanticSearchUnavailableError,
+)
+from birdxplorer_common.logger import get_logger
 from birdxplorer_common.models import (
     BaseModel,
     LanguageCode,
     LongHttpUrl,
-    Note,
+)
+from birdxplorer_common.models import Note
+from birdxplorer_common.models import Note as NoteModel
+from birdxplorer_common.models import (
     NoteId,
     NoteRequest,
     PaginationMeta,
     ParticipantId,
-    Post,
+)
+from birdxplorer_common.models import Post
+from birdxplorer_common.models import Post as PostModel
+from birdxplorer_common.models import (
     PostId,
     SearchSortField,
     SortOrder,
@@ -418,6 +428,56 @@ def ensure_twitter_timestamp(t: Union[str, TwitterTimestamp]) -> TwitterTimestam
         return timestamp
     except OverflowError:
         raise OverflowError("Timestamp out of range")
+
+
+def _build_search_response(
+    items: List[Tuple[NoteModel, Optional[PostModel]]],
+    has_next: bool,
+    total: Optional[int],
+    request: Request,
+    offset: int,
+    limit: int,
+) -> SearchResponse:
+    results = []
+    for note, post in items:
+        results.append(
+            SearchedNote(
+                noteId=note.note_id,
+                noteAuthorParticipantId=note.note_author_participant_id,
+                language=note.language,
+                topics=note.topics,
+                postId=note.post_id,
+                summary=note.summary,
+                current_status=note.current_status,
+                created_at=note.created_at,
+                has_been_helpfuled=note.has_been_helpfuled,
+                rate_count=note.rate_count,
+                helpful_count=note.helpful_count,
+                not_helpful_count=note.not_helpful_count,
+                somewhat_helpful_count=note.somewhat_helpful_count,
+                current_status_history=[
+                    {"status": history.status, "date": history.date} for history in note.current_status_history
+                ],
+                post=post,
+            )
+        )
+
+    base_url = str(request.url).split("?")[0]
+    query_params = parse_query_string(request.url.query)
+
+    next_url = None
+    if has_next:
+        query_params["offset"] = [str(offset + limit)]
+        query_params["limit"] = [str(limit)]
+        next_url = f"{base_url}?{urlencode(query_params, doseq=True)}"
+
+    prev_url = None
+    if offset > 0:
+        query_params["offset"] = [str(max(offset - limit, 0))]
+        query_params["limit"] = [str(limit)]
+        prev_url = f"{base_url}?{urlencode(query_params, doseq=True)}"
+
+    return SearchResponse(data=results, meta=PaginationMeta(next=next_url, prev=prev_url, total=total))
 
 
 def gen_router(
@@ -824,30 +884,6 @@ def gen_router(
             post_search_mode=post_search_mode,
         )
 
-        results = []
-        for note, post in page.items:
-            results.append(
-                SearchedNote(
-                    noteId=note.note_id,
-                    noteAuthorParticipantId=note.note_author_participant_id,
-                    language=note.language,
-                    topics=note.topics,
-                    postId=note.post_id,
-                    summary=note.summary,
-                    current_status=note.current_status,
-                    created_at=note.created_at,
-                    has_been_helpfuled=note.has_been_helpfuled,
-                    rate_count=note.rate_count,
-                    helpful_count=note.helpful_count,
-                    not_helpful_count=note.not_helpful_count,
-                    somewhat_helpful_count=note.somewhat_helpful_count,
-                    current_status_history=[
-                        {"status": history.status, "date": history.date} for history in note.current_status_history
-                    ],
-                    post=post,
-                )
-            )
-
         # include_total=True のときはCOUNTクエリで総件数を取得（後方互換性のため）
         total_count = None
         if include_total:
@@ -872,28 +908,97 @@ def gen_router(
                 post_search_mode=post_search_mode,
             )
 
-        # ページネーションURL生成
-        base_url = str(request.url).split("?")[0]
-        raw_query = request.url.query
-        query_params = parse_query_string(raw_query)
-
-        next_url = None
         # include_total時はCOUNTベースで判定（従来互換）、それ以外はlimit+1ベース
         has_next = (offset + limit < total_count) if total_count is not None else page.has_next
-        if has_next:
-            next_offset = offset + limit
-            query_params["offset"] = [str(next_offset)]
-            query_params["limit"] = [str(limit)]
-            next_url = f"{base_url}?{urlencode(query_params, doseq=True)}"
+        return _build_search_response(page.items, has_next, total_count, request, offset, limit)
 
-        prev_url = None
-        if offset > 0:
-            prev_offset = max(offset - limit, 0)
-            query_params["offset"] = [str(prev_offset)]
-            query_params["limit"] = [str(limit)]
-            prev_url = f"{base_url}?{urlencode(query_params, doseq=True)}"
+    @router.get("/search/keyword", description="広域 note テキスト検索（OpenSearch）", response_model=SearchResponse)
+    def search_keyword(
+        request: Request,
+        note_includes_text: List[str] = Query(..., **V1DataSearchDocs.params["note_includes_text"]),
+        note_excludes_text: Union[None, str] = Query(default=None, **V1DataSearchDocs.params["note_excludes_text"]),
+        language: Union[LanguageCode, None] = Query(default=None, **V1DataSearchDocs.params["language"]),
+        note_created_at_from: Union[None, TwitterTimestamp, str] = Query(
+            default=None, **V1DataSearchDocs.params["note_created_at_from"]
+        ),
+        note_created_at_to: Union[None, TwitterTimestamp, str] = Query(
+            default=None, **V1DataSearchDocs.params["note_created_at_to"]
+        ),
+        sort_field: Union[SearchSortField, None] = Query(default=None, **V1DataSearchDocs.params["sort_field"]),
+        sort_order: SortOrder = Query(default=SortOrder.DESC, **V1DataSearchDocs.params["sort_order"]),
+        offset: int = Query(default=0, ge=0, **V1DataSearchDocs.params["offset"]),
+        limit: int = Query(default=100, gt=0, le=1000, **V1DataSearchDocs.params["limit"]),
+        include_total: bool = Query(default=True, **V1DataSearchDocs.params["include_total"]),
+        note_search_mode: TextSearchMode = Query(
+            default=TextSearchMode.OR, **V1DataSearchDocs.params["note_search_mode"]
+        ),
+    ) -> SearchResponse:
+        # sort_field はエンゲージメント系を拒否（note_created_at のみ許可）
+        if sort_field is not None and sort_field != SearchSortField.NOTE_CREATED_AT:
+            raise HTTPException(status_code=422, detail="sort_field must be note_created_at for keyword search")
 
-        return SearchResponse(data=results, meta=PaginationMeta(next=next_url, prev=prev_url, total=total_count))
+        # 空白のみ/空文字だけのキーワードは match_all 化してしまうため拒否する
+        if not any(t and t.strip() for t in note_includes_text):
+            raise HTTPException(status_code=422, detail="note_includes_text must contain at least one non-empty term")
+
+        try:
+            if note_created_at_from is not None and isinstance(note_created_at_from, str):
+                note_created_at_from = ensure_twitter_timestamp(note_created_at_from)
+            if note_created_at_to is not None and isinstance(note_created_at_to, str):
+                note_created_at_to = ensure_twitter_timestamp(note_created_at_to)
+        except OverflowError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+        excludes = [note_excludes_text] if note_excludes_text else None
+
+        # OpenSearch 経路（未設定/失敗時は Postgres にフォールバック）
+        if semantic_search is not None:
+            try:
+                note_ids, total = semantic_search.keyword_search(
+                    includes=note_includes_text,
+                    search_mode=note_search_mode,
+                    excludes=excludes,
+                    language=language,
+                    created_at_from=int(note_created_at_from) if note_created_at_from is not None else None,
+                    created_at_to=int(note_created_at_to) if note_created_at_to is not None else None,
+                    sort_order=sort_order.value,
+                    offset=offset,
+                    limit=limit,
+                    track_total=include_total,
+                )
+                has_next = (offset + limit < total) if total is not None else (len(note_ids) > limit)
+                items = storage.hydrate_notes_with_posts(note_ids[:limit], sort_order=sort_order)
+                return _build_search_response(items, has_next, total, request, offset, limit)
+            except SemanticSearchUnavailableError:
+                get_logger().warning("keyword search fell back to postgres")
+
+        # フォールバック: Postgres LIKE
+        # sort_field省略時もOpenSearch経路と同じcreated_at順になるよう明示的に指定する
+        # (Noneのままだとsearch_notes_with_postsは無ソート経路になり、ページネーションが不定順になる)
+        page = storage.search_notes_with_posts(
+            note_includes_texts=note_includes_text,
+            note_excludes_text=note_excludes_text,
+            language=language,
+            note_created_at_from=note_created_at_from,
+            note_created_at_to=note_created_at_to,
+            offset=offset,
+            limit=limit,
+            sort_field=sort_field if sort_field is not None else SearchSortField.NOTE_CREATED_AT,
+            sort_order=sort_order,
+            note_search_mode=note_search_mode,
+        )
+        total = None
+        if include_total:
+            total = storage.count_search_results(
+                note_includes_texts=note_includes_text,
+                note_excludes_text=note_excludes_text,
+                language=language,
+                note_created_at_from=note_created_at_from,
+                note_created_at_to=note_created_at_to,
+                note_search_mode=note_search_mode,
+            )
+        has_next = (offset + limit < total) if total is not None else page.has_next
+        return _build_search_response(page.items, has_next, total, request, offset, limit)
 
     @router.get(
         "/export/csv",

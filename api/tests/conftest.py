@@ -684,6 +684,16 @@ def mock_storage(
 
     mock.get_number_of_note_requests.side_effect = _get_number_of_note_requests
 
+    def _hydrate_notes_with_posts(
+        note_ids: List[NoteId],
+        sort_order: Any = None,
+    ) -> List[Any]:
+        # note_samples から該当 note を (NoteModel, None) で返す簡易実装
+        by_id = {n.note_id: n for n in note_samples}
+        return [(by_id[nid], None) for nid in note_ids if nid in by_id]
+
+    mock.hydrate_notes_with_posts.side_effect = _hydrate_notes_with_posts
+
     yield mock
 
 
@@ -762,6 +772,7 @@ def mock_semantic_search(note_samples: List[Note]) -> Generator[MagicMock, None,
     mock.embed_query.return_value = [0.1] * 3
     mock.knn_search.return_value = [(note_samples[0].note_id, 0.9), (note_samples[1].note_id, 0.8)]
     mock.get_note_embedding.return_value = [0.2] * 3
+    mock.keyword_search.return_value = ([note_samples[0].note_id, note_samples[1].note_id], 2)
     yield mock
 
 
