@@ -1,10 +1,24 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from birdxplorer_etl.lib.lambda_handler.post_transform_lambda import (
     lambda_handler,
     select_valid_link_url,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_lang_detect_queue_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """birdxplorer_etl.settings の load_dotenv() が etl/.env から実プロセスへ
+
+    LANG_DETECT_QUEUE_URL を注入してしまうため、既存テストの execute呼び出し回数の
+    前提（post-commitのlang-detect用SELECTが走らないこと）を守るためテスト側で
+    デフォルト未設定状態にリセットする。lang-detect enqueueを検証するテストは
+    自身でmonkeypatch.setenvして明示的に有効化する。
+    """
+    monkeypatch.delenv("LANG_DETECT_QUEUE_URL", raising=False)
 
 
 def _make_row_post(post_id: str = "post_001", author_id: str = "author_001") -> MagicMock:
@@ -69,6 +83,59 @@ def _make_sqs_event(post_id: str = "post_001", retry_count: int = 0) -> dict:
             }
         ]
     }
+
+
+def _transform_event(post_ids: list) -> dict:
+    """複数post_idぶんのtransform_postイベントを生成"""
+    return {
+        "Records": [
+            {
+                "messageId": f"msg-{post_id}",
+                "body": json.dumps(
+                    {
+                        "operation": "transform_post",
+                        "post_id": post_id,
+                        "retry_count": 0,
+                    }
+                ),
+            }
+            for post_id in post_ids
+        ]
+    }
+
+
+@pytest.fixture
+def pg_with_one_null_and_one_set_post():
+    """postA(language NULL)とpostB(language既存)を変換するモックセッション
+
+    process_post_transform を postA→postB の順で2回実行させ、
+    コミット後のlang-detect用SELECTはpostAのみを返す（language IS NULLフィルタを模擬）。
+    """
+    with patch("birdxplorer_etl.lib.lambda_handler.post_transform_lambda.init_postgresql") as mock_init_pg:
+        mock_session = MagicMock()
+        mock_init_pg.return_value = mock_session
+
+        row_post_a = _make_row_post(post_id="A", author_id="author_A")
+        row_post_a.text = "text of A"
+        row_user_a = _make_row_user(user_id="author_A")
+        row_post_b = _make_row_post(post_id="B", author_id="author_B")
+        row_post_b.text = "text of B"
+        row_user_b = _make_row_user(user_id="author_B")
+
+        mock_session.execute.return_value.scalar_one_or_none.side_effect = [
+            row_post_a,
+            row_user_a,
+            row_post_b,
+            row_user_b,
+        ]
+        mock_scalars = MagicMock()
+        mock_scalars.all.side_effect = [[], [], [], []]  # postAのmedia/url, postBのmedia/url（すべて空）
+        mock_session.execute.return_value.scalars.return_value = mock_scalars
+
+        # コミット後のlang-detect対象SELECT: languageがNULLのpostAのみ返る
+        mock_session.execute.return_value.all.return_value = [("A", "text of A")]
+
+        yield mock_session
 
 
 class TestMediaBulkInsert:
@@ -291,3 +358,27 @@ class TestInvalidUrlSkipped:
         assert result["batchItemFailures"] == []
         # 有効URLが1件あるので link insert + link assoc insert は実行される = 8 calls
         assert mock_session.execute.call_count == 8
+
+
+class TestLangDetectEnqueue:
+    """コミット後、language IS NULL のpostのみlang-detectキューに積まれることを検証"""
+
+    @patch("birdxplorer_etl.lib.lambda_handler.post_transform_lambda.SQSHandler")
+    def test_enqueues_lang_detect_only_for_null_language(
+        self, mock_sqs_cls: MagicMock, monkeypatch: pytest.MonkeyPatch, pg_with_one_null_and_one_set_post: MagicMock
+    ) -> None:
+        monkeypatch.setenv("LANG_DETECT_QUEUE_URL", "http://queue/lang-detect")
+        sqs = mock_sqs_cls.return_value
+
+        event = _transform_event(["A", "B"])
+        result = lambda_handler(event, {})
+
+        assert result["batchItemFailures"] == []
+        lang_msgs = [
+            c.kwargs["message_body"]
+            for c in sqs.send_message.call_args_list
+            if c.kwargs["message_body"].get("entity_type") == "post"
+        ]
+        assert [m["post_id"] for m in lang_msgs] == ["A"]
+        assert lang_msgs[0]["processing_type"] == "language_detect"
+        assert "text" in lang_msgs[0]

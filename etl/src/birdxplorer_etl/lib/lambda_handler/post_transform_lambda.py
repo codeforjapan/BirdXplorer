@@ -243,6 +243,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
     sqs_handler = SQSHandler()
     queue_url = os.environ.get("POST_TRANSFORM_QUEUE_URL")
     batch_item_failures: list[dict[str, str]] = []
+    processed_post_ids: list[str] = []
 
     try:
         if "Records" not in event:
@@ -275,6 +276,9 @@ def lambda_handler(event: dict, context: Any) -> dict:
                     # 再キュー済みなので正常終了扱い（コミット不要）
                     continue
 
+                if result["status"] == "success":
+                    processed_post_ids.append(post_id)
+
             except json.JSONDecodeError as e:
                 logger.error(f"[ERROR] Failed to parse message {message_id}: {e}")
                 batch_item_failures.append({"itemIdentifier": message_id})
@@ -288,6 +292,27 @@ def lambda_handler(event: dict, context: Any) -> dict:
             postgresql.commit()
             success_count = len(event["Records"]) - len(batch_item_failures)
             logger.info(f"[COMMIT] Batch committed successfully: {success_count} messages")
+
+            lang_detect_queue_url = os.environ.get("LANG_DETECT_QUEUE_URL")
+            if lang_detect_queue_url and processed_post_ids:
+                rows = postgresql.execute(
+                    select(PostRecord.post_id, PostRecord.text).where(
+                        PostRecord.post_id.in_(processed_post_ids),
+                        PostRecord.language.is_(None),
+                    )
+                ).all()
+                for row_post_id, row_text in rows:
+                    if not row_text:
+                        continue
+                    sqs_handler.send_message(
+                        queue_url=lang_detect_queue_url,
+                        message_body={
+                            "processing_type": "language_detect",
+                            "entity_type": "post",
+                            "post_id": row_post_id,
+                            "text": row_text,
+                        },
+                    )
         except Exception as e:
             logger.error(f"[ERROR] Batch commit failed: {str(e)}")
             logger.error(traceback.format_exc())
