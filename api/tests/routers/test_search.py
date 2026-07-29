@@ -6,7 +6,14 @@ from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 from polyfactory import Use
 
-from birdxplorer_common.models import Note, Post, Topic, TwitterTimestamp, XUser
+from birdxplorer_common.models import (
+    Note,
+    Post,
+    SearchSortField,
+    Topic,
+    TwitterTimestamp,
+    XUser,
+)
 from birdxplorer_common.storage import SearchResultPage
 
 
@@ -539,3 +546,53 @@ def test_search_keyword_falls_back_to_postgres_on_opensearch_error(
     res = client.get("/api/v1/data/search/keyword?note_includes_text=ワクチン&include_total=false")
     assert res.status_code == 200
     assert mock_storage.search_notes_with_posts.called  # Postgres 経路に落ちた
+
+
+def test_search_keyword_fallback_sorts_by_created_at_when_field_omitted(
+    client: TestClient, mock_semantic_search: MagicMock, mock_storage: MagicMock
+) -> None:
+    """OpenSearch障害時のPostgresフォールバックは、sort_field省略時もOpenSearch経路と同じ
+    created_at順になるよう明示的にNOTE_CREATED_ATを渡す（不定順によるページネーション破綻を防ぐ）。"""
+    from birdxplorer_api.semantic_search import SemanticSearchUnavailableError
+
+    mock_semantic_search.keyword_search.side_effect = SemanticSearchUnavailableError("boom")
+    mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[], has_next=False)
+
+    res = client.get("/api/v1/data/search/keyword?note_includes_text=ワクチン&include_total=false")
+    assert res.status_code == 200
+
+    call_kwargs = mock_storage.search_notes_with_posts.call_args.kwargs
+    assert call_kwargs["sort_field"] == SearchSortField.NOTE_CREATED_AT
+
+
+def test_search_keyword_empty_text_returns_422(client: TestClient) -> None:
+    """note_includes_text= (空文字) は match_all 化を防ぐため422にする。"""
+    res = client.get("/api/v1/data/search/keyword?note_includes_text=")
+    assert res.status_code == 422
+
+
+def test_search_keyword_blank_whitespace_text_returns_422(client: TestClient) -> None:
+    """空白のみのキーワードも同様に422にする。"""
+    res = client.get("/api/v1/data/search/keyword?note_includes_text=%20%20")
+    assert res.status_code == 422
+
+
+def test_search_keyword_sort_field_engagement_returns_422(client: TestClient) -> None:
+    """keyword検索はnote_created_at以外のsort_field(エンゲージメント系)を拒否する。"""
+    res = client.get("/api/v1/data/search/keyword?note_includes_text=test&sort_field=impression_count")
+    assert res.status_code == 422
+
+
+def test_search_keyword_has_next_via_limit_plus_one_sentinel(
+    client: TestClient, mock_semantic_search: MagicMock, mock_storage: MagicMock, note_samples: List[Note]
+) -> None:
+    """include_total=falseのとき、keyword_searchがlimit+1件のnote_idを返せばhas_next=Trueになる。"""
+    limit = 2
+    ids = [note_samples[0].note_id, note_samples[1].note_id, note_samples[2].note_id]  # limit+1件
+    mock_semantic_search.keyword_search.return_value = (ids, None)
+
+    res = client.get(f"/api/v1/data/search/keyword?note_includes_text=test&limit={limit}&include_total=false")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["meta"]["next"] is not None
+    assert len(body["data"]) == limit

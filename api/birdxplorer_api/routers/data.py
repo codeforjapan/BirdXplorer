@@ -937,6 +937,10 @@ def gen_router(
         if sort_field is not None and sort_field != SearchSortField.NOTE_CREATED_AT:
             raise HTTPException(status_code=422, detail="sort_field must be note_created_at for keyword search")
 
+        # 空白のみ/空文字だけのキーワードは match_all 化してしまうため拒否する
+        if not any(t and t.strip() for t in note_includes_text):
+            raise HTTPException(status_code=422, detail="note_includes_text must contain at least one non-empty term")
+
         try:
             if note_created_at_from is not None and isinstance(note_created_at_from, str):
                 note_created_at_from = ensure_twitter_timestamp(note_created_at_from)
@@ -969,6 +973,8 @@ def gen_router(
                 get_logger().warning("keyword search fell back to postgres")
 
         # フォールバック: Postgres LIKE
+        # sort_field省略時もOpenSearch経路と同じcreated_at順になるよう明示的に指定する
+        # (Noneのままだとsearch_notes_with_postsは無ソート経路になり、ページネーションが不定順になる)
         page = storage.search_notes_with_posts(
             note_includes_texts=note_includes_text,
             note_excludes_text=note_excludes_text,
@@ -977,7 +983,7 @@ def gen_router(
             note_created_at_to=note_created_at_to,
             offset=offset,
             limit=limit,
-            sort_field=sort_field,
+            sort_field=sort_field if sort_field is not None else SearchSortField.NOTE_CREATED_AT,
             sort_order=sort_order,
             note_search_mode=note_search_mode,
         )

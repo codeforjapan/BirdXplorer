@@ -184,3 +184,67 @@ def test_keyword_search_no_total_when_track_false(monkeypatch: pytest.MonkeyPatc
     note_ids, total = svc.keyword_search(includes=["x"], track_total=False)
     assert note_ids == []
     assert total is None
+
+
+def test_keyword_search_and_mode_uses_must_not_should(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AND モードでは should ではなく must 句を使う。"""
+    from birdxplorer_api.semantic_search import SemanticSearchService
+    from birdxplorer_common.models import TextSearchMode
+
+    captured: Dict[str, Any] = {}
+
+    class FakeOS:
+        def search(self, index: str, body: Dict[str, Any]) -> Dict[str, Any]:
+            captured["body"] = body
+            return {"hits": {"hits": []}}
+
+    svc = SemanticSearchService.__new__(SemanticSearchService)
+    svc._opensearch = FakeOS()  # type: ignore[assignment]
+    svc.keyword_search(includes=["ワクチン", "河川"], search_mode=TextSearchMode.AND)
+
+    bool_body = captured["body"]["query"]["bool"]
+    assert "must" in bool_body
+    assert len(bool_body["must"]) == 2
+    assert "should" not in bool_body
+    assert "minimum_should_match" not in bool_body
+
+
+def test_keyword_search_excludes_builds_must_not(monkeypatch: pytest.MonkeyPatch) -> None:
+    """excludes は常に must_not 句になる。"""
+    from birdxplorer_api.semantic_search import SemanticSearchService
+
+    captured: Dict[str, Any] = {}
+
+    class FakeOS:
+        def search(self, index: str, body: Dict[str, Any]) -> Dict[str, Any]:
+            captured["body"] = body
+            return {"hits": {"hits": []}}
+
+    svc = SemanticSearchService.__new__(SemanticSearchService)
+    svc._opensearch = FakeOS()  # type: ignore[assignment]
+    svc.keyword_search(includes=["ワクチン"], excludes=["デマ"])
+
+    bool_body = captured["body"]["query"]["bool"]
+    assert bool_body["must_not"] == [
+        {"multi_match": {"query": "デマ", "fields": ["text.ja", "text.en"], "operator": "and"}}
+    ]
+
+
+def test_keyword_search_language_builds_term_filter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """language を渡すと term フィルタが filter 句に入る。"""
+    from birdxplorer_api.semantic_search import SemanticSearchService
+    from birdxplorer_common.models import LanguageCode
+
+    captured: Dict[str, Any] = {}
+
+    class FakeOS:
+        def search(self, index: str, body: Dict[str, Any]) -> Dict[str, Any]:
+            captured["body"] = body
+            return {"hits": {"hits": []}}
+
+    svc = SemanticSearchService.__new__(SemanticSearchService)
+    svc._opensearch = FakeOS()  # type: ignore[assignment]
+    svc.keyword_search(includes=["ワクチン"], language=LanguageCode.from_str("ja"))
+
+    bool_body = captured["body"]["query"]["bool"]
+    assert {"term": {"language": "ja"}} in bool_body["filter"]
