@@ -9,6 +9,7 @@ from sqlalchemy.sql import text
 from birdxplorer_common.models import (
     LanguageCode,
     Note,
+    NoteId,
     Post,
     SearchSortField,
     SortOrder,
@@ -982,6 +983,49 @@ def test_deep_page_count_branch_end_to_end(
 # behavioral tests above (test_engagement_sort_with_post_desc_then_postless_last,
 # test_sort_nulls_last, etc.).
 # ---------------------------------------------------------------------------
+
+
+def test_hydrate_notes_with_posts_empty_input_returns_empty_list(
+    engine_for_test: Engine,
+    note_samples: List[Note],
+    post_samples: List[Post],
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """Empty note_ids input must short-circuit to an empty list without querying the DB."""
+    storage = Storage(engine=engine_for_test)
+    result = storage.hydrate_notes_with_posts([], sort_order=SortOrder.DESC)
+    assert result == []
+
+
+def test_hydrate_notes_with_posts_returns_requested_ids_ordered_desc(
+    engine_for_test: Engine,
+    note_samples: List[Note],
+    post_samples: List[Post],
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    """Hydrating a set of seeded note_ids returns them as (NoteModel, Optional[PostModel]) pairs,
+    ordered by created_at desc then note_id desc."""
+    storage = Storage(engine=engine_for_test)
+    # note_samples seeds notes with distinct created_at values (see conftest note_samples);
+    # use them all so we can assert full-set membership and ordering.
+    note_ids = [NoteId(note.note_id) for note in note_samples]
+
+    items = storage.hydrate_notes_with_posts(note_ids, sort_order=SortOrder.DESC)
+
+    got_ids = [note.note_id for note, _ in items]
+    assert set(got_ids) == {str(nid) for nid in note_ids}
+
+    keys = [(note.created_at, note.note_id) for note, _ in items]
+    assert keys == sorted(keys, reverse=True)
+
+    # Notes with a valid linked post_id must be hydrated with a PostModel
+    post_ids_with_posts = {post.post_id for post in post_samples}
+    posts_by_note_id = {note.note_id: post for note, post in items}
+    for note in note_samples:
+        if note.post_id in post_ids_with_posts:
+            assert posts_by_note_id[note.note_id] is not None
 
 
 def test_seg0_order_expr_has_no_nulls_last(
