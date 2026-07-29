@@ -17,4 +17,5 @@ def test_get_posts_filters_by_language(client: TestClient, post_samples: List[Po
 def test_get_posts_without_language_returns_all(client: TestClient, post_samples: List[Post]) -> None:
     resp = client.get("/api/v1/data/posts")
     assert resp.status_code == 200
-    assert resp.json()["meta"]["total"] >= 1
+    body = resp.json()
+    assert body["meta"]["total"] == len(post_samples)

@@ -288,36 +288,49 @@ def lambda_handler(event: dict, context: Any) -> dict:
                 batch_item_failures.append({"itemIdentifier": message_id})
 
         # バッチ全体を1回でコミット
+        commit_ok = False
         try:
             postgresql.commit()
+            commit_ok = True
             success_count = len(event["Records"]) - len(batch_item_failures)
             logger.info(f"[COMMIT] Batch committed successfully: {success_count} messages")
-
-            lang_detect_queue_url = os.environ.get("LANG_DETECT_QUEUE_URL")
-            if lang_detect_queue_url and processed_post_ids:
-                rows = postgresql.execute(
-                    select(PostRecord.post_id, PostRecord.text).where(
-                        PostRecord.post_id.in_(processed_post_ids),
-                        PostRecord.language.is_(None),
-                    )
-                ).all()
-                for row_post_id, row_text in rows:
-                    if not row_text:
-                        continue
-                    sqs_handler.send_message(
-                        queue_url=lang_detect_queue_url,
-                        message_body={
-                            "processing_type": "language_detect",
-                            "entity_type": "post",
-                            "post_id": row_post_id,
-                            "text": row_text,
-                        },
-                    )
         except Exception as e:
             logger.error(f"[ERROR] Batch commit failed: {str(e)}")
             logger.error(traceback.format_exc())
             postgresql.rollback()
             batch_item_failures = [{"itemIdentifier": r.get("messageId", "unknown")} for r in event["Records"]]
+
+        # コミット成功後のlang-detect enqueueは副次処理。ここでの失敗はコミット済み
+        # バッチの再ドライブを引き起こしてはならない（missing languageはbackfillで回復可能）。
+        if commit_ok:
+            try:
+                lang_detect_queue_url = os.environ.get("LANG_DETECT_QUEUE_URL")
+                if lang_detect_queue_url and processed_post_ids:
+                    rows = postgresql.execute(
+                        select(PostRecord.post_id, PostRecord.text).where(
+                            PostRecord.post_id.in_(processed_post_ids),
+                            PostRecord.language.is_(None),
+                        )
+                    ).all()
+                    for row_post_id, row_text in rows:
+                        if not row_text:
+                            continue
+                        message_id = sqs_handler.send_message(
+                            queue_url=lang_detect_queue_url,
+                            message_body={
+                                "processing_type": "language_detect",
+                                "entity_type": "post",
+                                "post_id": row_post_id,
+                                "text": row_text,
+                            },
+                        )
+                        if not message_id:
+                            logger.warning(
+                                f"[LANG_DETECT_ENQUEUE_FAIL] post {row_post_id} not enqueued; "
+                                "recoverable via backfill"
+                            )
+            except Exception as e:
+                logger.warning(f"[LANG_DETECT_ENQUEUE_FAIL] enqueue phase raised, skipping: {str(e)}")
 
         logger.info("=" * 80)
         logger.info(

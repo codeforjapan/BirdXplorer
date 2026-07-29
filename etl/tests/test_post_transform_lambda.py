@@ -382,3 +382,66 @@ class TestLangDetectEnqueue:
         assert [m["post_id"] for m in lang_msgs] == ["A"]
         assert lang_msgs[0]["processing_type"] == "language_detect"
         assert "text" in lang_msgs[0]
+
+
+class TestLangDetectEnqueueFailureDoesNotReDriveCommittedBatch:
+    """post-commit後のenqueue失敗は、既にコミット済みのバッチを再ドライブしないことを検証
+
+    enqueueはコミット成功後の副次処理であり、失敗してもpostsは既にコミット済み。
+    missing languageはbackfillスクリプトで回復可能なため、batch_item_failuresに
+    積んで全件再ドライブしてはならない。
+    """
+
+    @patch("birdxplorer_etl.lib.lambda_handler.post_transform_lambda.SQSHandler")
+    @patch("birdxplorer_etl.lib.lambda_handler.post_transform_lambda.init_postgresql")
+    def test_enqueue_exception_after_commit_does_not_fail_batch(
+        self, mock_init_pg: MagicMock, mock_sqs_cls: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LANG_DETECT_QUEUE_URL", "http://queue/lang-detect")
+        mock_session = MagicMock()
+        mock_init_pg.return_value = mock_session
+
+        row_post = _make_row_post(post_id="A", author_id="author_A")
+        row_user = _make_row_user(user_id="author_A")
+        mock_session.execute.return_value.scalar_one_or_none.side_effect = [row_post, row_user]
+        mock_scalars = MagicMock()
+        mock_scalars.all.side_effect = [[], []]
+        mock_session.execute.return_value.scalars.return_value = mock_scalars
+        mock_session.execute.return_value.all.return_value = [("A", "text of A")]
+
+        sqs = mock_sqs_cls.return_value
+        sqs.send_message.side_effect = Exception("boom")
+
+        event = _transform_event(["A"])
+        result = lambda_handler(event, {})
+
+        assert result["batchItemFailures"] == []
+        mock_session.commit.assert_called_once()
+        mock_session.rollback.assert_not_called()
+
+    @patch("birdxplorer_etl.lib.lambda_handler.post_transform_lambda.SQSHandler")
+    @patch("birdxplorer_etl.lib.lambda_handler.post_transform_lambda.init_postgresql")
+    def test_enqueue_returns_none_does_not_fail_batch(
+        self, mock_init_pg: MagicMock, mock_sqs_cls: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LANG_DETECT_QUEUE_URL", "http://queue/lang-detect")
+        mock_session = MagicMock()
+        mock_init_pg.return_value = mock_session
+
+        row_post = _make_row_post(post_id="A", author_id="author_A")
+        row_user = _make_row_user(user_id="author_A")
+        mock_session.execute.return_value.scalar_one_or_none.side_effect = [row_post, row_user]
+        mock_scalars = MagicMock()
+        mock_scalars.all.side_effect = [[], []]
+        mock_session.execute.return_value.scalars.return_value = mock_scalars
+        mock_session.execute.return_value.all.return_value = [("A", "text of A")]
+
+        sqs = mock_sqs_cls.return_value
+        sqs.send_message.return_value = None
+
+        event = _transform_event(["A"])
+        result = lambda_handler(event, {})
+
+        assert result["batchItemFailures"] == []
+        mock_session.commit.assert_called_once()
+        mock_session.rollback.assert_not_called()

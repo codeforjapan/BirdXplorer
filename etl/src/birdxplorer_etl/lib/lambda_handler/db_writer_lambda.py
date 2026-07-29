@@ -218,12 +218,18 @@ def lambda_handler(event: dict, context: Any) -> dict:
         "Records": [{
             "messageId": "xxx",
             "body": "{
-                \"operation\": \"insert_note\" | \"update_language\" | \"update_topics\" | \"save_post_data\",
-                \"note_id\": \"xxx\",  # insert_note, update_language, update_topicsの場合
-                \"data\": { ... }
+                \"operation\": \"insert_note\" | \"update_language\" | \"update_topics\"
+                              | \"save_post_data\" | \"update_post_language\",
+                \"note_id\": \"xxx\",  # insert_note, update_language, update_topicsの場合に必須
+                \"post_id\": \"xxx\",  # update_post_languageの場合に必須
+                \"data\": { ... }      # update_post_languageの場合は {"language": "xxx"}
             }"
         }]
     }
+
+    save_post_data と update_post_language は note_id を必要としない
+    （save_post_data は data 内に post_id を含む。update_post_language は
+    上記の通り post_id をトップレベルで受け取る）。
     """
     logger.info("=" * 80)
     logger.info("DB Writer Lambda started (batch mode)")
