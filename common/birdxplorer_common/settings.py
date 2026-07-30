@@ -19,6 +19,10 @@ class PostgresStorageSettings(BaseSettings):
     password: str
     port: int = 5432
     database: str = "postgres"
+    # 1 クエリの上限時間。ここを超えると PostgreSQL 側でクエリが打ち切られる。
+    # 応答を返したあともクエリが走り続けて CPU とコネクションを占有するのを防ぐ。
+    # 0 を指定すると無制限（PostgreSQL の既定の扱い）。
+    statement_timeout_ms: int = Field(default=30000, ge=0)
 
     @computed_field  # type: ignore[prop-decorator]
     @property

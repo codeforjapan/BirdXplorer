@@ -2337,6 +2337,21 @@ class Storage:
             sess.commit()
 
 
-def gen_storage(settings: GlobalSettings) -> Storage:
-    engine = create_engine(settings.storage_settings.sqlalchemy_database_url)
+def gen_storage(settings: GlobalSettings, statement_timeout_ms: Optional[int] = None) -> Storage:
+    """Storage を生成する。
+
+    statement_timeout_ms を省略すると設定値を使う。マイグレーションのように
+    時間のかかる処理では 0 を渡して打ち切りを無効にする。
+    """
+    timeout_ms = (
+        settings.storage_settings.statement_timeout_ms if statement_timeout_ms is None else statement_timeout_ms
+    )
+    if timeout_ms < 0:
+        # 負の値は PostgreSQL が接続時に弾く（FATAL: ... is outside the valid range）ので、
+        # 分かりやすい例外にして接続前に落とす。
+        raise ValueError(f"statement_timeout_ms must be 0 or greater, got {timeout_ms}")
+    engine = create_engine(
+        settings.storage_settings.sqlalchemy_database_url,
+        connect_args={"options": f"-c statement_timeout={timeout_ms}"},
+    )
     return Storage(engine=engine)

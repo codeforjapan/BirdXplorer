@@ -64,7 +64,8 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
-    storage = gen_storage(settings=bx_settings)
+    # マイグレーションは 1 文が長くなりうるので、クエリの打ち切りを無効にする
+    storage = gen_storage(settings=bx_settings, statement_timeout_ms=0)
     connectable = storage.engine
 
     with connectable.connect() as connection:
