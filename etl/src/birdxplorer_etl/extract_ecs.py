@@ -3,6 +3,7 @@ import io
 import json
 import logging
 import os
+import sys
 import time
 import zipfile
 from datetime import datetime, timedelta
@@ -23,6 +24,11 @@ from birdxplorer_common.storage import (
     RowNoteRequestRecord,
     RowNoteStatusRecord,
 )
+
+# batSignals の suggestions フィールドは JSON がノートリクエスト提案の蓄積で肥大化し、
+# csv デフォルト上限 (131072 バイト) を超える行がある。上限を上げないと
+# `_csv.Error: field larger than field limit` で読み取りが途中で落ちる（毎日発生していた）。
+csv.field_size_limit(sys.maxsize)
 
 # モジュールレベル SQS クライアント（再生成コスト排除）
 _sqs_client = None
@@ -1055,39 +1061,69 @@ def extract_note_requests(postgresql: Session):
     for days_ago in range(3):  # 今日、昨日、一昨日
         date = datetime.now() - timedelta(days=days_ago)
         dateString = date.strftime("%Y/%m/%d")
-        url = f"https://ton.twimg.com/birdwatch-public-data/{dateString}/batSignals/batSignals-00000.zip"
-        logging.info(f"Fetching note requests from: {url}")
-        res = requests.get(url)
-        if res.status_code == 404:
-            logging.info(f"No note requests data available for {dateString}, trying previous day")
-            continue
-        if res.status_code != 200:
-            logging.warning(f"Unexpected status code {res.status_code} for note requests, skipping day")
-            continue
-        with zipfile.ZipFile(io.BytesIO(res.content)) as zip_file:
-            tsv_filename = "batSignals-00000.tsv"
-            if tsv_filename not in zip_file.namelist():
-                logging.error(f"TSV file {tsv_filename} not found in the zip file.")
-                return
-            with zip_file.open(tsv_filename) as tsv_file:
-                tsv_data = tsv_file.read().decode("utf-8").splitlines()
-                reader = csv.DictReader(tsv_data, delimiter="\t")
-                reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
-                rows_by_id = {}
-                total = 0
-                for row in reader:
-                    parsed = parse_note_request_row(row)
-                    if parsed is None:
-                        continue
-                    rows_by_id[parsed["tweet_id"]] = parsed
-                    if len(rows_by_id) >= 10000:
-                        _flush_note_request_batch(postgresql, list(rows_by_id.values()))
-                        total += len(rows_by_id)
-                        rows_by_id = {}
-                _flush_note_request_batch(postgresql, list(rows_by_id.values()))
-                total += len(rows_by_id)
-        logging.info(f"[PHASE_COMPLETE] NoteRequests: {total} rows in {time.time() - phase_start:.1f}s")
-        return
+
+        # batSignals-00000.zip から順に404が返るまでダウンロード（notes/ratings と同じ連番方式）
+        file_index = 0
+        date_has_data = False
+        rows_by_id = {}
+        total = 0
+
+        while True:
+            url = (
+                f"https://ton.twimg.com/birdwatch-public-data/{dateString}/"
+                f"batSignals/batSignals-{file_index:05d}.zip"
+            )
+            logging.info(f"Fetching note requests from: {url}")
+            res = requests.get(url)
+
+            if res.status_code == 404:
+                if file_index == 0:
+                    logging.info(f"No note requests data available for {dateString}, trying previous day")
+                else:
+                    logging.info(
+                        f"Note requests file {file_index:05d} not found (404), "
+                        f"stopping note requests download for {dateString}"
+                    )
+                break
+
+            if res.status_code != 200:
+                logging.warning(
+                    f"Unexpected status code {res.status_code} for note requests file {file_index:05d}, skipping"
+                )
+                file_index += 1
+                continue
+
+            with zipfile.ZipFile(io.BytesIO(res.content)) as zip_file:
+                tsv_filename = f"batSignals-{file_index:05d}.tsv"
+                if tsv_filename not in zip_file.namelist():
+                    logging.error(f"TSV file {tsv_filename} not found in the zip file.")
+                    file_index += 1
+                    continue
+
+                date_has_data = True
+                with zip_file.open(tsv_filename) as tsv_file:
+                    tsv_data = tsv_file.read().decode("utf-8").splitlines()
+                    reader = csv.DictReader(tsv_data, delimiter="\t")
+                    reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
+                    for row in reader:
+                        parsed = parse_note_request_row(row)
+                        if parsed is None:
+                            continue
+                        rows_by_id[parsed["tweet_id"]] = parsed
+                        if len(rows_by_id) >= 10000:
+                            _flush_note_request_batch(postgresql, list(rows_by_id.values()))
+                            total += len(rows_by_id)
+                            rows_by_id = {}
+
+            file_index += 1
+
+        if date_has_data:
+            # 全ファイル処理後、残りをフラッシュ
+            _flush_note_request_batch(postgresql, list(rows_by_id.values()))
+            total += len(rows_by_id)
+            logging.info(f"[PHASE_COMPLETE] NoteRequests: {total} rows in {time.time() - phase_start:.1f}s")
+            return
+
     logging.warning("No note requests data found in the last 3 days")
 
 

@@ -92,10 +92,10 @@ TSV_HEADER = (
 )
 
 
-def _build_zip(tsv: str) -> bytes:
+def _build_zip(tsv: str, file_index: int = 0) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
-        zf.writestr("batSignals-00000.tsv", tsv)
+        zf.writestr(f"batSignals-{file_index:05d}.tsv", tsv)
     return buf.getvalue()
 
 
@@ -108,11 +108,14 @@ class TestExtractNoteRequests:
             + json.dumps([{"suggestion_id": 1, "suggestion": "test", "source_link": ""}])
             + "\n"
         )
-        mock_res = MagicMock(status_code=200, content=_build_zip(tsv))
+        # batSignals-00000 は 200、次のファイル (-00001) は 404 で打ち止め
+        res_200 = MagicMock(status_code=200, content=_build_zip(tsv))
+        res_404 = MagicMock(status_code=404)
         session = MagicMock()
-        with patch("birdxplorer_etl.extract_ecs.requests.get", return_value=mock_res):
+        with patch("birdxplorer_etl.extract_ecs.requests.get", side_effect=[res_200, res_404]) as get:
             with patch("birdxplorer_etl.extract_ecs._flush_note_request_batch") as flush:
                 extract_note_requests(session)
+        assert get.call_count == 2
         assert flush.call_count == 1
         batch = flush.call_args[0][1]
         assert len(batch) == 1
@@ -123,15 +126,53 @@ class TestExtractNoteRequests:
         assert batch[0]["source_links"] == ["https://x.com/i/status/1", "https://x.com/i/status/2"]
         assert batch[0]["suggestions"] == [{"suggestion_id": 1, "suggestion": "test", "source_link": ""}]
 
+    def test_downloads_multiple_files_until_404(self):
+        # notes/ratings と同様、batSignals-00000, -00001 ... と 404 まで連番でDLする
+        tsv0 = TSV_HEADER + "\n1212092628029698048\t-1\t-1\t-1\t-1\t\t[]\n"
+        tsv1 = TSV_HEADER + "\n1212092628029698049\t-1\t-1\t-1\t-1\t\t[]\n"
+        res0 = MagicMock(status_code=200, content=_build_zip(tsv0, file_index=0))
+        res1 = MagicMock(status_code=200, content=_build_zip(tsv1, file_index=1))
+        res_404 = MagicMock(status_code=404)
+        session = MagicMock()
+        with patch("birdxplorer_etl.extract_ecs.requests.get", side_effect=[res0, res1, res_404]) as get:
+            with patch("birdxplorer_etl.extract_ecs._flush_note_request_batch") as flush:
+                extract_note_requests(session)
+        # -00000, -00001, -00002(404) の 3 回 GET
+        assert get.call_count == 3
+        # 両ファイルの行が最終フラッシュにまとめて渡る
+        assert flush.call_count == 1
+        batch = flush.call_args[0][1]
+        tweet_ids = {r["tweet_id"] for r in batch}
+        assert tweet_ids == {"1212092628029698048", "1212092628029698049"}
+
+    def test_handles_field_larger_than_default_csv_limit(self):
+        # suggestions が Python の csv デフォルト上限 (131072 バイト) を超えても
+        # _csv.Error を出さずに処理できること（本番で毎日クラッシュしていた回帰の防止）
+        big_suggestions = json.dumps([{"suggestion_id": 1, "suggestion": "x" * 140000, "source_link": ""}])
+        assert len(big_suggestions) > 131072
+        tsv = TSV_HEADER + "\n1212092628029698048\t-1\t-1\t-1\t-1\t\t" + big_suggestions + "\n"
+        res_200 = MagicMock(status_code=200, content=_build_zip(tsv))
+        res_404 = MagicMock(status_code=404)
+        session = MagicMock()
+        with patch("birdxplorer_etl.extract_ecs.requests.get", side_effect=[res_200, res_404]):
+            with patch("birdxplorer_etl.extract_ecs._flush_note_request_batch") as flush:
+                extract_note_requests(session)  # _csv.Error が投げられないこと
+        assert flush.call_count == 1
+        batch = flush.call_args[0][1]
+        assert len(batch) == 1
+        assert batch[0]["tweet_id"] == "1212092628029698048"
+        assert len(batch[0]["suggestions"]) == 1
+
     def test_falls_back_to_previous_day_on_404(self):
         tsv = TSV_HEADER + "\n1212092628029698048\t-1\t-1\t-1\t-1\t\t[]\n"
         res_404 = MagicMock(status_code=404)
         res_200 = MagicMock(status_code=200, content=_build_zip(tsv))
         session = MagicMock()
-        with patch("birdxplorer_etl.extract_ecs.requests.get", side_effect=[res_404, res_200]) as get:
+        # 当日は -00000 が 404 → 前日にフォールバック → 前日 -00000 は 200、-00001 は 404
+        with patch("birdxplorer_etl.extract_ecs.requests.get", side_effect=[res_404, res_200, res_404]) as get:
             with patch("birdxplorer_etl.extract_ecs._flush_note_request_batch") as flush:
                 extract_note_requests(session)
-        assert get.call_count == 2
+        assert get.call_count == 3
         assert flush.call_count == 1
 
     def test_gives_up_after_3_days_of_404(self):
@@ -140,6 +181,7 @@ class TestExtractNoteRequests:
         with patch("birdxplorer_etl.extract_ecs.requests.get", return_value=res_404) as get:
             with patch("birdxplorer_etl.extract_ecs._flush_note_request_batch") as flush:
                 extract_note_requests(session)
+        # 3 日分それぞれ -00000 が 404 → 各日即打ち止め
         assert get.call_count == 3
         assert flush.call_count == 0
 
