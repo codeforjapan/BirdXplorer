@@ -791,15 +791,15 @@ v1_data_note_requests_limit: FastAPIEndpointParamDocs = {
 """,
 }
 
-v1_data_note_requests_language = FastAPIEndpointParamDocs(
-    description="紐づく Post の言語 (ISO 639-1 等) で絞り込む。指定すると Post 未取得のリクエストは除外される。",
-    openapi_examples={"ja": {"summary": "日本語", "value": "ja"}},
-)
+v1_data_note_requests_language: FastAPIEndpointParamDocs = {
+    "description": "紐づく Post の言語 (ISO 639-1 等) で絞り込む。指定すると Post 未取得のリクエストは除外される。",
+    "openapi_examples": {"ja": {"summary": "日本語", "value": "ja"}},
+}
 
-v1_data_note_requests_search_text = FastAPIEndpointParamDocs(
-    description="suggestion 本文または Post 本文への部分一致 (大文字小文字無視)。2 文字以上。",
-    openapi_examples={"scam": {"summary": "詐欺を含む", "value": "詐欺"}},
-)
+v1_data_note_requests_search_text: FastAPIEndpointParamDocs = {
+    "description": "suggestion 本文または Post 本文への部分一致 (大文字小文字無視)。2 文字以上。",
+    "openapi_examples": {"scam": {"summary": "詐欺を含む", "value": "詐欺"}},
+}
 
 V1DataNoteRequestsDocs = FastAPIEndpointDocs(
     "コミュニティノートのリクエスト (Note Requests) のデータを取得するエンドポイント",

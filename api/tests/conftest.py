@@ -685,8 +685,10 @@ def mock_storage(
             if language is not None and (r.post is None or r.post.language != language):
                 continue
             if search_text:
-                in_suggestion = any(search_text in (s.suggestion or "") for s in r.suggestions)
-                in_post = r.post is not None and search_text in r.post.text
+                # 実 storage は ILIKE（大文字小文字無視）なのでモックも case-insensitive に合わせる
+                needle = search_text.lower()
+                in_suggestion = any(needle in (s.suggestion or "").lower() for s in r.suggestions)
+                in_post = r.post is not None and needle in r.post.text.lower()
                 if not (in_suggestion or in_post):
                     continue
             filtered.append(r)

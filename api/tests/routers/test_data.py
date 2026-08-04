@@ -320,3 +320,18 @@ def test_note_requests_count_search_text_min_length(
 ) -> None:
     response = client.get("/api/v1/data/note-requests/count?search_text=a")
     assert response.status_code == 422
+
+
+def test_note_requests_get_search_text_blank_is_422(
+    client: TestClient, note_request_samples: List[NoteRequest]
+) -> None:
+    # min_length=2 は通るが空白のみは 422（strip で弾く分岐）
+    response = client.get("/api/v1/data/note-requests", params={"search_text": "  "})
+    assert response.status_code == 422
+
+
+def test_note_requests_count_search_text_blank_is_422(
+    client: TestClient, note_request_samples: List[NoteRequest]
+) -> None:
+    response = client.get("/api/v1/data/note-requests/count", params={"search_text": "  "})
+    assert response.status_code == 422
