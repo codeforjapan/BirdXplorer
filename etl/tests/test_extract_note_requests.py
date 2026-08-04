@@ -1,5 +1,6 @@
 import io
 import json
+import logging
 import sys
 import zipfile
 from unittest.mock import MagicMock, patch
@@ -162,6 +163,48 @@ class TestExtractNoteRequests:
         assert len(batch) == 1
         assert batch[0]["tweet_id"] == "1212092628029698048"
         assert len(batch[0]["suggestions"]) == 1
+
+    def test_skips_poison_row_and_logs_diagnostics(self, caplog):
+        # 1行の異常 (NULバイト -> _csv.Error) が phase 全体を止めず、
+        # 前後の正常行は取り込まれ、毒行は識別情報付きで WARN される
+        good0 = "1212092628029698048\t-1\t-1\t-1\t-1\t\t[]"
+        poison = "1212092628029698099\t-1\t-1\t-1\t-1\t\tbad\x00value"  # NUL で csv.Error
+        good1 = "1212092628029698050\t-1\t-1\t-1\t-1\t\t[]"
+        tsv = TSV_HEADER + "\n" + good0 + "\n" + poison + "\n" + good1 + "\n"
+        res_200 = MagicMock(status_code=200, content=_build_zip(tsv))
+        res_404 = MagicMock(status_code=404)
+        session = MagicMock()
+        with caplog.at_level(logging.WARNING):
+            with patch("birdxplorer_etl.extract_ecs.requests.get", side_effect=[res_200, res_404]):
+                with patch("birdxplorer_etl.extract_ecs._flush_note_request_batch") as flush:
+                    extract_note_requests(session)  # 毒行があっても例外を投げない
+        assert flush.call_count == 1
+        batch = flush.call_args[0][1]
+        tweet_ids = {r["tweet_id"] for r in batch}
+        assert tweet_ids == {"1212092628029698048", "1212092628029698050"}  # 良行は両方入る
+        # メトリクスフィルタ用トークン + 根本調査用の tweet_id が残る
+        assert "NOTE_REQUEST_ROW_SKIPPED" in caplog.text
+        assert "1212092628029698099" in caplog.text
+
+    def test_skips_broken_zip_file_and_falls_back(self, caplog):
+        # zip 破損ファイル (200) は 1 ファイルに閉じ込めて skip し、phase は落ちない
+        good = TSV_HEADER + "\n1212092628029698048\t-1\t-1\t-1\t-1\t\t[]\n"
+        broken = MagicMock(status_code=200, content=b"this is not a zip")
+        res_404 = MagicMock(status_code=404)
+        res_good = MagicMock(status_code=200, content=_build_zip(good))
+        session = MagicMock()
+        # 当日: -00000 壊れzip -> skip, -00001 404 -> データ無し -> 前日へ
+        # 前日: -00000 正常, -00001 404
+        with caplog.at_level(logging.ERROR):
+            with patch(
+                "birdxplorer_etl.extract_ecs.requests.get",
+                side_effect=[broken, res_404, res_good, res_404],
+            ) as get:
+                with patch("birdxplorer_etl.extract_ecs._flush_note_request_batch") as flush:
+                    extract_note_requests(session)
+        assert get.call_count == 4
+        assert flush.call_count == 1  # 前日の正常行のみ
+        assert "NOTE_REQUEST_FILE_SKIPPED" in caplog.text
 
     def test_falls_back_to_previous_day_on_404(self):
         tsv = TSV_HEADER + "\n1212092628029698048\t-1\t-1\t-1\t-1\t\t[]\n"

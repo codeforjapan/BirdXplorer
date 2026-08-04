@@ -1055,8 +1055,29 @@ def _flush_note_request_batch(postgresql: Session, batch: list):
     postgresql.commit()
 
 
+def _log_skipped_note_request_row(file_index: int, line_no: int, line: str, header: list[str], exc: Exception) -> None:
+    """毒行を skip する際、根本調査用の識別情報を WARN 出力する。
+
+    `NOTE_REQUEST_ROW_SKIPPED` トークンで CloudWatch メトリクスフィルタ/アラームに接続し、
+    tweet_id・例外種別・最長フィールド（肥大の疑いが濃い箇所）を残して原因追跡を可能にする。
+    """
+    fields = line.split("\t")
+    tweet_id = fields[0][:32] if fields else ""
+    max_idx = max(range(len(fields)), key=lambda i: len(fields[i])) if fields else -1
+    max_len = len(fields[max_idx]) if max_idx >= 0 else 0
+    field_name = header[max_idx] if 0 <= max_idx < len(header) else f"col{max_idx}"
+    logging.warning(
+        f"NOTE_REQUEST_ROW_SKIPPED file={file_index:05d} line={line_no} tweet_id={tweet_id} "
+        f"reason={type(exc).__name__}: {str(exc)[:200]} field={field_name} field_len={max_len}"
+    )
+
+
 def extract_note_requests(postgresql: Session):
-    """batSignals (Note Requests) の日次スナップショットを row_note_requests に UPSERT する。"""
+    """batSignals (Note Requests) の日次スナップショットを row_note_requests に UPSERT する。
+
+    1行/1ファイルの異常はそれぞれ skip して継続し、フェーズ全体を中断させない
+    （毒行1件で以降のツイートが取り込まれなくなる silent truncation を構造的に防ぐ）。
+    """
     phase_start = time.time()
     for days_ago in range(3):  # 今日、昨日、一昨日
         date = datetime.now() - timedelta(days=days_ago)
@@ -1067,6 +1088,7 @@ def extract_note_requests(postgresql: Session):
         date_has_data = False
         rows_by_id = {}
         total = 0
+        skipped = 0
 
         while True:
             url = (
@@ -1093,27 +1115,47 @@ def extract_note_requests(postgresql: Session):
                 file_index += 1
                 continue
 
-            with zipfile.ZipFile(io.BytesIO(res.content)) as zip_file:
-                tsv_filename = f"batSignals-{file_index:05d}.tsv"
-                if tsv_filename not in zip_file.namelist():
-                    logging.error(f"TSV file {tsv_filename} not found in the zip file.")
-                    file_index += 1
-                    continue
+            tsv_filename = f"batSignals-{file_index:05d}.tsv"
+            try:
+                with zipfile.ZipFile(io.BytesIO(res.content)) as zip_file:
+                    if tsv_filename not in zip_file.namelist():
+                        logging.error(f"TSV file {tsv_filename} not found in the zip file.")
+                        file_index += 1
+                        continue
+                    with zip_file.open(tsv_filename) as tsv_file:
+                        tsv_data = tsv_file.read().decode("utf-8").splitlines()
+            except (zipfile.BadZipFile, UnicodeDecodeError) as exc:
+                # 壊れた zip / 不正 UTF-8 は 1 ファイルに閉じ込めて skip（他ファイル・他日は継続）
+                logging.error(
+                    f"NOTE_REQUEST_FILE_SKIPPED file={file_index:05d} date={dateString} "
+                    f"reason={type(exc).__name__}: {str(exc)[:200]}"
+                )
+                file_index += 1
+                continue
 
-                date_has_data = True
-                with zip_file.open(tsv_filename) as tsv_file:
-                    tsv_data = tsv_file.read().decode("utf-8").splitlines()
-                    reader = csv.DictReader(tsv_data, delimiter="\t")
-                    reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
-                    for row in reader:
-                        parsed = parse_note_request_row(row)
-                        if parsed is None:
-                            continue
-                        rows_by_id[parsed["tweet_id"]] = parsed
-                        if len(rows_by_id) >= 10000:
-                            _flush_note_request_batch(postgresql, list(rows_by_id.values()))
-                            total += len(rows_by_id)
-                            rows_by_id = {}
+            if not tsv_data:
+                logging.warning(f"Empty note requests file {file_index:05d} for {dateString}, skipping")
+                file_index += 1
+                continue
+
+            date_has_data = True
+            header = [stringcase.snakecase(field) for field in next(csv.reader([tsv_data[0]], delimiter="\t"))]
+            for line_no, line in enumerate(tsv_data[1:], start=2):
+                # 1行のパース失敗（csv.Error/JSON/値異常）は skip して継続。フラッシュ(DBエラー)は隔離しない。
+                try:
+                    values = next(csv.reader([line], delimiter="\t"))
+                    parsed = parse_note_request_row(dict(zip(header, values)))
+                except Exception as exc:
+                    skipped += 1
+                    _log_skipped_note_request_row(file_index, line_no, line, header, exc)
+                    continue
+                if parsed is None:
+                    continue
+                rows_by_id[parsed["tweet_id"]] = parsed
+                if len(rows_by_id) >= 10000:
+                    _flush_note_request_batch(postgresql, list(rows_by_id.values()))
+                    total += len(rows_by_id)
+                    rows_by_id = {}
 
             file_index += 1
 
@@ -1121,7 +1163,10 @@ def extract_note_requests(postgresql: Session):
             # 全ファイル処理後、残りをフラッシュ
             _flush_note_request_batch(postgresql, list(rows_by_id.values()))
             total += len(rows_by_id)
-            logging.info(f"[PHASE_COMPLETE] NoteRequests: {total} rows in {time.time() - phase_start:.1f}s")
+            logging.info(
+                f"[PHASE_COMPLETE] NoteRequests: {total} rows ({skipped} skipped) "
+                f"in {time.time() - phase_start:.1f}s"
+            )
             return
 
     logging.warning("No note requests data found in the last 3 days")
