@@ -299,3 +299,24 @@ def test_note_requests_count(client: TestClient, note_request_samples: List[Note
     response = client.get("/api/v1/data/note-requests/count")
     assert response.status_code == 200
     assert response.json() == {"total": 2}
+
+
+def test_note_requests_get_language_filter_passthrough(
+    client: TestClient, note_request_samples: List[NoteRequest]
+) -> None:
+    # 存在しない言語コードでは 0 件（フィルタが storage に渡っている）
+    response = client.get("/api/v1/data/note-requests?language=zz")
+    assert response.status_code == 200
+    assert response.json()["data"] == []
+
+
+def test_note_requests_get_search_text_min_length(client: TestClient, note_request_samples: List[NoteRequest]) -> None:
+    response = client.get("/api/v1/data/note-requests?search_text=a")
+    assert response.status_code == 422
+
+
+def test_note_requests_count_search_text_min_length(
+    client: TestClient, note_request_samples: List[NoteRequest]
+) -> None:
+    response = client.get("/api/v1/data/note-requests/count?search_text=a")
+    assert response.status_code == 422

@@ -661,6 +661,8 @@ def mock_storage(
         tweet_created_at_from: Union[TwitterTimestamp, None] = None,
         tweet_created_at_to: Union[TwitterTimestamp, None] = None,
         has_post: Union[bool, None] = None,
+        language: Union[LanguageCode, None] = None,
+        search_text: Union[str, None] = None,
         offset: Union[int, None] = None,
         limit: int = 100,
     ) -> Generator[NoteRequest, None, None]:
@@ -680,6 +682,13 @@ def mock_storage(
                 continue
             if has_post is False and r.post is not None:
                 continue
+            if language is not None and (r.post is None or r.post.language != language):
+                continue
+            if search_text:
+                in_suggestion = any(search_text in (s.suggestion or "") for s in r.suggestions)
+                in_post = r.post is not None and search_text in r.post.text
+                if not (in_suggestion or in_post):
+                    continue
             filtered.append(r)
         yield from filtered[offset or 0 : (offset or 0) + limit]
 
@@ -690,8 +699,16 @@ def mock_storage(
         tweet_created_at_from: Union[TwitterTimestamp, None] = None,
         tweet_created_at_to: Union[TwitterTimestamp, None] = None,
         has_post: Union[bool, None] = None,
+        language: Union[LanguageCode, None] = None,
+        search_text: Union[str, None] = None,
     ) -> int:
-        return len(list(_get_note_requests(tweet_ids, tweet_created_at_from, tweet_created_at_to, has_post, 0, 10**9)))
+        return len(
+            list(
+                _get_note_requests(
+                    tweet_ids, tweet_created_at_from, tweet_created_at_to, has_post, language, search_text, 0, 10**9
+                )
+            )
+        )
 
     mock.get_number_of_note_requests.side_effect = _get_number_of_note_requests
 
