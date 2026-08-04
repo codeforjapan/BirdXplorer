@@ -60,3 +60,29 @@ def test_gen_storage_keeps_database_url(mocker: MockerFixture) -> None:
     gen_storage(settings)
 
     assert create_engine.call_args.args[0] == settings.storage_settings.sqlalchemy_database_url
+
+
+def test_gen_storage_passes_csv_export_statement_timeout(mocker: MockerFixture) -> None:
+    # CSV エクスポート用の上限はトランザクション単位で使うので、接続ではなく
+    # Storage 側へ渡る。
+    env = dict(BASE_ENV, BX_STORAGE_SETTINGS__CSV_EXPORT_STATEMENT_TIMEOUT_MS="45000")
+    mocker.patch.dict(os.environ, env, clear=True)
+    mocker.patch("birdxplorer_common.storage.create_engine")
+
+    storage = gen_storage(GlobalSettings())
+
+    assert storage.csv_export_statement_timeout_ms == 45000
+
+
+def test_gen_storage_csv_export_timeout_does_not_change_connection_default(mocker: MockerFixture) -> None:
+    # CSV 用の値を上げても、接続全体（＝他の全クエリ）は既定 30 秒のまま。
+    env = dict(BASE_ENV, BX_STORAGE_SETTINGS__CSV_EXPORT_STATEMENT_TIMEOUT_MS="45000")
+    assert _connect_args(mocker, env) == {"options": "-c statement_timeout=30000"}
+
+
+def test_settings_rejects_negative_csv_export_statement_timeout(mocker: MockerFixture) -> None:
+    env = dict(BASE_ENV, BX_STORAGE_SETTINGS__CSV_EXPORT_STATEMENT_TIMEOUT_MS="-1")
+    mocker.patch.dict(os.environ, env, clear=True)
+
+    with pytest.raises(ValidationError):
+        GlobalSettings()

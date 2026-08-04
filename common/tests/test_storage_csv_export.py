@@ -3,13 +3,15 @@
 See specs/002-csv-export-api/ for the design.
 """
 
-from typing import Generator, List
+from typing import Any, Generator, List
 
 from pytest import fixture
-from sqlalchemy.engine import Engine
+from sqlalchemy import create_engine, event, text
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session
 
 from birdxplorer_common.models import NoteId, TextSearchMode, TwitterTimestamp
+from birdxplorer_common.settings import GlobalSettings
 from birdxplorer_common.storage import (
     NoteRecord,
     PostRecord,
@@ -472,3 +474,155 @@ def test_and_search_single_keyword_matches_same_as_or(
         search_mode=TextSearchMode.AND,
     )
     assert {r.note.note_id for r in rows_or} == {r.note.note_id for r in rows_and}
+
+
+# --- statement_timeout の差し替え --------------------------------------------
+#
+# CSV エクスポートは前方ワイルドカードの LIKE + JOIN でインデックスが効かず、
+# 接続全体の既定 statement_timeout を超えうる。そこでこの経路のトランザクション
+# でだけ上限を差し替えている。確かめたいのは次の 2 点:
+#   1. 差し替えが本当に PostgreSQL 側へ効いた状態で本体の SELECT が走ること
+#   2. その値がトランザクションの外（＝プールへ返したコネクション）へ漏れないこと
+
+
+@fixture
+def engine_with_connection_timeout(
+    settings_for_test: GlobalSettings, engine_for_test: Engine
+) -> Generator[Engine, None, None]:
+    """接続側に見分けのつく statement_timeout（7 秒）を持たせた engine。
+
+    テスト DB の既定は 0 なので、接続側が 0 のままだと「0（無制限）へ差し替えた」と
+    「そもそも触っていない」を区別できない。本番の gen_storage も接続側に有限値
+    （既定 30 秒）を入れるので、この方が実際の構成にも近い。
+    """
+    engine = create_engine(
+        settings_for_test.storage_settings.sqlalchemy_database_url,
+        connect_args={"options": "-c statement_timeout=7000"},
+    )
+    yield engine
+    engine.dispose()
+
+
+def _current_statement_timeout(engine: Engine) -> str:
+    """新しいセッションから見える statement_timeout を返す。"""
+    with Session(engine) as sess:
+        value = sess.execute(text("SHOW statement_timeout")).scalar()
+    return "" if value is None else str(value)
+
+
+def _statement_timeout_during_csv_query(engine: Engine, storage: Storage) -> List[str]:
+    """CSV エクスポートが撃つ各クエリの直前に見えている statement_timeout を集めて返す。
+
+    この経路は本体の SELECT だけでなく、リレーションの eager load（note_topic /
+    post_link / x_users）も同じトランザクションで撃つ。差し替えはそれら全部に
+    効いていなければ意味がないので、set_config 自身を除いた全クエリを見る。
+
+    before_cursor_execute の中で、同じ DBAPI コネクションから生カーソルを開いて
+    SHOW を撃つ。SQLAlchemy を経由しないのでイベントが再入せず、かつ同一
+    トランザクション内なので SET LOCAL 相当の値がそのまま見える。
+    """
+    observed: List[str] = []
+
+    def _on_before_cursor_execute(
+        conn: Connection,
+        cursor: Any,
+        statement: str,
+        parameters: Any,
+        context: Any,
+        executemany: bool,
+    ) -> None:
+        # 差し替え自身は対象外。残り（本体 SELECT と eager load）を全部見る。
+        if "set_config" in statement:
+            return
+        raw_cursor = conn.connection.cursor()
+        try:
+            raw_cursor.execute("SHOW statement_timeout")
+            row = raw_cursor.fetchone()
+            observed.append("" if row is None else str(row[0]))
+        finally:
+            raw_cursor.close()
+
+    event.listen(engine, "before_cursor_execute", _on_before_cursor_execute)
+    try:
+        storage.search_notes_with_posts_for_csv(
+            keywords=["医療"],
+            note_created_at_from=_ts(1700000000000),
+            note_created_at_to=_ts(1700001000000),
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", _on_before_cursor_execute)
+    return observed
+
+
+def test_csv_export_applies_its_own_statement_timeout(
+    engine_with_connection_timeout: Engine,
+    csv_notes: List[NoteRecord],
+    csv_row_note_status: List[RowNoteStatusRecord],
+) -> None:
+    # 接続側は 7 秒。CSV の経路だけ 45 秒へ差し替わる。
+    engine = engine_with_connection_timeout
+    assert _current_statement_timeout(engine) == "7s"
+    storage = Storage(engine=engine, csv_export_statement_timeout_ms=45000)
+    observed = _statement_timeout_during_csv_query(engine, storage)
+    assert observed and set(observed) == {"45s"}
+
+
+def test_csv_export_statement_timeout_is_transaction_local(
+    engine_with_connection_timeout: Engine,
+    csv_notes: List[NoteRecord],
+    csv_row_note_status: List[RowNoteStatusRecord],
+) -> None:
+    # プールへ返したコネクションを次に掴んだ処理へ 45 秒が漏れないこと。
+    # （SET LOCAL 相当かどうかの判定は
+    #  test_csv_export_statement_timeout_does_not_survive_commit の担当）
+    engine = engine_with_connection_timeout
+    before = _current_statement_timeout(engine)
+    storage = Storage(engine=engine, csv_export_statement_timeout_ms=45000)
+    storage.search_notes_with_posts_for_csv(
+        keywords=["医療"],
+        note_created_at_from=_ts(1700000000000),
+        note_created_at_to=_ts(1700001000000),
+    )
+    assert _current_statement_timeout(engine) == before == "7s"
+
+
+def test_csv_export_leaves_statement_timeout_alone_when_unset(
+    engine_with_connection_timeout: Engine,
+    csv_notes: List[NoteRecord],
+    csv_row_note_status: List[RowNoteStatusRecord],
+) -> None:
+    # 未指定なら接続の値（7 秒）をそのまま使う＝差し替えの SQL を撃たない。
+    engine = engine_with_connection_timeout
+    storage = Storage(engine=engine)
+    observed = _statement_timeout_during_csv_query(engine, storage)
+    assert observed and set(observed) == {"7s"}
+
+
+def test_csv_export_statement_timeout_can_be_disabled(
+    engine_with_connection_timeout: Engine,
+    csv_notes: List[NoteRecord],
+    csv_row_note_status: List[RowNoteStatusRecord],
+) -> None:
+    # 0 は「無制限へ差し替える」。未指定（None = 接続の 7 秒のまま）とは意味が違う。
+    engine = engine_with_connection_timeout
+    storage = Storage(engine=engine, csv_export_statement_timeout_ms=0)
+    observed = _statement_timeout_during_csv_query(engine, storage)
+    assert observed and set(observed) == {"0"}
+
+
+def test_csv_export_statement_timeout_does_not_survive_commit(
+    engine_with_connection_timeout: Engine,
+) -> None:
+    # トランザクション単位かどうかは「コミット境界」でしか判定できない。
+    # PostgreSQL では素の SET もトランザクション内ならロールバックで巻き戻るため、
+    # ロールバックしかしない経路を見ても SET LOCAL 相当かは区別できない。
+    # SET LOCAL はコミットでも失効し、素の SET はコミット後セッションに残る。
+    # 差し替えは Storage 内部の一手なので、ここだけ内部メソッドを直接呼んでいる。
+    engine = engine_with_connection_timeout
+    baseline = _current_statement_timeout(engine)
+    storage = Storage(engine=engine, csv_export_statement_timeout_ms=45000)
+    with Session(engine) as sess:
+        storage._apply_csv_export_statement_timeout(sess)
+        assert sess.execute(text("SHOW statement_timeout")).scalar() == "45s"
+        sess.commit()
+        assert sess.execute(text("SHOW statement_timeout")).scalar() == baseline

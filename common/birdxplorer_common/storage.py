@@ -400,12 +400,17 @@ class CsvExportRow(NamedTuple):
 
 
 class Storage:
-    def __init__(self, engine: Engine) -> None:
+    def __init__(self, engine: Engine, csv_export_statement_timeout_ms: Optional[int] = None) -> None:
         self._engine = engine
+        self._csv_export_statement_timeout_ms = csv_export_statement_timeout_ms
 
     @property
     def engine(self) -> Engine:
         return self._engine
+
+    @property
+    def csv_export_statement_timeout_ms(self) -> Optional[int]:
+        return self._csv_export_statement_timeout_ms
 
     @classmethod
     def _parse_status_history(cls, status_history_json: str) -> List[NoteStatusHistory]:
@@ -2234,6 +2239,27 @@ class Storage:
 
             return query.scalar() or 0
 
+    def _apply_csv_export_statement_timeout(self, sess: Session) -> None:
+        """CSV エクスポートのトランザクションだけ statement_timeout を差し替える。
+
+        `set_config(..., is_local => true)` は `SET LOCAL` と同じ意味で、
+        **そのトランザクションの間だけ**有効。コミット / ロールバックで元に戻るので、
+        コネクションプールへ返したあと別のリクエストが同じコネクションを掴んでも
+        設定は残らない（`SET` を使うと残ってしまう）。
+
+        `SET` 文はバインド変数を取れないため、値を SQL に埋め込まずに渡せる
+        `set_config()` を使っている。
+
+        なお engine を AUTOCOMMIT で作ると 1 文ごとにトランザクションが閉じるため、
+        この差し替えは本体の SELECT へ届かない。`gen_storage` はそうしていない。
+        """
+        if self._csv_export_statement_timeout_ms is None:
+            return
+        sess.execute(
+            text("SELECT set_config('statement_timeout', :timeout_ms, true)"),
+            {"timeout_ms": str(self._csv_export_statement_timeout_ms)},
+        )
+
     def search_notes_with_posts_for_csv(
         self,
         keywords: List[str],
@@ -2263,6 +2289,7 @@ class Storage:
         )
 
         with Session(self.engine) as sess:
+            self._apply_csv_export_statement_timeout(sess)
             query = (
                 sess.query(NoteRecord, PostRecord, RowNoteStatusRecord)
                 .join(PostRecord, NoteRecord.post_id == PostRecord.post_id)
@@ -2354,4 +2381,7 @@ def gen_storage(settings: GlobalSettings, statement_timeout_ms: Optional[int] = 
         settings.storage_settings.sqlalchemy_database_url,
         connect_args={"options": f"-c statement_timeout={timeout_ms}"},
     )
-    return Storage(engine=engine)
+    return Storage(
+        engine=engine,
+        csv_export_statement_timeout_ms=settings.storage_settings.csv_export_statement_timeout_ms,
+    )
