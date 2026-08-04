@@ -654,6 +654,10 @@ def gen_router(
             default=None, **V1DataNoteRequestsDocs.params["tweet_created_at_to"]
         ),
         has_post: Union[bool, None] = Query(default=None, **V1DataNoteRequestsDocs.params["has_post"]),
+        language: Union[LanguageCode, None] = Query(default=None, **V1DataNoteRequestsDocs.params["language"]),
+        search_text: Union[str, None] = Query(
+            default=None, min_length=2, **V1DataNoteRequestsDocs.params["search_text"]
+        ),
         offset: int = Query(default=0, ge=0, **V1DataNoteRequestsDocs.params["offset"]),
         limit: int = Query(default=100, gt=0, le=1000, **V1DataNoteRequestsDocs.params["limit"]),
     ) -> NoteRequestListResponse:
@@ -664,6 +668,8 @@ def gen_router(
                 tweet_created_at_to = ensure_twitter_timestamp(tweet_created_at_to)
         except OverflowError as e:
             raise HTTPException(status_code=422, detail=str(e))
+        if search_text is not None and search_text.strip() == "":
+            raise HTTPException(status_code=422, detail="search_text must not be blank")
 
         note_requests = list(
             storage.get_note_requests(
@@ -671,6 +677,8 @@ def gen_router(
                 tweet_created_at_from=tweet_created_at_from,
                 tweet_created_at_to=tweet_created_at_to,
                 has_post=has_post,
+                language=language,
+                search_text=search_text,
                 offset=offset,
                 limit=limit,
             )
@@ -680,6 +688,8 @@ def gen_router(
             tweet_created_at_from=tweet_created_at_from,
             tweet_created_at_to=tweet_created_at_to,
             has_post=has_post,
+            language=language,
+            search_text=search_text,
         )
 
         base_url = str(request.url).split("?")[0]
@@ -710,6 +720,10 @@ def gen_router(
             default=None, **V1DataNoteRequestsCountDocs.params["tweet_created_at_to"]
         ),
         has_post: Union[bool, None] = Query(default=None, **V1DataNoteRequestsCountDocs.params["has_post"]),
+        language: Union[LanguageCode, None] = Query(default=None, **V1DataNoteRequestsCountDocs.params["language"]),
+        search_text: Union[str, None] = Query(
+            default=None, min_length=2, **V1DataNoteRequestsCountDocs.params["search_text"]
+        ),
     ) -> SearchCountResponse:
         try:
             if tweet_created_at_from is not None and isinstance(tweet_created_at_from, str):
@@ -718,12 +732,16 @@ def gen_router(
                 tweet_created_at_to = ensure_twitter_timestamp(tweet_created_at_to)
         except OverflowError as e:
             raise HTTPException(status_code=422, detail=str(e))
+        if search_text is not None and search_text.strip() == "":
+            raise HTTPException(status_code=422, detail="search_text must not be blank")
 
         total_count = storage.get_number_of_note_requests(
             tweet_ids=tweet_ids,
             tweet_created_at_from=tweet_created_at_from,
             tweet_created_at_to=tweet_created_at_to,
             has_post=has_post,
+            language=language,
+            search_text=search_text,
         )
         return SearchCountResponse(total=total_count)
 
