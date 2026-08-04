@@ -239,3 +239,63 @@ def test_get_number_of_note_requests_language_and_search_text(
     assert storage.get_number_of_note_requests(language="ja") == 1
     assert storage.get_number_of_note_requests(search_text="送金") == 2
     assert storage.get_number_of_note_requests(language="ja", search_text="送金") == 1
+
+
+@pytest.fixture
+def note_request_null_suggestions_sample(
+    engine_for_test: Engine,
+    post_records_sample: List[PostRecord],  # x_users(1234567890123456781) を DB に投入する
+) -> List[RowNoteRequestRecord]:
+    with Session(engine_for_test) as sess:
+        sess.add(
+            PostRecord(
+                post_id="2234567890123456998",
+                user_id="1234567890123456781",
+                text="ここに検査キーワードを含む本文",
+                language="en",
+                created_at=1152921600000,
+                like_count=0,
+                repost_count=0,
+                impression_count=0,
+            )
+        )
+        records = [
+            # suggestions=NULL + Post あり（本番で多数派。search_text は post 本文で評価される）
+            RowNoteRequestRecord(
+                tweet_id="2234567890123456998",
+                note_request_feed_eligible_at_millis=None,
+                api_small_feed_eligible_at_millis=None,
+                api_large_feed_eligible_at_millis=None,
+                api_xl_feed_eligible_at_millis=None,
+                source_links=None,
+                suggestions=None,
+                tweet_created_at=1782870000003,
+                lookup_enqueued_at=None,
+            ),
+            # suggestions=NULL + Post なし（どこにもマッチしない）
+            RowNoteRequestRecord(
+                tweet_id="9990000000000000002",
+                note_request_feed_eligible_at_millis=None,
+                api_small_feed_eligible_at_millis=None,
+                api_large_feed_eligible_at_millis=None,
+                api_xl_feed_eligible_at_millis=None,
+                source_links=None,
+                suggestions=None,
+                tweet_created_at=1782870000004,
+                lookup_enqueued_at=None,
+            ),
+        ]
+        sess.add_all(records)
+        sess.commit()
+    return records
+
+
+def test_search_text_handles_null_suggestions(
+    engine_for_test: Engine, note_request_null_suggestions_sample: List[RowNoteRequestRecord]
+) -> None:
+    # 本番で多数を占める suggestions=NULL の行があっても jsonb_array_elements(NULL) で
+    # クエリが落ちず、Post 本文一致は正しく拾い、Post 無し NULL 行は拾わないこと（回帰ガード）。
+    storage = Storage(engine=engine_for_test)
+    got = [str(r.tweet_id) for r in storage.get_note_requests(search_text="検査キーワード")]
+    assert got == ["2234567890123456998"]
+    assert storage.get_number_of_note_requests(search_text="検査キーワード") == 1

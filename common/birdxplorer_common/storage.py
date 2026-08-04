@@ -1615,8 +1615,14 @@ class Storage:
             query = query.filter(PostRecord.language == language)
         if search_text:
             pattern = f"%{search_text}%"
-            # suggestions(JSONB 配列)の各要素の "suggestion" 値だけを対象にする（key/id/source_link を誤爆しない）
-            elem = func.jsonb_array_elements(RowNoteRequestRecord.suggestions).table_valued("value")
+            # suggestions は NULL や JSON スカラー(null 等)がありうる（未取得行は JSON null で保存される）。
+            # jsonb_array_elements は非 array 値でエラーになるため、array のときだけ展開し他は空配列に倒す。
+            suggestions_array = case(
+                (func.jsonb_typeof(RowNoteRequestRecord.suggestions) == "array", RowNoteRequestRecord.suggestions),
+                else_=text("'[]'::jsonb"),
+            )
+            # 各要素の "suggestion" 値だけを対象にする（key/id/source_link を誤爆しない）
+            elem = func.jsonb_array_elements(suggestions_array).table_valued("value")
             suggestion_match = (
                 select(1)
                 .select_from(elem)
