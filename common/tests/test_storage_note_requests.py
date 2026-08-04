@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from birdxplorer_common.models import Post, PostId
+from birdxplorer_common.models import LanguageCode, Post, PostId
 from birdxplorer_common.storage import PostRecord, RowNoteRequestRecord, Storage
 
 
@@ -198,7 +198,7 @@ def test_get_note_requests_language_filter(
 ) -> None:
     storage = Storage(engine=engine_for_test)
     # language=ja は ja Post が紐づく行のみ（Post 未取得行は language NULL で除外）
-    actual = [str(r.tweet_id) for r in storage.get_note_requests(language="ja")]
+    actual = [str(r.tweet_id) for r in storage.get_note_requests(language=LanguageCode("ja"))]
     assert actual == ["2234567890123456999"]
 
 
@@ -228,7 +228,7 @@ def test_get_note_requests_language_and_search_text_are_anded(
 ) -> None:
     storage = Storage(engine=engine_for_test)
     # 送金 に両方ヒットするが language=ja で Post ありの 999 のみ
-    got = [str(r.tweet_id) for r in storage.get_note_requests(language="ja", search_text="送金")]
+    got = [str(r.tweet_id) for r in storage.get_note_requests(language=LanguageCode("ja"), search_text="送金")]
     assert got == ["2234567890123456999"]
 
 
@@ -236,9 +236,9 @@ def test_get_number_of_note_requests_language_and_search_text(
     engine_for_test: Engine, note_request_search_sample: List[RowNoteRequestRecord]
 ) -> None:
     storage = Storage(engine=engine_for_test)
-    assert storage.get_number_of_note_requests(language="ja") == 1
+    assert storage.get_number_of_note_requests(language=LanguageCode("ja")) == 1
     assert storage.get_number_of_note_requests(search_text="送金") == 2
-    assert storage.get_number_of_note_requests(language="ja", search_text="送金") == 1
+    assert storage.get_number_of_note_requests(language=LanguageCode("ja"), search_text="送金") == 1
 
 
 @pytest.fixture
