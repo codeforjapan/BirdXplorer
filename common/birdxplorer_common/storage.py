@@ -1598,6 +1598,8 @@ class Storage:
         tweet_created_at_from: Union[TwitterTimestamp, None] = None,
         tweet_created_at_to: Union[TwitterTimestamp, None] = None,
         has_post: Union[bool, None] = None,
+        language: Union[LanguageCode, None] = None,
+        search_text: Union[str, None] = None,
     ) -> Any:
         if tweet_ids is not None:
             query = query.filter(RowNoteRequestRecord.tweet_id.in_(tweet_ids))
@@ -1609,6 +1611,19 @@ class Storage:
             query = query.filter(PostRecord.post_id.isnot(None))
         elif has_post is False:
             query = query.filter(PostRecord.post_id.is_(None))
+        if language is not None:
+            query = query.filter(PostRecord.language == language)
+        if search_text:
+            pattern = f"%{search_text}%"
+            # suggestions(JSONB 配列)の各要素の "suggestion" 値だけを対象にする（key/id/source_link を誤爆しない）
+            elem = func.jsonb_array_elements(RowNoteRequestRecord.suggestions).table_valued("value")
+            suggestion_match = (
+                select(1)
+                .select_from(elem)
+                .where(func.jsonb_extract_path_text(elem.c.value, "suggestion").ilike(pattern))
+                .exists()
+            )
+            query = query.filter(or_(suggestion_match, PostRecord.text.ilike(pattern)))
         return query
 
     def get_note_requests(
@@ -1617,6 +1632,8 @@ class Storage:
         tweet_created_at_from: Union[TwitterTimestamp, None] = None,
         tweet_created_at_to: Union[TwitterTimestamp, None] = None,
         has_post: Union[bool, None] = None,
+        language: Union[LanguageCode, None] = None,
+        search_text: Union[str, None] = None,
         offset: Union[int, None] = None,
         limit: int = 100,
     ) -> Generator[NoteRequestModel, None, None]:
@@ -1625,7 +1642,7 @@ class Storage:
                 PostRecord, RowNoteRequestRecord.tweet_id == PostRecord.post_id
             )
             query = self._apply_note_request_filters(
-                query, tweet_ids, tweet_created_at_from, tweet_created_at_to, has_post
+                query, tweet_ids, tweet_created_at_from, tweet_created_at_to, has_post, language, search_text
             )
             query = query.order_by(RowNoteRequestRecord.tweet_id)
             if offset is not None:
@@ -1640,14 +1657,17 @@ class Storage:
         tweet_created_at_from: Union[TwitterTimestamp, None] = None,
         tweet_created_at_to: Union[TwitterTimestamp, None] = None,
         has_post: Union[bool, None] = None,
+        language: Union[LanguageCode, None] = None,
+        search_text: Union[str, None] = None,
     ) -> int:
         with Session(self.engine) as sess:
             query = sess.query(RowNoteRequestRecord)
-            if has_post is not None:
-                # posts への join は has_post フィルタでのみ必要 (post_id は PK 同士なので行数は変わらない)
+            if has_post is not None or language is not None or search_text:
+                # posts への join は has_post / language / search_text のいずれかで必要
+                # (post_id は PK 同士なので行数は変わらない)
                 query = query.outerjoin(PostRecord, RowNoteRequestRecord.tweet_id == PostRecord.post_id)
             query = self._apply_note_request_filters(
-                query, tweet_ids, tweet_created_at_from, tweet_created_at_to, has_post
+                query, tweet_ids, tweet_created_at_from, tweet_created_at_to, has_post, language, search_text
             )
             return int(query.count())
 
