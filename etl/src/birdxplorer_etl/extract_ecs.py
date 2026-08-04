@@ -1138,8 +1138,18 @@ def extract_note_requests(postgresql: Session):
                 file_index += 1
                 continue
 
+            # ヘッダ行のパースも 1 ファイルに閉じ込める（行の隔離と同じく phase 全体を止めない）
+            try:
+                header = [stringcase.snakecase(field) for field in next(csv.reader([tsv_data[0]], delimiter="\t"))]
+            except csv.Error as exc:
+                logging.error(
+                    f"NOTE_REQUEST_FILE_SKIPPED file={file_index:05d} date={dateString} "
+                    f"reason=header_{type(exc).__name__}: {str(exc)[:200]}"
+                )
+                file_index += 1
+                continue
+
             date_has_data = True
-            header = [stringcase.snakecase(field) for field in next(csv.reader([tsv_data[0]], delimiter="\t"))]
             for line_no, line in enumerate(tsv_data[1:], start=2):
                 # 1行のパース失敗（csv.Error/JSON/値異常）は skip して継続。フラッシュ(DBエラー)は隔離しない。
                 try:

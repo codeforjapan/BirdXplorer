@@ -206,6 +206,29 @@ class TestExtractNoteRequests:
         assert flush.call_count == 1  # 前日の正常行のみ
         assert "NOTE_REQUEST_FILE_SKIPPED" in caplog.text
 
+    def test_skips_file_with_poison_header_and_falls_back(self, caplog):
+        # ヘッダ行自体が壊れている (NUL) ファイルも 1 ファイルに閉じ込めて skip し、phase を止めない
+        poison_header = TSV_HEADER.replace("suggestions", "sugg\x00estions")
+        bad = poison_header + "\n1212092628029698048\t-1\t-1\t-1\t-1\t\t[]\n"
+        good = TSV_HEADER + "\n1212092628029698050\t-1\t-1\t-1\t-1\t\t[]\n"
+        res_bad = MagicMock(status_code=200, content=_build_zip(bad))
+        res_good = MagicMock(status_code=200, content=_build_zip(good))
+        res_404 = MagicMock(status_code=404)
+        session = MagicMock()
+        # 当日: -00000 毒ヘッダ -> skip, -00001 404 -> データ無し -> 前日へ / 前日: 正常
+        with caplog.at_level(logging.ERROR):
+            with patch(
+                "birdxplorer_etl.extract_ecs.requests.get",
+                side_effect=[res_bad, res_404, res_good, res_404],
+            ) as get:
+                with patch("birdxplorer_etl.extract_ecs._flush_note_request_batch") as flush:
+                    extract_note_requests(session)  # 毒ヘッダでも例外を投げない
+        assert get.call_count == 4
+        assert flush.call_count == 1
+        batch = flush.call_args[0][1]
+        assert {r["tweet_id"] for r in batch} == {"1212092628029698050"}
+        assert "NOTE_REQUEST_FILE_SKIPPED" in caplog.text
+
     def test_falls_back_to_previous_day_on_404(self):
         tsv = TSV_HEADER + "\n1212092628029698048\t-1\t-1\t-1\t-1\t\t[]\n"
         res_404 = MagicMock(status_code=404)
