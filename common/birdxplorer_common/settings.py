@@ -19,6 +19,16 @@ class PostgresStorageSettings(BaseSettings):
     password: str
     port: int = 5432
     database: str = "postgres"
+    # 1 クエリの上限時間。ここを超えると PostgreSQL 側でクエリが打ち切られる。
+    # 応答を返したあともクエリが走り続けて CPU とコネクションを占有するのを防ぐ。
+    # 0 を指定すると無制限（PostgreSQL の既定の扱い）。
+    statement_timeout_ms: int = Field(default=30000, ge=0)
+    # CSV エクスポートだけは上の既定では足りないことがある。前方ワイルドカードの
+    # LIKE + JOIN でインデックスが効かず、仕様上の目標（5,000 件を 10 秒以内、
+    # specs/002-csv-export-api/spec.md SC-001）を大きく外れる可能性があるため。
+    # この経路のトランザクションでだけ statement_timeout を差し替える。
+    # 0 を指定すると無制限だが、公開エンドポイントなので既定は有限値にしている。
+    csv_export_statement_timeout_ms: int = Field(default=120000, ge=0)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
