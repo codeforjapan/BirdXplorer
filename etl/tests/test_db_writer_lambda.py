@@ -6,6 +6,7 @@ import pytest
 from birdxplorer_etl.lib.lambda_handler.db_writer_lambda import (
     lambda_handler,
     process_update_post_language,
+    strip_nul_bytes,
 )
 
 
@@ -174,6 +175,63 @@ class TestProcessUpdatePostLanguage:
 
         with pytest.raises(ValueError):
             process_update_post_language(mock_session, "1234567890", {})
+
+
+class TestStripNulBytes:
+    """strip_nul_bytes が NUL(0x00) 文字を再帰的に除去することを検証"""
+
+    def test_removes_nul_from_string(self) -> None:
+        assert strip_nul_bytes("a\x00b\x00c") == "abc"
+
+    def test_string_without_nul_unchanged(self) -> None:
+        assert strip_nul_bytes("hello") == "hello"
+
+    def test_removes_nul_in_nested_dict(self) -> None:
+        result = strip_nul_bytes({"summary": "pay\x00out", "tweet_id": "123"})
+        assert result == {"summary": "payout", "tweet_id": "123"}
+
+    def test_removes_nul_in_nested_list_and_dict(self) -> None:
+        result = strip_nul_bytes({"post_data": {"text": "a\x00b", "media": [{"url": "u\x00rl"}]}})
+        assert result == {"post_data": {"text": "ab", "media": [{"url": "url"}]}}
+
+    def test_non_string_values_preserved(self) -> None:
+        result = strip_nul_bytes({"count": 5, "flag": True, "none": None, "text": "x\x00y"})
+        assert result == {"count": 5, "flag": True, "none": None, "text": "xy"}
+
+
+class TestInsertNoteStripsNul:
+    """insert_note 経由で summary の NUL バイトが除去されて書き込まれることを検証"""
+
+    @patch("birdxplorer_etl.lib.lambda_handler.db_writer_lambda.init_postgresql")
+    def test_summary_with_nul_is_sanitized_before_insert(self, mock_init_pg: MagicMock) -> None:
+        mock_session = MagicMock()
+        mock_init_pg.return_value = mock_session
+
+        event = {
+            "Records": [
+                {
+                    "messageId": "msg-nul",
+                    "body": json.dumps(
+                        {
+                            "operation": "insert_note",
+                            "note_id": "n1",
+                            "data": {
+                                "note_id": "n1",
+                                "summary": "pay\x00out screenshot",
+                                "tweet_id": "t1",
+                                "created_at_millis": 1786552607612,
+                            },
+                        }
+                    ),
+                }
+            ]
+        }
+
+        result = lambda_handler(event, {})
+
+        assert result["batchItemFailures"] == []
+        stmt = mock_session.execute.call_args_list[0][0][0]
+        assert stmt.compile().params["summary"] == "payout screenshot"
 
 
 class TestUpdatePostLanguageDispatch:
