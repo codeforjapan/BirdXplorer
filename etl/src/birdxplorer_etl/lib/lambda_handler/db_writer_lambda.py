@@ -23,6 +23,23 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
+def strip_nul_bytes(value: Any) -> Any:
+    """文字列中の NUL(0x00) 文字を再帰的に除去する。
+
+    PostgreSQL のテキスト型は NUL バイトを保存できず、psycopg2 が
+    ``ValueError: A string literal cannot contain NUL (0x00) characters.``
+    を送出する。X の Community Notes summary や投稿本文にまれに NUL が
+    混入するため、DB 書き込み前に全テキストフィールドから除去する。
+    """
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, dict):
+        return {key: strip_nul_bytes(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [strip_nul_bytes(item) for item in value]
+    return value
+
+
 def process_insert_note(postgresql: Any, note_id: str, data: dict) -> None:
     """ノートの挿入処理（UPSERT使用）"""
     note_data = data
@@ -255,7 +272,8 @@ def lambda_handler(event: dict, context: Any) -> dict:
                 operation = message_body.get("operation")
                 note_id = message_body.get("note_id")
                 post_id = message_body.get("post_id")
-                data = message_body.get("data", {})
+                # PostgreSQL が保存できない NUL(0x00) を全テキストフィールドから除去
+                data = strip_nul_bytes(message_body.get("data", {}))
 
                 if not operation:
                     logger.error(f"[ERROR] Missing operation in message {message_id}")
