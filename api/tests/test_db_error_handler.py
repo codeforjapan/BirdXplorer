@@ -6,10 +6,12 @@
 (ドライバがサーバ応答から設定するため) ので、テストでは pgcode を持つスタブで本番の形を再現する。
 """
 
+import logging
 from typing import Optional
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
+from pytest import LogCaptureFixture
 from sqlalchemy.exc import OperationalError
 
 _VALID_FROM = 1700000000000
@@ -67,6 +69,27 @@ def test_connection_failure_returns_503(client: TestClient, mock_storage: MagicM
 
     assert response.status_code == 503
     assert response.json()["detail"] != ""
+
+
+def test_log_does_not_contain_sql_or_bound_values(
+    client: TestClient, mock_storage: MagicMock, caplog: LogCaptureFixture
+) -> None:
+    """SQLAlchemy の例外を文字列化すると `[SQL: ...]` と `[parameters: ...]` が付き、
+    検索キーワードなどのバインド値がログに漏れる。ログにはドライバ側のメッセージだけを出す。
+    """
+    statement = "SELECT * FROM note WHERE summary LIKE %(keyword)s"
+    params = {"keyword": "%secret-search-term%"}
+    mock_storage.get_topics.side_effect = OperationalError(
+        statement, params, _Psycopg2StyleError("connection to server failed: Connection refused")
+    )
+
+    with caplog.at_level(logging.ERROR, logger="birdxplorer_api.app"):
+        response = client.get("/api/v1/data/topics")
+
+    assert response.status_code == 503
+    assert "secret-search-term" not in caplog.text
+    assert "[SQL:" not in caplog.text
+    assert "Connection refused" in caplog.text
 
 
 def test_csv_export_query_canceled_returns_504_json(client: TestClient, mock_storage: MagicMock) -> None:
