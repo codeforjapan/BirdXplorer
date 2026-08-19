@@ -1,6 +1,7 @@
 import csv
 import io
 from logging import getLogger
+from typing import Any, Optional
 from urllib.parse import parse_qs as parse_query_string
 from urllib.parse import urlencode as encode_query_string
 
@@ -8,6 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic.alias_generators import to_snake
+from sqlalchemy.exc import OperationalError
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from birdxplorer_common.logger import get_logger
@@ -24,6 +26,24 @@ from .semantic_search import (
 )
 
 logger = getLogger(__name__)
+
+# PostgreSQL の SQLSTATE 57014 (query_canceled)。statement_timeout での打ち切りがこれにあたる。
+PG_QUERY_CANCELED_SQLSTATE = "57014"
+
+
+def _is_query_canceled(exc: OperationalError) -> bool:
+    """OperationalError が statement_timeout による打ち切り (SQLSTATE 57014) かを判定する。
+
+    api パッケージは DB ドライバに直接依存しない (psycopg2 は dev 依存のみ) ため、
+    例外クラスではなく SQLSTATE で判定する。psycopg2 は `pgcode`、psycopg (3系) は
+    `sqlstate` に SQLSTATE を持つので、両方を見る。
+    """
+    orig: Optional[BaseException] = exc.orig
+    for attribute in ("pgcode", "sqlstate"):
+        code: Any = getattr(orig, attribute, None)
+        if code == PG_QUERY_CANCELED_SQLSTATE:
+            return True
+    return False
 
 
 class QueryStringFlatteningMiddleware:
@@ -62,6 +82,33 @@ def gen_app(settings: GlobalSettings) -> FastAPI:
         """SemanticSearchUnavailableError を 503 に変換するアプリレベルハンドラ"""
         logger.error(f"semantic search unavailable: {exc}")
         return JSONResponse(status_code=503, content={"detail": "semantic search is temporarily unavailable"})
+
+    @app.exception_handler(OperationalError)
+    def handle_db_operational_error(request: Request, exc: OperationalError) -> JSONResponse:
+        """DB の OperationalError を 504 / 503 に変換するアプリレベルハンドラ
+
+        statement_timeout で打ち切られたクエリ (SQLSTATE 57014) は「重すぎるクエリのタイムアウト」なので
+        504 を返し、接続断などそれ以外の OperationalError は 503 を返す。どちらも 500 (サーバ内部エラー)
+        ではクライアントに意味が伝わらない。
+
+        ログには例外全体 (`str(exc)`) を出さない。SQLAlchemy の DBAPIError は文字列化すると
+        `[SQL: ...]` と `[parameters: ...]` を含み、検索キーワードなどのバインド値がログに漏れる
+        (実測で確認)。ドライバ側のメッセージ `exc.orig` には SQL もバインド値も含まれない。
+        """
+        if _is_query_canceled(exc):
+            logger.warning(f"query canceled by statement_timeout: {request.method} {request.url.path}")
+            return JSONResponse(
+                status_code=504,
+                content={"detail": "クエリがタイムアウトしました。条件を絞って再試行してください"},
+            )
+        logger.error(
+            f"database operational error: {type(exc.orig).__name__}: {exc.orig} "
+            f"({request.method} {request.url.path})"
+        )
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "データベースに接続できません。しばらくしてから再試行してください"},
+        )
 
     app.include_router(gen_system_router(), prefix="/api/v1/system")
     app.include_router(
