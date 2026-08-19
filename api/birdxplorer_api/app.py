@@ -90,6 +90,10 @@ def gen_app(settings: GlobalSettings) -> FastAPI:
         statement_timeout で打ち切られたクエリ (SQLSTATE 57014) は「重すぎるクエリのタイムアウト」なので
         504 を返し、接続断などそれ以外の OperationalError は 503 を返す。どちらも 500 (サーバ内部エラー)
         ではクライアントに意味が伝わらない。
+
+        ログには例外全体 (`str(exc)`) を出さない。SQLAlchemy の DBAPIError は文字列化すると
+        `[SQL: ...]` と `[parameters: ...]` を含み、検索キーワードなどのバインド値がログに漏れる
+        (実測で確認)。ドライバ側のメッセージ `exc.orig` には SQL もバインド値も含まれない。
         """
         if _is_query_canceled(exc):
             logger.warning(f"query canceled by statement_timeout: {request.method} {request.url.path}")
@@ -97,7 +101,10 @@ def gen_app(settings: GlobalSettings) -> FastAPI:
                 status_code=504,
                 content={"detail": "クエリがタイムアウトしました。条件を絞って再試行してください"},
             )
-        logger.error(f"database operational error: {exc}")
+        logger.error(
+            f"database operational error: {type(exc.orig).__name__}: {exc.orig} "
+            f"({request.method} {request.url.path})"
+        )
         return JSONResponse(
             status_code=503,
             content={"detail": "データベースに接続できません。しばらくしてから再試行してください"},
