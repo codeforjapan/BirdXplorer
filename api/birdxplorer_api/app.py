@@ -9,7 +9,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic.alias_generators import to_snake
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from birdxplorer_common.logger import get_logger
@@ -101,7 +102,13 @@ def gen_app(settings: GlobalSettings) -> FastAPI:
         (実測で確認)。ドライバ側のメッセージ `exc.orig` には SQL もバインド値も含まれない。
         """
         if _is_query_canceled(exc):
-            logger.warning(f"query canceled by statement_timeout: {request.method} {request.url.path}")
+            # exc.orig も出す。57014 は statement_timeout だけでなく pg_cancel_backend() による
+            # 手動キャンセルでも返るので、ドライバ側のメッセージ
+            # ("due to statement timeout" / "due to user request") が両者を区別する唯一の手がかりになる。
+            # タイムアウト時の exc.orig はバインド値を含まない (503 側と同じ理由で str(exc) は使わない)。
+            logger.warning(
+                f"query canceled: {type(exc.orig).__name__}: {exc.orig} " f"({request.method} {request.url.path})"
+            )
             return JSONResponse(
                 status_code=504,
                 content={"detail": _QUERY_TIMEOUT_DETAIL},
@@ -110,10 +117,48 @@ def gen_app(settings: GlobalSettings) -> FastAPI:
             f"database operational error: {type(exc.orig).__name__}: {exc.orig} "
             f"({request.method} {request.url.path})"
         )
-        return JSONResponse(
-            status_code=503,
-            content={"detail": _DB_UNAVAILABLE_DETAIL},
-        )
+        return JSONResponse(status_code=503, content={"detail": _DB_UNAVAILABLE_DETAIL})
+
+    @app.exception_handler(InterfaceError)
+    @app.exception_handler(SQLAlchemyTimeoutError)
+    def handle_db_unavailable(request: Request, exc: Exception) -> JSONResponse:
+        """OperationalError では捕まらない「DB に手が届かない」系を 503 に変換する。
+
+        sqlalchemy.exc の階層 (2.0.52 で実測):
+
+            DBAPIError
+            |-- InterfaceError        <- DatabaseError の下ではないので OperationalError では捕まらない
+            +-- DatabaseError
+                +-- OperationalError  <- 上のハンドラが捕まえる範囲
+            TimeoutError(SQLAlchemyError)  <- DBAPIError ですらない
+
+        - InterfaceError: セッションが接続断をまたいだときにドライバが出す
+          (psycopg2 の `connection already closed` / `cursor already closed`)。
+        - TimeoutError: コネクションプールの枯渇。storage.gen_storage() の create_engine は
+          pool 設定を渡していないので SQLAlchemy 既定 (pool_size=5 / max_overflow=10 /
+          pool_timeout=30) が効く。同時リクエストが 15 を超えると 30 秒待って失敗する
+          ＝利用者から見た症状は statement_timeout と同じ「遅い → エラー」なので、
+          片方だけ 504 でもう片方が 500 になるのを避ける。
+
+        DBAPIError まで広げないのは意図的。IntegrityError や ProgrammingError はアプリ側のバグで、
+        500 のままにしたい。
+        """
+        # TimeoutError は DBAPIError ではないので orig を持たない。
+        #
+        # orig が無い DBAPIError に str(exc) を使ってはいけない。DBAPIError の __str__ は
+        # `[SQL: ...]` と `[parameters: ...]` を足すので、バインド値 (検索キーワードなど) が
+        # ログに漏れる。実測: InterfaceError(stmt, params, None) を str() すると
+        # "[parameters: {'keyword': '%secret-search-term%'}]" がそのまま出る。
+        # TimeoutError は DBAPIError ではなく SQL を持たないので str(exc) で安全。
+        orig = getattr(exc, "orig", None)
+        if orig is not None:
+            detail = f"{type(orig).__name__}: {orig}"
+        elif isinstance(exc, DBAPIError):
+            detail = type(exc).__name__
+        else:
+            detail = str(exc)
+        logger.error(f"database unavailable: {type(exc).__name__}: {detail} ({request.method} {request.url.path})")
+        return JSONResponse(status_code=503, content={"detail": _DB_UNAVAILABLE_DETAIL})
 
     app.include_router(gen_system_router(), prefix="/api/v1/system")
     app.include_router(
