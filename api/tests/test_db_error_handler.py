@@ -46,7 +46,7 @@ def test_query_canceled_returns_504(client: TestClient, mock_storage: MagicMock)
     response = client.get("/api/v1/data/topics")
 
     assert response.status_code == 504
-    assert "タイムアウト" in response.json()["detail"]
+    assert "timed out" in response.json()["detail"]
 
 
 def test_query_canceled_with_sqlstate_attribute_returns_504(client: TestClient, mock_storage: MagicMock) -> None:
@@ -68,7 +68,8 @@ def test_connection_failure_returns_503(client: TestClient, mock_storage: MagicM
     response = client.get("/api/v1/data/topics")
 
     assert response.status_code == 503
-    assert response.json()["detail"] != ""
+    # 504 側と同じ粒度で文言を見る。`!= ""` はハンドラが本文を作らなくなっても気づけない。
+    assert "temporarily unavailable" in response.json()["detail"]
 
 
 def test_log_does_not_contain_sql_or_bound_values(

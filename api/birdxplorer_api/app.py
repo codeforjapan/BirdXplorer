@@ -30,6 +30,11 @@ logger = getLogger(__name__)
 # PostgreSQL の SQLSTATE 57014 (query_canceled)。statement_timeout での打ち切りがこれにあたる。
 PG_QUERY_CANCELED_SQLSTATE = "57014"
 
+# 応答本文は英語。同じファイルの SemanticSearchUnavailableError ハンドラが英語であり、
+# この API は外部提供 (dev.api-birdxplorer.code4japan.org) なので利用者が日本語を読めるとは限らない。
+_QUERY_TIMEOUT_DETAIL = "the query timed out; please narrow the conditions and retry"
+_DB_UNAVAILABLE_DETAIL = "the database is temporarily unavailable; please retry later"
+
 
 def _is_query_canceled(exc: OperationalError) -> bool:
     """OperationalError が statement_timeout による打ち切り (SQLSTATE 57014) かを判定する。
@@ -99,7 +104,7 @@ def gen_app(settings: GlobalSettings) -> FastAPI:
             logger.warning(f"query canceled by statement_timeout: {request.method} {request.url.path}")
             return JSONResponse(
                 status_code=504,
-                content={"detail": "クエリがタイムアウトしました。条件を絞って再試行してください"},
+                content={"detail": _QUERY_TIMEOUT_DETAIL},
             )
         logger.error(
             f"database operational error: {type(exc.orig).__name__}: {exc.orig} "
@@ -107,7 +112,7 @@ def gen_app(settings: GlobalSettings) -> FastAPI:
         )
         return JSONResponse(
             status_code=503,
-            content={"detail": "データベースに接続できません。しばらくしてから再試行してください"},
+            content={"detail": _DB_UNAVAILABLE_DETAIL},
         )
 
     app.include_router(gen_system_router(), prefix="/api/v1/system")
