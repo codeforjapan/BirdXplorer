@@ -116,6 +116,11 @@ def connect_to_endpoint(url: str) -> tuple[dict, Optional[int]]:
         logger.warning("[RATE_LIMITED] 429 received. Message will return to queue via visibility timeout.")
         return {"status": "rate_limited"}, 0
     elif response.status_code == 402:
+        # ⚠️ デプロイ順序: BirdXplorer-cdk の tweet-lookup retentionPeriod 14日化を
+        # 必ず先にデプロイすること。この変更を先に入れると receive が毎分35件から1件に
+        # 落ちて DLQ への退避が止まり、保持期間4日のまま滞留が全件消える。現状は receive の
+        # 回転で一部が DLQ に逃げて14日まで残るので、順序を誤ると何もしないより悪くなる。
+        #
         # X API のクレジット枯渇。全リクエストが失敗するのでバッチを止める。
         # ここで止めないと 1 メッセージも処理できないまま MAX_MESSAGES_PER_INVOCATION 件を
         # 毎分 receive し続け、ApproximateReceiveCount だけが進んで maxReceiveCount に達し、
@@ -200,13 +205,19 @@ MAX_MESSAGES_PER_INVOCATION = 35
 TIMEOUT_BUFFER_MS = 10_000  # 10秒のバッファ
 
 
-def _raise_if_lookup_unavailable(result: dict, should_stop: bool, tweet_id: str) -> None:
+def _raise_if_lookup_unavailable(result: dict[str, Any], should_stop: bool, tweet_id: str) -> None:
     """should_stop なら例外を送出する。取得できていない呼び出しを成功として返さないため。
 
     呼び出し側が statusCode や FunctionError だけを見て成否を判断できることを保証する。
     これが無いと 402/429 で1件も取得できていないのに 200 が返り、手動バックフィルが
     「全件成功・0行書き込み」を成功と報告する。将来 SqsEventSource を付けた場合は
     200 を見た SQS がメッセージを削除するため、DLQ にも残らず恒久的に失われる。
+
+    ⚠️ ただし SqsEventSource を付けるなら、この「送出する」だけでは不十分。402 が続く間
+    メッセージ単位で raise すると maxReceiveCount=5 / visibilityTimeout 180秒 の下では
+    約15分でキュー全体が DLQ に落ちる。つまり元の障害をより速く再現する。恒久停止する
+    種類の失敗にはバッチ単位のサーキットブレーカが必要で、raise はあくまで
+    「EventBridge 単独駆動かつ一過性の失敗」に対する正解。
     """
     if not should_stop:
         return

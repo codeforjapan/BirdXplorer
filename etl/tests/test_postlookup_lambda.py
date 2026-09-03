@@ -390,6 +390,9 @@ class TestBatchProcessingLoop:
         body = json.loads(result["body"])
         assert body["batch"] is True
         assert body["processed"] == 3
+        # 負方向も固定する。フラグが常時 True に張り付いても捕まえられなかった
+        assert body["rate_limited"] is False
+        assert body["credits_depleted"] is False
         assert mock_process.call_count == 3
 
     @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda._poll_message")
@@ -760,7 +763,12 @@ class TestCreditsDepletedObservability:
         with caplog.at_level(logging.ERROR):
             lambda_handler({}, _make_context())
 
-        assert "CREDITS_DEPLETED" in caplog.text
+        # 出力箇所ごとに固定する。どちらか一方が debug に落ちても text 全体には
+        # 残ってしまうため、「少なくとも1箇所」では検知の後退を捕まえられない
+        emitters = {
+            r.funcName for r in caplog.records if "CREDITS_DEPLETED" in r.getMessage() and r.levelno >= logging.ERROR
+        }
+        assert emitters == {"connect_to_endpoint", "_process_single_tweet"}
 
     @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.requests.request")
     @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.bearer_oauth")
