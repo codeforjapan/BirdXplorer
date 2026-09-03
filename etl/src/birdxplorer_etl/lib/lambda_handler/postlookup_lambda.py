@@ -104,7 +104,10 @@ def connect_to_endpoint(url: str) -> tuple[dict, Optional[int]]:
         # 毎分 receive し続け、ApproximateReceiveCount だけが進んで maxReceiveCount に達し、
         # 未処理のまま DLQ へ送られる。2026-08-14 の枯渇では実際にこれが起きた。
         logger.error("[CREDITS_DEPLETED] X API 402 Payment Required. API credits exhausted. Stopping batch.")
-        return {"status": "credits_depleted"}, 0
+        # rate_remaining は None を返す。402 はレート制限の残量について何も言っていない。
+        # ここで 0 を返すと、仮に should_stop の break が外れたときに
+        # 「rate limit exhausted」の停止条件を誤って踏み、原因を取り違える。
+        return {"status": "credits_depleted"}, None
     elif response.status_code == 401:
         logger.error("[DLQ_CAUSE:AUTH_FAILED] X API 401 Unauthorized. Check X_BEARER_TOKEN.")
         raise Exception("X API authentication failed: 401 Unauthorized. Token may be invalid or expired.")
@@ -129,6 +132,7 @@ def lookup(id: str) -> tuple[dict, Optional[int]]:
         - 非公開時: ({"status": "protected", "title": ..., "detail": ...}, rate_remaining)
         - その他エラー: ({"status": "error", "title": ..., "detail": ...}, rate_remaining)
         - レート制限時: ({"status": "rate_limited"}, 0)
+        - クレジット枯渇時: ({"status": "credits_depleted"}, None)
     """
     url = create_url(id)
     json_response, rate_remaining = connect_to_endpoint(url)
@@ -177,6 +181,26 @@ def _poll_message(sqs_handler: SQSHandler, queue_url: str) -> Optional[dict]:
 
 MAX_MESSAGES_PER_INVOCATION = 35
 TIMEOUT_BUFFER_MS = 10_000  # 10秒のバッファ
+
+
+def _raise_if_lookup_unavailable(result: dict, should_stop: bool, tweet_id: str) -> None:
+    """取得できていないのに成功として返さないようにする。
+
+    バッチ経路以外(SQS Records / 直接呼び出し)は should_stop を捨てて常に 200 を返して
+    いた。そのため 402 や 429 でツイートを1件も取得できていないのに statusCode 200 が
+    返り、手動バックフィルのスクリプトが「全件成功・0行書き込み」を成功と報告する。
+    さらに将来 SqsEventSource を付けると、200 を見た SQS がメッセージを削除してしまい、
+    DLQ にも残らず恒久的に失われる。
+
+    例外を送出して Lambda の呼び出し自体を失敗させる(Errors メトリクスに出る)。
+    402 は本変更以前も connect_to_endpoint が raise していたので、その挙動に戻す形。
+    """
+    if not should_stop:
+        return
+    if result.get("credits_depleted"):
+        raise Exception(f"X API credits depleted; tweet {tweet_id} was not fetched")
+    if result.get("rate_limited"):
+        raise Exception(f"X API rate limited; tweet {tweet_id} was not fetched")
 
 
 def _process_single_tweet(
@@ -237,7 +261,7 @@ def _process_single_tweet(
             # 別ステータスにしているのは、運用上の原因がレート制限とは全く異なるため
             # (課金の問題であり、待っても回復しない)。ログのキーワードも分けている。
             logger.error("[CREDITS_DEPLETED] Message not deleted. Batch stopped until credits are restored.")
-            return {"credits_depleted": True, "tweet_id": tweet_id}, 0, True
+            return {"credits_depleted": True, "tweet_id": tweet_id}, None, True
 
         detail = post.get("detail", "")
         if status == "deleted":
@@ -420,7 +444,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
                     "body": json.dumps({"error": "No valid tweet_lookup message found in Records"}),
                 }
 
-            result, _rate_remaining, _should_stop = _process_single_tweet(
+            result, _rate_remaining, should_stop = _process_single_tweet(
                 tweet_id=tweet_id,
                 receipt_handle=None,
                 skip_tweet_lookup=skip_tweet_lookup,
@@ -429,12 +453,13 @@ def lambda_handler(event: dict, context: Any) -> dict:
                 post_transform_queue_url=post_transform_queue_url,
                 tweet_lookup_queue_url=tweet_lookup_queue_url,
             )
+            _raise_if_lookup_unavailable(result, should_stop, tweet_id)
             return {"statusCode": 200, "body": json.dumps(result)}
 
         # 2. 直接呼び出しの場合
         if "tweet_id" in event:
             tweet_id = event["tweet_id"]
-            result, _rate_remaining, _should_stop = _process_single_tweet(
+            result, _rate_remaining, should_stop = _process_single_tweet(
                 tweet_id=tweet_id,
                 receipt_handle=None,
                 skip_tweet_lookup=False,
@@ -443,6 +468,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
                 post_transform_queue_url=post_transform_queue_url,
                 tweet_lookup_queue_url=tweet_lookup_queue_url,
             )
+            _raise_if_lookup_unavailable(result, should_stop, tweet_id)
             return {"statusCode": 200, "body": json.dumps(result)}
 
         # 3. EventBridge起動の場合 — バッチ処理ループ

@@ -122,7 +122,8 @@ class TestConnectToEndpoint:
         result, rate_remaining = connect_to_endpoint("https://api.twitter.com/2/tweets/123")
 
         assert result == {"status": "credits_depleted"}
-        assert rate_remaining == 0
+        # 402 はレート制限の残量について何も言っていないので 0 を偽らない
+        assert rate_remaining is None
 
     @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.requests.request")
     @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.bearer_oauth")
@@ -280,7 +281,7 @@ class TestProcessSingleTweet:
         )
 
         assert result["credits_depleted"] is True
-        assert remaining == 0
+        assert remaining is None
         assert should_stop is True
         # メッセージを削除しない = クレジット復旧後に再処理できる
         sqs.delete_message.assert_not_called()
@@ -401,6 +402,65 @@ class TestBatchProcessingLoop:
         assert body["batch"] is True
         assert body["processed"] == 0
         assert body["skipped"] == 0
+
+    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda._process_single_tweet")
+    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda._poll_message")
+    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.SQSHandler")
+    @patch.dict("os.environ", {"TWEET_LOOKUP_QUEUE_URL": "https://sqs/tweet-lookup"})
+    def test_stops_on_credits_depleted(self, mock_sqs_cls, mock_poll, mock_process):
+        """402 で1件目でループが止まり、フラグが応答に載る"""
+        mock_sqs_cls.return_value = _make_sqs_handler()
+        mock_poll.return_value = {"tweet_id": "t1", "receipt_handle": "rh-1", "body": {"tweet_id": "t1"}}
+        mock_process.return_value = ({"credits_depleted": True, "tweet_id": "t1"}, None, True)
+
+        result = lambda_handler({}, _make_context())
+
+        body = json.loads(result["body"])
+        assert body["credits_depleted"] is True
+        assert body["processed"] == 0
+        # ここが本変更の目的。35件ではなく1件で止まる
+        assert mock_process.call_count == 1
+
+    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.requests.request")
+    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.bearer_oauth")
+    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.SQSHandler")
+    @patch.dict("os.environ", {"TWEET_LOOKUP_QUEUE_URL": "https://sqs/tweet-lookup"})
+    def test_402_polls_once_and_deletes_nothing(self, mock_sqs_cls, _mock_auth, mock_request):
+        """402 では receive が1回だけ、delete は0回。
+
+        変更前は1件も処理できないのに35件を receive し続け、ApproximateReceiveCount だけが
+        進んで未処理のまま DLQ に落ちていた。
+        """
+        sqs = _make_sqs_handler()
+        # receive_message はメッセージの list を返す
+        sqs.receive_message.return_value = [{"Body": json.dumps({"tweet_id": "t1"}), "ReceiptHandle": "rh-1"}]
+        mock_sqs_cls.return_value = sqs
+        mock_request.return_value = _make_mock_response(402)
+
+        result = lambda_handler({}, _make_context())
+
+        body = json.loads(result["body"])
+        assert body["credits_depleted"] is True
+        assert sqs.receive_message.call_count == 1
+        # 削除しない = クレジット復旧後に再処理できる
+        sqs.delete_message.assert_not_called()
+
+    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda._process_single_tweet")
+    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.SQSHandler")
+    @patch.dict("os.environ", {"TWEET_LOOKUP_QUEUE_URL": "https://sqs/tweet-lookup"})
+    def test_direct_invoke_does_not_report_success_when_lookup_unavailable(self, mock_sqs_cls, mock_process):
+        """取得できていないのに 200 を返さない。
+
+        非バッチ経路は should_stop を捨てて常に 200 を返していた。手動バックフィルの
+        スクリプトが「全件成功・0行書き込み」を成功と誤認するため、例外を送出して
+        Lambda の呼び出し自体を失敗させる。
+        """
+        mock_sqs_cls.return_value = _make_sqs_handler()
+
+        for flag in ("credits_depleted", "rate_limited"):
+            mock_process.return_value = ({flag: True, "tweet_id": "t1"}, None, True)
+            with pytest.raises(Exception, match="was not fetched"):
+                lambda_handler({"tweet_id": "t1"}, _make_context())
 
     @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda._process_single_tweet")
     @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda._poll_message")
