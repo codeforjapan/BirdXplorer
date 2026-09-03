@@ -1,9 +1,13 @@
 import json
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from birdxplorer_etl.lib.lambda_handler.postlookup_lambda import (
+    CreditsDepletedError,
+    LookupUnavailableError,
+    RateLimitedError,
     _poll_message,
     _process_single_tweet,
     connect_to_endpoint,
@@ -446,23 +450,6 @@ class TestBatchProcessingLoop:
         sqs.delete_message.assert_not_called()
 
     @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda._process_single_tweet")
-    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.SQSHandler")
-    @patch.dict("os.environ", {"TWEET_LOOKUP_QUEUE_URL": "https://sqs/tweet-lookup"})
-    def test_direct_invoke_does_not_report_success_when_lookup_unavailable(self, mock_sqs_cls, mock_process):
-        """取得できていないのに 200 を返さない。
-
-        非バッチ経路は should_stop を捨てて常に 200 を返していた。手動バックフィルの
-        スクリプトが「全件成功・0行書き込み」を成功と誤認するため、例外を送出して
-        Lambda の呼び出し自体を失敗させる。
-        """
-        mock_sqs_cls.return_value = _make_sqs_handler()
-
-        for flag in ("credits_depleted", "rate_limited"):
-            mock_process.return_value = ({flag: True, "tweet_id": "t1"}, None, True)
-            with pytest.raises(Exception, match="was not fetched"):
-                lambda_handler({"tweet_id": "t1"}, _make_context())
-
-    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda._process_single_tweet")
     @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda._poll_message")
     @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.SQSHandler")
     @patch.dict("os.environ", {"TWEET_LOOKUP_QUEUE_URL": "https://sqs/tweet-lookup"})
@@ -710,3 +697,105 @@ class TestParseApiError:
             {"errors": [{"type": "not-authorized", "title": "Authorization Error", "detail": "Forbidden"}]}
         )
         assert result["status"] == "protected"
+
+
+_NON_BATCH_EVENTS = [
+    pytest.param({"tweet_id": "t1"}, id="direct-invoke"),
+    pytest.param(
+        {"Records": [{"body": json.dumps({"processing_type": "tweet_lookup", "tweet_id": "t1"})}]},
+        id="sqs-records",
+    ),
+]
+
+
+class TestNonBatchPathsFailLoudly:
+    """バッチ経路以外は、取得できていない呼び出しを成功として返さない"""
+
+    @pytest.mark.parametrize("event", _NON_BATCH_EVENTS)
+    @pytest.mark.parametrize(
+        ("flag", "expected"),
+        [("credits_depleted", CreditsDepletedError), ("rate_limited", RateLimitedError)],
+    )
+    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda._process_single_tweet")
+    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.SQSHandler")
+    @patch.dict("os.environ", {"TWEET_LOOKUP_QUEUE_URL": "https://sqs/tweet-lookup"})
+    def test_raises_instead_of_returning_200(self, mock_sqs_cls, mock_process, flag, expected, event):
+        mock_sqs_cls.return_value = _make_sqs_handler()
+        mock_process.return_value = ({flag: True, "tweet_id": "t1"}, None, True)
+
+        with pytest.raises(expected, match="was not fetched"):
+            lambda_handler(event, _make_context())
+
+    @pytest.mark.parametrize("event", _NON_BATCH_EVENTS)
+    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda._process_single_tweet")
+    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.SQSHandler")
+    @patch.dict("os.environ", {"TWEET_LOOKUP_QUEUE_URL": "https://sqs/tweet-lookup"})
+    def test_unknown_stop_reason_also_raises(self, mock_sqs_cls, mock_process, event):
+        """将来 should_stop の理由が増えても 200 を返さない（既定で送出側に倒す）"""
+        mock_sqs_cls.return_value = _make_sqs_handler()
+        mock_process.return_value = ({"some_future_status": True, "tweet_id": "t1"}, None, True)
+
+        with pytest.raises(LookupUnavailableError, match="lookup unavailable"):
+            lambda_handler(event, _make_context())
+
+
+class TestCreditsDepletedObservability:
+    """CW Metric Filter が拾うリテラルと、部分的な進捗の保持"""
+
+    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.requests.request")
+    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.bearer_oauth")
+    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.SQSHandler")
+    @patch.dict("os.environ", {"TWEET_LOOKUP_QUEUE_URL": "https://sqs/tweet-lookup"})
+    def test_logs_credits_depleted_keyword(self, mock_sqs_cls, _mock_auth, mock_request, caplog):
+        """このリテラルは CDK の FilterPattern.literal('CREDITS_DEPLETED') との契約。
+
+        402 のときバッチは 200 を返し Errors にも出ないので、このログ行だけが検知手段。
+        リネームやログレベル変更で 2026-08-14 の「20日気づけない」状態に戻る。
+        """
+        sqs = _make_sqs_handler()
+        sqs.receive_message.return_value = [{"Body": json.dumps({"tweet_id": "t1"}), "ReceiptHandle": "rh-1"}]
+        mock_sqs_cls.return_value = sqs
+        mock_request.return_value = _make_mock_response(402)
+
+        with caplog.at_level(logging.ERROR):
+            lambda_handler({}, _make_context())
+
+        assert "CREDITS_DEPLETED" in caplog.text
+
+    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.requests.request")
+    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.bearer_oauth")
+    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.SQSHandler")
+    @patch.dict(
+        "os.environ",
+        {
+            "TWEET_LOOKUP_QUEUE_URL": "https://sqs/tweet-lookup",
+            "DB_WRITE_QUEUE_URL": "https://sqs/db-write",
+            "POST_TRANSFORM_QUEUE_URL": "https://sqs/post-transform",
+        },
+    )
+    def test_preserves_progress_made_before_the_402(self, mock_sqs_cls, _mock_auth, mock_request):
+        """402 の手前で成功した分は processed に残り、そのメッセージは削除される。
+
+        4万件の滞留を捌く途中で枯渇に当たるので、ここが潰れると復旧のたびに
+        取り込み済みの分を数え直すことになる。
+        """
+        sqs = _make_sqs_handler()
+        sqs.receive_message.side_effect = [
+            [{"Body": json.dumps({"tweet_id": "t1"}), "ReceiptHandle": "rh-1"}],
+            [{"Body": json.dumps({"tweet_id": "t2"}), "ReceiptHandle": "rh-2"}],
+        ]
+        mock_sqs_cls.return_value = sqs
+        mock_request.side_effect = [
+            _make_mock_response(200, json_data=_make_tweet_response("t1")),
+            _make_mock_response(402),
+        ]
+
+        result = lambda_handler({}, _make_context())
+
+        body = json.loads(result["body"])
+        assert body["processed"] == 1
+        assert body["credits_depleted"] is True
+        assert sqs.receive_message.call_count == 2
+        # 成功した1件目だけが削除される
+        sqs.delete_message.assert_called_once()
+        assert "rh-1" in sqs.delete_message.call_args[0]

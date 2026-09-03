@@ -13,6 +13,23 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
+class LookupUnavailableError(Exception):
+    """ツイートを取得できず、リトライしても即座には回復しない状態。
+
+    バッチ経路以外(SQS Records / 直接呼び出し)で送出して、呼び出しを失敗させる。
+    文字列ではなく型で判別できるようにしてある(既存の 401/403 判定が
+    エラーメッセージの部分一致に頼っているため、同じ轍を踏まないように)。
+    """
+
+
+class CreditsDepletedError(LookupUnavailableError):
+    """X API のクレジット枯渇 (HTTP 402)。課金しない限り回復しない"""
+
+
+class RateLimitedError(LookupUnavailableError):
+    """X API のレート制限 (HTTP 429)。時間が経てば回復する"""
+
+
 def create_url(id: str) -> str:
     expansions = (
         "expansions=attachments.poll_ids,attachments.media_keys,author_id,"
@@ -184,23 +201,22 @@ TIMEOUT_BUFFER_MS = 10_000  # 10秒のバッファ
 
 
 def _raise_if_lookup_unavailable(result: dict, should_stop: bool, tweet_id: str) -> None:
-    """取得できていないのに成功として返さないようにする。
+    """should_stop なら例外を送出する。取得できていない呼び出しを成功として返さないため。
 
-    バッチ経路以外(SQS Records / 直接呼び出し)は should_stop を捨てて常に 200 を返して
-    いた。そのため 402 や 429 でツイートを1件も取得できていないのに statusCode 200 が
-    返り、手動バックフィルのスクリプトが「全件成功・0行書き込み」を成功と報告する。
-    さらに将来 SqsEventSource を付けると、200 を見た SQS がメッセージを削除してしまい、
-    DLQ にも残らず恒久的に失われる。
-
-    例外を送出して Lambda の呼び出し自体を失敗させる(Errors メトリクスに出る)。
-    402 は本変更以前も connect_to_endpoint が raise していたので、その挙動に戻す形。
+    呼び出し側が statusCode や FunctionError だけを見て成否を判断できることを保証する。
+    これが無いと 402/429 で1件も取得できていないのに 200 が返り、手動バックフィルが
+    「全件成功・0行書き込み」を成功と報告する。将来 SqsEventSource を付けた場合は
+    200 を見た SQS がメッセージを削除するため、DLQ にも残らず恒久的に失われる。
     """
     if not should_stop:
         return
+    # should_stop = 何も取得できていない。既知のキーに当てはまらない停止理由が将来
+    # 増えても 200 を返さないよう、既定で送出する側に倒す
     if result.get("credits_depleted"):
-        raise Exception(f"X API credits depleted; tweet {tweet_id} was not fetched")
+        raise CreditsDepletedError(f"X API credits depleted; tweet {tweet_id} was not fetched")
     if result.get("rate_limited"):
-        raise Exception(f"X API rate limited; tweet {tweet_id} was not fetched")
+        raise RateLimitedError(f"X API rate limited; tweet {tweet_id} was not fetched")
+    raise LookupUnavailableError(f"lookup unavailable ({sorted(result)}); tweet {tweet_id} was not fetched")
 
 
 def _process_single_tweet(
@@ -411,6 +427,11 @@ def lambda_handler(event: dict, context: Any) -> dict:
     1. EventBridge (定期実行): event={} → SQSキューをポーリング（バッチ処理）
     2. 直接呼び出し: {"tweet_id": "1234567890"}
     3. SQS経由 (レガシー): {"Records": [{"body": "..."}]}
+
+    ログで識別可能なキーワード:
+      [RATE_LIMITED]     : X API 429（時間経過で回復する）
+      [CREDITS_DEPLETED] : X API 402 クレジット枯渇（CW Metric Filter の検知対象）
+      [DLQ_CAUSE:*]      : DLQ 行きの原因
     """
     logger.info("=" * 80)
     logger.info("Postlookup Lambda started")
