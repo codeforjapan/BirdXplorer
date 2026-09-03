@@ -76,6 +76,22 @@ testpaths = ["tests", "birdxplorer_api"]
 filterwarnings = [
     "error",
     "ignore:The \\'app\\' shortcut is now deprecated. Use the explicit style \\'transport=WSGITransport\\(app=\\.\\.\\.\\)\\' instead\\.",
+    # starlette の testclient が anyio.abc.* の旧別名を参照しており、新しい anyio が
+    # その別名に DeprecationWarning を付けたため、依存を更新するだけで "error" に
+    # 引っかかって conftest の import 時点で collection error になる。
+    # 実際に警告を出すのは testclient.py:53 のみ(379/422 は from __future__ import
+    # annotations 下の注釈なので評価されない)。こちらのコードでは制御できない。
+    #
+    # 別名を1つに絞らず anyio.abc.* をまとめて対象にしているのは、starlette が別の別名を
+    # 触ったときに同じ失敗を繰り返さないため。メッセージは anyio の
+    # _lazyimport.emit_deprecation_warning だけが生成するので、範囲は限定的。
+    #
+    # 契機: anyio 4.15.0 (2026-09-02) の遅延 import 化 (agronholm/anyio#1169)
+    # 上流 issue: https://github.com/Kludex/starlette/issues/3497
+    # starlette 側が新しい参照に移行したらこの行は削除する。上限指定は不要 -- 別名が
+    # 削除された場合は AttributeError になり、filterwarnings では抑止できないので
+    # CI が初回実行で落ちる。
+    "ignore:The anyio\\.abc\\.\\w+ alias is deprecated:DeprecationWarning",
 ]
 
 [tool.black]
