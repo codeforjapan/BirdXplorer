@@ -110,6 +110,22 @@ class TestConnectToEndpoint:
 
     @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.requests.request")
     @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.bearer_oauth")
+    def test_credits_depleted_returns_status_instead_of_raising(self, _mock_auth, mock_request):
+        """402 は raise せず credits_depleted を返す。
+
+        raise すると呼び出し側で「非致命的エラー」として次のメッセージに進んでしまい、
+        1件も処理できないまま毎分 MAX_MESSAGES_PER_INVOCATION 件を receive し続ける。
+        ApproximateReceiveCount だけが進んで未処理のまま DLQ に落ちる。
+        """
+        mock_request.return_value = _make_mock_response(402)
+
+        result, rate_remaining = connect_to_endpoint("https://api.twitter.com/2/tweets/123")
+
+        assert result == {"status": "credits_depleted"}
+        assert rate_remaining == 0
+
+    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.requests.request")
+    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.bearer_oauth")
     def test_401_raises(self, _mock_auth, mock_request):
         mock_request.return_value = _make_mock_response(401)
 
@@ -245,6 +261,28 @@ class TestProcessSingleTweet:
         assert remaining == 0
         assert should_stop is True
         # メッセージは削除しない
+        sqs.delete_message.assert_not_called()
+
+    @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.lookup")
+    def test_credits_depleted_stops_loop(self, mock_lookup):
+        """402 は rate_limited と同様にメッセージを削除せずループを止める"""
+        mock_lookup.return_value = ({"status": "credits_depleted"}, 0)
+        sqs = _make_sqs_handler()
+
+        result, remaining, should_stop = _process_single_tweet(
+            tweet_id="222",
+            receipt_handle="rh-4",
+            skip_tweet_lookup=False,
+            sqs_handler=sqs,
+            db_write_queue_url="https://sqs/db-write",
+            post_transform_queue_url="https://sqs/post-transform",
+            tweet_lookup_queue_url="https://sqs/tweet-lookup",
+        )
+
+        assert result["credits_depleted"] is True
+        assert remaining == 0
+        assert should_stop is True
+        # メッセージを削除しない = クレジット復旧後に再処理できる
         sqs.delete_message.assert_not_called()
 
     @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.lookup")

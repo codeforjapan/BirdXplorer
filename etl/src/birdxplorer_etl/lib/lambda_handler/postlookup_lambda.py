@@ -98,6 +98,13 @@ def connect_to_endpoint(url: str) -> tuple[dict, Optional[int]]:
     if response.status_code == 429:
         logger.warning("[RATE_LIMITED] 429 received. Message will return to queue via visibility timeout.")
         return {"status": "rate_limited"}, 0
+    elif response.status_code == 402:
+        # X API のクレジット枯渇。全リクエストが失敗するのでバッチを止める。
+        # ここで止めないと 1 メッセージも処理できないまま MAX_MESSAGES_PER_INVOCATION 件を
+        # 毎分 receive し続け、ApproximateReceiveCount だけが進んで maxReceiveCount に達し、
+        # 未処理のまま DLQ へ送られる。2026-08-14 の枯渇では実際にこれが起きた。
+        logger.error("[CREDITS_DEPLETED] X API 402 Payment Required. API credits exhausted. Stopping batch.")
+        return {"status": "credits_depleted"}, 0
     elif response.status_code == 401:
         logger.error("[DLQ_CAUSE:AUTH_FAILED] X API 401 Unauthorized. Check X_BEARER_TOKEN.")
         raise Exception("X API authentication failed: 401 Unauthorized. Token may be invalid or expired.")
@@ -224,6 +231,13 @@ def _process_single_tweet(
         if status == "rate_limited":
             logger.info("[RATE_LIMITED] Message not deleted. Will return to queue via visibility timeout.")
             return {"rate_limited": True, "tweet_id": tweet_id}, 0, True
+
+        if status == "credits_depleted":
+            # rate_limited と同様にメッセージを削除せず、バッチを止める。
+            # 別ステータスにしているのは、運用上の原因がレート制限とは全く異なるため
+            # (課金の問題であり、待っても回復しない)。ログのキーワードも分けている。
+            logger.error("[CREDITS_DEPLETED] Message not deleted. Batch stopped until credits are restored.")
+            return {"credits_depleted": True, "tweet_id": tweet_id}, 0, True
 
         detail = post.get("detail", "")
         if status == "deleted":
@@ -440,6 +454,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
         skipped = 0
         errors = 0
         rate_limited = False
+        credits_depleted = False
         last_rate_remaining: Optional[int] = None
 
         for i in range(MAX_MESSAGES_PER_INVOCATION):
@@ -484,6 +499,8 @@ def lambda_handler(event: dict, context: Any) -> dict:
                     skipped += 1
                 elif result.get("rate_limited"):
                     rate_limited = True
+                elif result.get("credits_depleted"):
+                    credits_depleted = True
                 else:
                     processed += 1
 
@@ -510,7 +527,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
         logger.info("=" * 80)
         logger.info(
             f"[BATCH_COMPLETE] Processed={processed}, Skipped={skipped}, "
-            f"Errors={errors}, RateLimited={rate_limited}"
+            f"Errors={errors}, RateLimited={rate_limited}, CreditsDepleted={credits_depleted}"
         )
         logger.info("=" * 80)
 
@@ -523,6 +540,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
                     "skipped": skipped,
                     "errors": errors,
                     "rate_limited": rate_limited,
+                    "credits_depleted": credits_depleted,
                 }
             ),
         }
