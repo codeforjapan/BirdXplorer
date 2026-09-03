@@ -726,6 +726,8 @@ class TestNonBatchPathsFailLoudly:
         mock_sqs_cls.return_value = _make_sqs_handler()
         mock_process.return_value = ({flag: True, "tweet_id": "t1"}, None, True)
 
+        # 型で判別できることが要点。umbrella での catch が壊れていないことも固定する
+        assert issubclass(expected, LookupUnavailableError)
         with pytest.raises(expected, match="was not fetched"):
             lambda_handler(event, _make_context())
 
@@ -763,12 +765,13 @@ class TestCreditsDepletedObservability:
         with caplog.at_level(logging.ERROR):
             lambda_handler({}, _make_context())
 
-        # 出力箇所ごとに固定する。どちらか一方が debug に落ちても text 全体には
-        # 残ってしまうため、「少なくとも1箇所」では検知の後退を捕まえられない
-        emitters = {
-            r.funcName for r in caplog.records if "CREDITS_DEPLETED" in r.getMessage() and r.levelno >= logging.ERROR
-        }
-        assert emitters == {"connect_to_endpoint", "_process_single_tweet"}
+        # メトリクスフィルタの契約は「ERROR 以上で1回以上出ること」。どの関数が出すかや
+        # 何回出るかは実装の詳細なので固定しない(現状は2箇所から出るが、重複の整理を
+        # テストで妨げたくない)。全箇所が debug に落ちたりリネームされた場合はここで落ちる
+        credit_errors = [
+            r for r in caplog.records if "CREDITS_DEPLETED" in r.getMessage() and r.levelno >= logging.ERROR
+        ]
+        assert credit_errors, "CREDITS_DEPLETED が ERROR 以上で出力されていない"
 
     @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.requests.request")
     @patch("birdxplorer_etl.lib.lambda_handler.postlookup_lambda.bearer_oauth")

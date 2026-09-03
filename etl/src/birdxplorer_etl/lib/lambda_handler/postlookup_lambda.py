@@ -6,6 +6,7 @@ from typing import Any, Optional
 
 import requests
 
+from birdxplorer_common.exceptions import BaseError
 from birdxplorer_etl.lib.lambda_handler.common.sqs_handler import SQSHandler
 
 # Lambda用のロガー設定
@@ -13,7 +14,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
-class LookupUnavailableError(Exception):
+class LookupUnavailableError(BaseError):
     """ツイートを取得できず、リトライしても即座には回復しない状態。
 
     バッチ経路以外(SQS Records / 直接呼び出し)で送出して、呼び出しを失敗させる。
@@ -116,12 +117,14 @@ def connect_to_endpoint(url: str) -> tuple[dict, Optional[int]]:
         logger.warning("[RATE_LIMITED] 429 received. Message will return to queue via visibility timeout.")
         return {"status": "rate_limited"}, 0
     elif response.status_code == 402:
-        # ⚠️ デプロイ順序: BirdXplorer-cdk の tweet-lookup retentionPeriod 14日化を
-        # 必ず先にデプロイすること。この変更を先に入れると receive が毎分35件から1件に
-        # 落ちて DLQ への退避が止まり、保持期間4日のまま滞留が全件消える。現状は receive の
-        # 回転で一部が DLQ に逃げて14日まで残るので、順序を誤ると何もしないより悪くなる。
-        #
         # X API のクレジット枯渇。全リクエストが失敗するのでバッチを止める。
+        #
+        # 枯渇中はここで止まるので receive が毎分1件になり、maxReceiveCount には事実上
+        # 到達しない。したがって滞留の期限は tweet-lookup キューの retentionPeriod で決まる
+        # (2026-09-03 時点で14日、元 enqueue 起算)。保持期間切れは DLQ に回らず静かに削除
+        # されるので、期限までにクレジットを復旧させるか再 enqueue 経路を用意する必要がある。
+        # postlookup は本体キューしかポーリングしないため、DLQ に落ちた分は手動 redrive が
+        # 必要になる。
         # ここで止めないと 1 メッセージも処理できないまま MAX_MESSAGES_PER_INVOCATION 件を
         # 毎分 receive し続け、ApproximateReceiveCount だけが進んで maxReceiveCount に達し、
         # 未処理のまま DLQ へ送られる。2026-08-14 の枯渇では実際にこれが起きた。
@@ -214,10 +217,12 @@ def _raise_if_lookup_unavailable(result: dict[str, Any], should_stop: bool, twee
     200 を見た SQS がメッセージを削除するため、DLQ にも残らず恒久的に失われる。
 
     ⚠️ ただし SqsEventSource を付けるなら、この「送出する」だけでは不十分。402 が続く間
-    メッセージ単位で raise すると maxReceiveCount=5 / visibilityTimeout 180秒 の下では
-    約15分でキュー全体が DLQ に落ちる。つまり元の障害をより速く再現する。恒久停止する
-    種類の失敗にはバッチ単位のサーキットブレーカが必要で、raise はあくまで
-    「EventBridge 単独駆動かつ一過性の失敗」に対する正解。
+    メッセージ単位で raise すると、そのメッセージは maxReceiveCount=5 /
+    visibilityTimeout 180秒 の下で約12〜15分で DLQ に落ちる。キュー全体がどれだけの
+    速さで流れるかは配信スループット次第だが、いずれにせよ未取得のまま DLQ に溜まる
+    という元の障害を再現する。恒久停止する種類の失敗にはバッチ単位のサーキット
+    ブレーカが必要で、raise はあくまで「EventBridge 単独駆動かつ一過性の失敗」に
+    対する正解。
     """
     if not should_stop:
         return
