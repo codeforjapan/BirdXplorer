@@ -304,6 +304,45 @@ class TestProcessRatingRows:
         assert total == 50001
         assert mock_cursor.copy_expert.call_count == 2
 
+    def _captured_buffer(self, mock_cursor: MagicMock) -> str:
+        """copy_expert に渡された COPY バッファの中身を取り出す"""
+        assert mock_cursor.copy_expert.called, "copy_expert が呼ばれていない"
+        buffer = mock_cursor.copy_expert.call_args[0][1]
+        buffer.seek(0)
+        return buffer.read()
+
+    def test_escapes_backslash_so_copy_marker_is_not_produced(self) -> None:
+        """suggestion 内の `\\.` を素通しすると COPY が end-of-copy marker corrupt で落ちる。
+
+        2026-09-07 の ratings-00008.tsv 5736123行目に実在した値を再現している。
+        """
+        mock_session, _, mock_cursor = self._mock_session_with_dbapi()
+
+        row = self._make_rating_row("n1", "r1")
+        row["suggestion"] = r"based on the number of reported cases\. However, this does not"
+
+        _process_rating_rows([row], mock_session, {"n1"}, 0)
+
+        written = self._captured_buffer(mock_cursor)
+        suggestion_idx = _RATING_COLUMNS.index("suggestion")
+        field = written.rstrip("\n").split("\t")[suggestion_idx]
+        assert "\\\\." in field, f"バックスラッシュがエスケープされていない: {field!r}"
+
+    def test_escapes_tab_newline_and_carriage_return(self) -> None:
+        """タブ・改行を素通しすると列がずれる。COPY TEXT のエスケープ形式で書くこと。"""
+        mock_session, _, mock_cursor = self._mock_session_with_dbapi()
+
+        row = self._make_rating_row("n1", "r1")
+        row["suggestion"] = "line1\nline2\tcol\rend"
+
+        _process_rating_rows([row], mock_session, {"n1"}, 0)
+
+        written = self._captured_buffer(mock_cursor)
+        assert written.count("\n") == 1, "改行が素通しされ行が分割されている"
+        fields = written.rstrip("\n").split("\t")
+        assert len(fields) == len(_RATING_COLUMNS), f"列数がずれている: {len(fields)}"
+        assert fields[_RATING_COLUMNS.index("suggestion")] == r"line1\nline2\tcol\rend"
+
 
 class TestExtractRatingsErrorRecovery:
     """extract_ratings のエラーリカバリテスト"""

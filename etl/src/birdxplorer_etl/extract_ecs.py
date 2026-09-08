@@ -591,6 +591,18 @@ def _validate_rating_row(row: dict, existing_row_note_ids: set) -> bool:
     return True
 
 
+# COPY TEXT 形式の特殊文字。素通しすると値が壊れるだけでなく COPY 自体が失敗する。
+# 特に行頭の `\.` は終端マーカーとみなされ、psycopg2 が
+# BadCopyFileFormat: end-of-copy marker corrupt を送出してファイル全体の取り込みが落ちる。
+# ratings の suggestion はユーザ入力のフリーテキストなので、これらは実際に混入する。
+_COPY_TEXT_ESCAPES = str.maketrans({"\\": "\\\\", "\n": "\\n", "\r": "\\r", "\t": "\\t"})
+
+
+def _escape_copy_text(value: str) -> str:
+    """COPY TEXT 形式に合わせてバックスラッシュ・タブ・改行をエスケープする。"""
+    return value.translate(_COPY_TEXT_ESCAPES)
+
+
 def _process_rating_rows(reader, postgresql: Session, existing_row_note_ids: set, file_index: int) -> int:
     """ratingsのTSV行をバリデーションし、COPYでstaging tableにバルクロードする。"""
     BATCH_SIZE = 50000
@@ -613,7 +625,7 @@ def _process_rating_rows(reader, postgresql: Session, existing_row_note_ids: set
             if val is None:
                 values.append("\\N")
             else:
-                values.append(str(val))
+                values.append(_escape_copy_text(str(val)))
         buffer.write("\t".join(values) + "\n")
         row_count += 1
 
