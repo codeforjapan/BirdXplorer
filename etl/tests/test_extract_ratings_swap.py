@@ -1,3 +1,5 @@
+import csv
+import io
 import logging
 import sys
 from unittest.mock import MagicMock, patch
@@ -18,9 +20,12 @@ from birdxplorer_etl.extract_ecs import (  # noqa: E402
     _cleanup_staging_table,
     _create_staging_table,
     _deduplicate_staging_table,
+    _iter_lines_without_nul,
     _process_rating_rows,
+    _run_phase,
     _swap_ratings_table,
     _validate_rating_row,
+    extract_data,
     extract_ratings,
 )
 
@@ -326,7 +331,9 @@ class TestProcessRatingRows:
         written = self._captured_buffer(mock_cursor)
         suggestion_idx = _RATING_COLUMNS.index("suggestion")
         field = written.rstrip("\n").split("\t")[suggestion_idx]
-        assert "\\\\." in field, f"バックスラッシュがエスケープされていない: {field!r}"
+        # 完全一致で見る。部分一致だと二重エスケープされていても通ってしまう。
+        expected = r"based on the number of reported cases\\. However, this does not"
+        assert field == expected, f"想定外の出力: {field!r}"
 
     def test_escapes_tab_newline_and_carriage_return(self) -> None:
         """タブ・改行を素通しすると列がずれる。COPY TEXT のエスケープ形式で書くこと。"""
@@ -512,3 +519,122 @@ class TestRatingColumns:
         idx_suggestion = _RATING_COLUMNS.index("suggestion")
         idx_suggestion_id = _RATING_COLUMNS.index("suggestion_id")
         assert idx_rated < idx_source < idx_suggestion < idx_suggestion_id
+
+
+class TestIterLinesWithoutNul:
+    """_iter_lines_without_nul のユニットテスト"""
+
+    def test_csv_cannot_parse_nul_without_the_helper(self) -> None:
+        """前提の確認: NUL を含む行を csv にそのまま渡すと _csv.Error で落ちる。"""
+        raw = io.StringIO("note_id\tsuggestion\nn1\tbad\x00value\n")
+
+        with pytest.raises(csv.Error, match="NUL"):
+            list(csv.DictReader(raw, delimiter="\t"))
+
+    def test_strips_nul_so_csv_can_parse(self) -> None:
+        raw = io.StringIO("note_id\tsuggestion\nn1\tbad\x00value\n")
+
+        rows = list(csv.DictReader(_iter_lines_without_nul(raw), delimiter="\t"))
+
+        assert rows == [{"note_id": "n1", "suggestion": "badvalue"}]
+
+    def test_leaves_clean_lines_untouched(self) -> None:
+        raw = io.StringIO("note_id\tsuggestion\nn1\tokay\n")
+
+        rows = list(csv.DictReader(_iter_lines_without_nul(raw), delimiter="\t"))
+
+        assert rows == [{"note_id": "n1", "suggestion": "okay"}]
+
+
+class TestRunPhase:
+    """_run_phase のユニットテスト"""
+
+    def test_returns_true_and_logs_completion_on_success(self, caplog: pytest.LogCaptureFixture) -> None:
+        mock_session = MagicMock()
+        calls = []
+
+        with caplog.at_level(logging.INFO):
+            result = _run_phase("Ratings", mock_session, lambda: calls.append("ran"))
+
+        assert result is True
+        assert calls == ["ran"]
+        assert "[PHASE_COMPLETE] Ratings" in caplog.text
+        mock_session.rollback.assert_not_called()
+
+    def test_swallows_exception_so_later_phases_still_run(self) -> None:
+        """フェーズが落ちてもプロセスを殺さない。これが後続フェーズの飢餓を防ぐ肝。"""
+        mock_session = MagicMock()
+
+        def boom() -> None:
+            raise RuntimeError("end-of-copy marker corrupt")
+
+        result = _run_phase("Ratings", mock_session, boom)
+
+        assert result is False
+
+    def test_logs_alarm_token_on_failure(self, caplog: pytest.LogCaptureFixture) -> None:
+        """握りつぶしを無音にしないため、アラーム連携用トークンを必ず出す。"""
+        mock_session = MagicMock()
+
+        def boom() -> None:
+            raise RuntimeError("end-of-copy marker corrupt")
+
+        with caplog.at_level(logging.ERROR):
+            _run_phase("Ratings", mock_session, boom)
+
+        assert "EXTRACT_PHASE_FAILED" in caplog.text
+        assert "phase=Ratings" in caplog.text
+        assert "end-of-copy marker corrupt" in caplog.text
+
+    def test_rolls_back_on_failure(self) -> None:
+        """例外後のセッションは InFailedSqlTransaction になるため後続フェーズが道連れになる。"""
+        mock_session = MagicMock()
+
+        def boom() -> None:
+            raise RuntimeError("boom")
+
+        _run_phase("Ratings", mock_session, boom)
+
+        mock_session.rollback.assert_called_once()
+
+
+class TestExtractDataPhaseIsolation:
+    """前段フェーズの失敗が後段フェーズを巻き添えにしないことのテスト"""
+
+    @patch("birdxplorer_etl.extract_ecs.run_note_requests_phase")
+    @patch("birdxplorer_etl.extract_ecs.backfill_missing_notes")
+    @patch("birdxplorer_etl.extract_ecs.recalculate_rating_counts")
+    @patch("birdxplorer_etl.extract_ecs.extract_ratings")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_ratings_failure_does_not_starve_note_requests_phase(
+        self,
+        mock_requests: MagicMock,
+        mock_extract_ratings: MagicMock,
+        mock_recalculate: MagicMock,
+        mock_backfill: MagicMock,
+        mock_note_requests: MagicMock,
+    ) -> None:
+        """2026-09-02〜09-07 の実障害の再現。
+
+        ratings の COPY が落ちると extract_data ごと死に、最終フェーズの
+        run_note_requests_phase が6日間まったく走らず tweet-lookup への
+        enqueue が止まっていた。
+        """
+        import settings
+
+        settings.USE_DUMMY_DATA = True
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = b"noteId\tsummary\n"
+        mock_requests.get.return_value = mock_response
+
+        mock_extract_ratings.side_effect = RuntimeError("end-of-copy marker corrupt")
+
+        mock_session = MagicMock()
+        mock_session.query.return_value.all.return_value = []
+
+        extract_data(mock_session)
+
+        mock_extract_ratings.assert_called_once()
+        mock_note_requests.assert_called_once()
+        mock_backfill.assert_called_once()

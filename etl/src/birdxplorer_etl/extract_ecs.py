@@ -7,7 +7,7 @@ import sys
 import time
 import zipfile
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Callable, Iterable, Iterator, Optional
 
 import boto3
 import requests
@@ -143,6 +143,28 @@ def _detect_status_changes(postgresql: Session, rows: list[dict]) -> list[str]:
             if old != new:
                 changed.append(nid)
     return changed
+
+
+def _run_phase(name: str, postgresql: Session, phase: Callable[[], None]) -> bool:
+    """1フェーズを実行し、失敗しても後続フェーズを止めない。成功なら True。
+
+    フェーズを直列に裸で呼ぶと、前段の例外が extract_data を貫通してプロセスごと落ち、
+    後段のフェーズが一度も走らない。2026-09-02 からの6日間、ratings の COPY 失敗が
+    run_note_requests_phase を巻き添えにして tweet-lookup への enqueue を止めていた。
+
+    ただし握りつぶしを無音にすると劣化に気付けないので、CloudWatch メトリクスフィルタ用に
+    EXTRACT_PHASE_FAILED トークンを必ず出す（NOTE_REQUEST_ROW_SKIPPED と同じ方式）。
+    例外後のセッションは InFailedSqlTransaction のままなので rollback して後段に渡す。
+    """
+    phase_start = time.time()
+    try:
+        phase()
+    except Exception as e:
+        postgresql.rollback()
+        logging.exception(f"EXTRACT_PHASE_FAILED phase={name} elapsed={time.time() - phase_start:.1f}s reason={e}")
+        return False
+    logging.info(f"[PHASE_COMPLETE] {name}: {time.time() - phase_start:.1f}s")
+    return True
 
 
 def extract_data(postgresql: Session):
@@ -334,18 +356,10 @@ def extract_data(postgresql: Session):
             continue
 
         # 評価データを取得して保存（noteStatus処理より先に実行することで集計タイミングを保証）
-        phase_start = time.time()
-        extract_ratings(postgresql, dateString, existing_row_note_ids)
-        logging.info(f"[PHASE_COMPLETE] Ratings: {time.time() - phase_start:.1f}s")
+        _run_phase("Ratings", postgresql, lambda: extract_ratings(postgresql, dateString, existing_row_note_ids))
 
         # notesテーブルの評価集計カラムを再計算
-        phase_start = time.time()
-        try:
-            recalculate_rating_counts(postgresql)
-            logging.info(f"[PHASE_COMPLETE] Rating recalculation: {time.time() - phase_start:.1f}s")
-        except Exception as e:
-            logging.error(f"Rating recalculation failed: {e}")
-            postgresql.rollback()
+        _run_phase("Rating recalculation", postgresql, lambda: recalculate_rating_counts(postgresql))
 
         # noteStatusHistory-00000.zip から順に404が返るまでダウンロード
         phase_start = time.time()
@@ -447,12 +461,10 @@ def extract_data(postgresql: Session):
     postgresql.commit()
 
     # row_notesにあるがnotesにないレコードをバックフィル
-    phase_start = time.time()
-    backfill_missing_notes(postgresql)
-    logging.info(f"[PHASE_COMPLETE] Backfill: {time.time() - phase_start:.1f}s")
+    _run_phase("Backfill", postgresql, lambda: backfill_missing_notes(postgresql))
 
     # Note Requests (batSignals) の取り込みと投稿 lookup の enqueue
-    run_note_requests_phase(postgresql)
+    _run_phase("NoteRequests", postgresql, lambda: run_note_requests_phase(postgresql))
 
     return
 
@@ -599,8 +611,19 @@ _COPY_TEXT_ESCAPES = str.maketrans({"\\": "\\\\", "\n": "\\n", "\r": "\\r", "\t"
 
 
 def _escape_copy_text(value: str) -> str:
-    """COPY TEXT 形式に合わせてバックスラッシュ・タブ・改行をエスケープする。"""
+    """COPY TEXT 形式に合わせてバックスラッシュ・改行・復帰・タブをエスケープする。"""
     return value.translate(_COPY_TEXT_ESCAPES)
+
+
+def _iter_lines_without_nul(lines: Iterable[str]) -> Iterator[str]:
+    """NUL(0x00) を除去しながら行を流す。
+
+    PostgreSQL のテキスト型は NUL を保存できず、COPY TEXT にも表現が無いので除去しかない。
+    さらに csv は NUL を含む行で ``_csv.Error: line contains NUL`` を投げるため、
+    パーサに渡す手前で落とす必要がある。X のフリーテキストにはまれに混入する。
+    """
+    for line in lines:
+        yield line.replace("\x00", "") if "\x00" in line else line
 
 
 def _process_rating_rows(reader, postgresql: Session, existing_row_note_ids: set, file_index: int) -> int:
@@ -705,7 +728,7 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
             try:
                 if settings.USE_DUMMY_DATA:
                     tsv_data = res.content.decode("utf-8").splitlines()
-                    reader = csv.DictReader(tsv_data, delimiter="\t")
+                    reader = csv.DictReader(_iter_lines_without_nul(tsv_data), delimiter="\t")
                     reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
                     total_loaded += _process_rating_rows(reader, postgresql, existing_row_note_ids, file_index)
                 else:
@@ -718,7 +741,7 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
 
                         with zip_file.open(tsv_filename) as tsv_file:
                             text_file = io.TextIOWrapper(tsv_file, encoding="utf-8")
-                            reader = csv.DictReader(text_file, delimiter="\t")
+                            reader = csv.DictReader(_iter_lines_without_nul(text_file), delimiter="\t")
                             reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
                             total_loaded += _process_rating_rows(reader, postgresql, existing_row_note_ids, file_index)
 
@@ -820,7 +843,7 @@ def recalculate_rating_counts(postgresql: Session) -> int:
 _STAGING_TABLE = "row_note_ratings_new"
 _OLD_TABLE = "row_note_ratings_old"
 
-# _process_rating_rows_to_staging で COPY に使うカラム順
+# _process_rating_rows で COPY に使うカラム順
 _RATING_COLUMNS = [
     "note_id",
     "rater_participant_id",
@@ -1231,9 +1254,10 @@ def enqueue_note_request_lookups(postgresql: Session, batch_limit: int = 10000):
 
 
 def run_note_requests_phase(postgresql: Session):
-    """Note Requests の取り込みと lookup enqueue。失敗しても extract 全体は落とさない。"""
-    try:
-        extract_note_requests(postgresql)
-        enqueue_note_request_lookups(postgresql)
-    except Exception:
-        logging.exception("Note requests phase failed, continuing")
+    """Note Requests の取り込みと lookup enqueue。
+
+    失敗の握りつぶしは _run_phase に集約している。ここで独自に握りつぶすと
+    EXTRACT_PHASE_FAILED トークンが出ずアラームに乗らないので、例外はそのまま送出する。
+    """
+    extract_note_requests(postgresql)
+    enqueue_note_request_lookups(postgresql)
