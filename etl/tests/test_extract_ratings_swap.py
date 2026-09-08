@@ -597,6 +597,25 @@ class TestRunPhase:
 
         mock_session.rollback.assert_called_once()
 
+    def test_logs_alarm_token_even_when_rollback_fails(self, caplog: pytest.LogCaptureFixture) -> None:
+        """DB コネクションごと死ぬと rollback 自体も失敗する。
+
+        そこでトークンを取りこぼすと、アラームが最も必要な場面で無音になる。
+        トークンの出力は rollback より先でなければならない。
+        """
+        mock_session = MagicMock()
+        mock_session.rollback.side_effect = RuntimeError("connection already closed")
+
+        def boom() -> None:
+            raise RuntimeError("server closed the connection unexpectedly")
+
+        with caplog.at_level(logging.ERROR):
+            result = _run_phase("Ratings", mock_session, boom)
+
+        assert result is False
+        assert "EXTRACT_PHASE_FAILED" in caplog.text
+        assert "phase=Ratings" in caplog.text
+
 
 class TestExtractDataPhaseIsolation:
     """前段フェーズの失敗が後段フェーズを巻き添えにしないことのテスト"""

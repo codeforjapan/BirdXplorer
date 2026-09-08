@@ -155,13 +155,22 @@ def _run_phase(name: str, postgresql: Session, phase: Callable[[], None]) -> boo
     ただし握りつぶしを無音にすると劣化に気付けないので、CloudWatch メトリクスフィルタ用に
     EXTRACT_PHASE_FAILED トークンを必ず出す（NOTE_REQUEST_ROW_SKIPPED と同じ方式）。
     例外後のセッションは InFailedSqlTransaction のままなので rollback して後段に渡す。
+
+    トークンの出力は rollback より必ず先に行う。RDS のフェイルオーバーや接続断で
+    フェーズが落ちた場合は rollback 自体も例外を投げるため、順序を逆にすると
+    トークンを取りこぼしたうえでプロセスが死ぬ。アラームが最も必要な場面で無音になる。
     """
     phase_start = time.time()
     try:
         phase()
     except Exception as e:
-        postgresql.rollback()
         logging.exception(f"EXTRACT_PHASE_FAILED phase={name} elapsed={time.time() - phase_start:.1f}s reason={e}")
+        try:
+            postgresql.rollback()
+        except Exception:
+            # 接続が死んでいると rollback もできない。後段フェーズはそれぞれ失敗して
+            # 個別にトークンを出すので、ここで打ち切らず契約（例外を投げない）を守る。
+            logging.exception(f"EXTRACT_PHASE_FAILED phase={name} rollback also failed")
         return False
     logging.info(f"[PHASE_COMPLETE] {name}: {time.time() - phase_start:.1f}s")
     return True
