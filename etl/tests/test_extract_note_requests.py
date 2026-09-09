@@ -5,6 +5,8 @@ import sys
 import zipfile
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 # extract_ecs.py は psycopg2 と settings を transitively import する（ECS/Lambda ランタイム専用）
 _mock_psycopg2 = MagicMock()
 _mock_psycopg2.extensions = MagicMock()
@@ -283,13 +285,19 @@ class TestEnqueueNoteRequestLookups:
 
 
 class TestRunNoteRequestsPhase:
-    def test_swallows_exceptions(self):
+    def test_propagates_exceptions_so_the_failure_reaches_the_alarm(self):
+        """握りつぶしは _run_phase に集約した。
+
+        ここで握りつぶすと EXTRACT_PHASE_FAILED トークンが出ずアラームに乗らないため、
+        例外はそのまま送出する。extract 全体が落ちない保証は _run_phase 側のテストが持つ。
+        """
         session = MagicMock()
         with patch(
             "birdxplorer_etl.extract_ecs.extract_note_requests",
             side_effect=RuntimeError("SQS send failed"),
         ):
-            run_note_requests_phase(session)  # 例外が伝播しなければ成功
+            with pytest.raises(RuntimeError, match="SQS send failed"):
+                run_note_requests_phase(session)
 
     def test_calls_both_functions(self):
         session = MagicMock()
