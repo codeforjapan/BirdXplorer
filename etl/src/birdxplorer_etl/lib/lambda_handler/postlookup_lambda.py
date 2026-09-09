@@ -6,11 +6,29 @@ from typing import Any, Optional
 
 import requests
 
+from birdxplorer_common.exceptions import BaseError
 from birdxplorer_etl.lib.lambda_handler.common.sqs_handler import SQSHandler
 
 # Lambda用のロガー設定
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+
+class LookupUnavailableError(BaseError):
+    """ツイートを取得できず、リトライしても即座には回復しない状態。
+
+    バッチ経路以外(SQS Records / 直接呼び出し)で送出して、呼び出しを失敗させる。
+    文字列ではなく型で判別できるようにしてある(既存の 401/403 判定が
+    エラーメッセージの部分一致に頼っているため、同じ轍を踏まないように)。
+    """
+
+
+class CreditsDepletedError(LookupUnavailableError):
+    """X API のクレジット枯渇 (HTTP 402)。課金しない限り回復しない"""
+
+
+class RateLimitedError(LookupUnavailableError):
+    """X API のレート制限 (HTTP 429)。時間が経てば回復する"""
 
 
 def create_url(id: str) -> str:
@@ -98,6 +116,23 @@ def connect_to_endpoint(url: str) -> tuple[dict, Optional[int]]:
     if response.status_code == 429:
         logger.warning("[RATE_LIMITED] 429 received. Message will return to queue via visibility timeout.")
         return {"status": "rate_limited"}, 0
+    elif response.status_code == 402:
+        # X API のクレジット枯渇。全リクエストが失敗するのでバッチを止める。
+        #
+        # 枯渇中はここで止まるので receive が毎分1件になり、maxReceiveCount には事実上
+        # 到達しない。したがって滞留の期限は tweet-lookup キューの retentionPeriod で決まる
+        # (2026-09-03 時点で14日、元 enqueue 起算)。保持期間切れは DLQ に回らず静かに削除
+        # されるので、期限までにクレジットを復旧させるか再 enqueue 経路を用意する必要がある。
+        # postlookup は本体キューしかポーリングしないため、DLQ に落ちた分は手動 redrive が
+        # 必要になる。
+        # ここで止めないと 1 メッセージも処理できないまま MAX_MESSAGES_PER_INVOCATION 件を
+        # 毎分 receive し続け、ApproximateReceiveCount だけが進んで maxReceiveCount に達し、
+        # 未処理のまま DLQ へ送られる。2026-08-14 の枯渇では実際にこれが起きた。
+        logger.error("[CREDITS_DEPLETED] X API 402 Payment Required. API credits exhausted. Stopping batch.")
+        # rate_remaining は None を返す。402 はレート制限の残量について何も言っていない。
+        # ここで 0 を返すと、仮に should_stop の break が外れたときに
+        # 「rate limit exhausted」の停止条件を誤って踏み、原因を取り違える。
+        return {"status": "credits_depleted"}, None
     elif response.status_code == 401:
         logger.error("[DLQ_CAUSE:AUTH_FAILED] X API 401 Unauthorized. Check X_BEARER_TOKEN.")
         raise Exception("X API authentication failed: 401 Unauthorized. Token may be invalid or expired.")
@@ -122,6 +157,7 @@ def lookup(id: str) -> tuple[dict, Optional[int]]:
         - 非公開時: ({"status": "protected", "title": ..., "detail": ...}, rate_remaining)
         - その他エラー: ({"status": "error", "title": ..., "detail": ...}, rate_remaining)
         - レート制限時: ({"status": "rate_limited"}, 0)
+        - クレジット枯渇時: ({"status": "credits_depleted"}, None)
     """
     url = create_url(id)
     json_response, rate_remaining = connect_to_endpoint(url)
@@ -170,6 +206,33 @@ def _poll_message(sqs_handler: SQSHandler, queue_url: str) -> Optional[dict]:
 
 MAX_MESSAGES_PER_INVOCATION = 35
 TIMEOUT_BUFFER_MS = 10_000  # 10秒のバッファ
+
+
+def _raise_if_lookup_unavailable(result: dict[str, Any], should_stop: bool, tweet_id: str) -> None:
+    """should_stop なら例外を送出する。取得できていない呼び出しを成功として返さないため。
+
+    呼び出し側が statusCode や FunctionError だけを見て成否を判断できることを保証する。
+    これが無いと 402/429 で1件も取得できていないのに 200 が返り、手動バックフィルが
+    「全件成功・0行書き込み」を成功と報告する。将来 SqsEventSource を付けた場合は
+    200 を見た SQS がメッセージを削除するため、DLQ にも残らず恒久的に失われる。
+
+    ⚠️ ただし SqsEventSource を付けるなら、この「送出する」だけでは不十分。402 が続く間
+    メッセージ単位で raise すると、そのメッセージは maxReceiveCount=5 /
+    visibilityTimeout 180秒 の下で約12〜15分で DLQ に落ちる。キュー全体がどれだけの
+    速さで流れるかは配信スループット次第だが、いずれにせよ未取得のまま DLQ に溜まる
+    という元の障害を再現する。恒久停止する種類の失敗にはバッチ単位のサーキット
+    ブレーカが必要で、raise はあくまで「EventBridge 単独駆動かつ一過性の失敗」に
+    対する正解。
+    """
+    if not should_stop:
+        return
+    # should_stop = 何も取得できていない。既知のキーに当てはまらない停止理由が将来
+    # 増えても 200 を返さないよう、既定で送出する側に倒す
+    if result.get("credits_depleted"):
+        raise CreditsDepletedError(f"X API credits depleted; tweet {tweet_id} was not fetched")
+    if result.get("rate_limited"):
+        raise RateLimitedError(f"X API rate limited; tweet {tweet_id} was not fetched")
+    raise LookupUnavailableError(f"lookup unavailable ({sorted(result)}); tweet {tweet_id} was not fetched")
 
 
 def _process_single_tweet(
@@ -224,6 +287,13 @@ def _process_single_tweet(
         if status == "rate_limited":
             logger.info("[RATE_LIMITED] Message not deleted. Will return to queue via visibility timeout.")
             return {"rate_limited": True, "tweet_id": tweet_id}, 0, True
+
+        if status == "credits_depleted":
+            # rate_limited と同様にメッセージを削除せず、バッチを止める。
+            # 別ステータスにしているのは、運用上の原因がレート制限とは全く異なるため
+            # (課金の問題であり、待っても回復しない)。ログのキーワードも分けている。
+            logger.error("[CREDITS_DEPLETED] Message not deleted. Batch stopped until credits are restored.")
+            return {"credits_depleted": True, "tweet_id": tweet_id}, None, True
 
         detail = post.get("detail", "")
         if status == "deleted":
@@ -373,6 +443,11 @@ def lambda_handler(event: dict, context: Any) -> dict:
     1. EventBridge (定期実行): event={} → SQSキューをポーリング（バッチ処理）
     2. 直接呼び出し: {"tweet_id": "1234567890"}
     3. SQS経由 (レガシー): {"Records": [{"body": "..."}]}
+
+    ログで識別可能なキーワード:
+      [RATE_LIMITED]     : X API 429（時間経過で回復する）
+      [CREDITS_DEPLETED] : X API 402 クレジット枯渇（CW Metric Filter の検知対象）
+      [DLQ_CAUSE:*]      : DLQ 行きの原因
     """
     logger.info("=" * 80)
     logger.info("Postlookup Lambda started")
@@ -406,7 +481,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
                     "body": json.dumps({"error": "No valid tweet_lookup message found in Records"}),
                 }
 
-            result, _rate_remaining, _should_stop = _process_single_tweet(
+            result, _rate_remaining, should_stop = _process_single_tweet(
                 tweet_id=tweet_id,
                 receipt_handle=None,
                 skip_tweet_lookup=skip_tweet_lookup,
@@ -415,12 +490,13 @@ def lambda_handler(event: dict, context: Any) -> dict:
                 post_transform_queue_url=post_transform_queue_url,
                 tweet_lookup_queue_url=tweet_lookup_queue_url,
             )
+            _raise_if_lookup_unavailable(result, should_stop, tweet_id)
             return {"statusCode": 200, "body": json.dumps(result)}
 
         # 2. 直接呼び出しの場合
         if "tweet_id" in event:
             tweet_id = event["tweet_id"]
-            result, _rate_remaining, _should_stop = _process_single_tweet(
+            result, _rate_remaining, should_stop = _process_single_tweet(
                 tweet_id=tweet_id,
                 receipt_handle=None,
                 skip_tweet_lookup=False,
@@ -429,6 +505,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
                 post_transform_queue_url=post_transform_queue_url,
                 tweet_lookup_queue_url=tweet_lookup_queue_url,
             )
+            _raise_if_lookup_unavailable(result, should_stop, tweet_id)
             return {"statusCode": 200, "body": json.dumps(result)}
 
         # 3. EventBridge起動の場合 — バッチ処理ループ
@@ -440,6 +517,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
         skipped = 0
         errors = 0
         rate_limited = False
+        credits_depleted = False
         last_rate_remaining: Optional[int] = None
 
         for i in range(MAX_MESSAGES_PER_INVOCATION):
@@ -484,6 +562,8 @@ def lambda_handler(event: dict, context: Any) -> dict:
                     skipped += 1
                 elif result.get("rate_limited"):
                     rate_limited = True
+                elif result.get("credits_depleted"):
+                    credits_depleted = True
                 else:
                     processed += 1
 
@@ -510,7 +590,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
         logger.info("=" * 80)
         logger.info(
             f"[BATCH_COMPLETE] Processed={processed}, Skipped={skipped}, "
-            f"Errors={errors}, RateLimited={rate_limited}"
+            f"Errors={errors}, RateLimited={rate_limited}, CreditsDepleted={credits_depleted}"
         )
         logger.info("=" * 80)
 
@@ -523,6 +603,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
                     "skipped": skipped,
                     "errors": errors,
                     "rate_limited": rate_limited,
+                    "credits_depleted": credits_depleted,
                 }
             ),
         }
