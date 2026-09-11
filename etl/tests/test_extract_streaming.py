@@ -35,7 +35,7 @@ def _reader_over_zip(tsv_text: str, member: str = "notes-00000.tsv") -> csv.Dict
     buf.seek(0)
     zip_file = zipfile.ZipFile(buf)
     tsv_file = zip_file.open(member)
-    text_file = io.TextIOWrapper(tsv_file, encoding="utf-8")
+    text_file = io.TextIOWrapper(tsv_file, encoding="utf-8", newline="")
     reader = csv.DictReader(_iter_lines_without_nul(text_file), delimiter="\t")
     reader.fieldnames = [stringcase.snakecase(field) for field in reader.fieldnames]
     return reader
@@ -56,10 +56,14 @@ class TestProcessNoteRows:
         pending = flush.call_args_list[-1].args[2]
         assert list(pending) == ["n1"]
 
-    def test_a_quoted_newline_stays_one_row(self) -> None:
-        """splitlines() はクォート内の改行でも行を割ってしまう。
+    def test_a_quoted_newline_is_preserved(self) -> None:
+        """クォート内の改行が値として保たれること。
 
-        ストリーミング + csv なら1行として扱われる。取り込み行数が変わる挙動変化。
+        旧実装(splitlines())でも行数は変わらない。splitlines() がクォート内で割った断片を
+        csv.reader が再結合するため。ただし改行そのものは落ちるので値は "line oneline two"
+        になっていた。ストリーミングでは "line one\nline two" のまま保たれる。
+        つまり行数ではなく summary の値が変わる挙動変化であり、次のフル再取り込みで
+        改行を含む summary は全件値が更新される。
         """
         tsv = 'noteId\tsummary\nn1\t"line one\nline two"\n'
         reader = _reader_over_zip(tsv)
@@ -124,3 +128,86 @@ class TestProcessNoteStatusRows:
                     _process_note_status_rows(reader, session, {"n1"})
 
         assert [r["note_id"] for r in upsert.call_args.args[1]] == ["n1"]
+
+
+class TestFlushBoundary:
+    def test_a_duplicate_row_does_not_skip_the_flush_boundary(self) -> None:
+        """重複行で境界を踏み外してバッチが膨らまないこと。
+
+        フラッシュ判定を enumerate の index に依存させると、重複 note_id の
+        `continue` が 1000 の倍数を飛ばし、次の境界まで溜め込み続ける。
+        毎1000行目が重複する入力ではファイル全体がメモリに載る＝潰したはずの OOM 形状。
+        """
+        note_ids = [f"n{i}" for i in range(1999)]
+        lines = [f"{note_id}\ts\n" for note_id in note_ids]
+        lines.insert(999, "n0\ts\n")  # 1000行目を重複させ、境界の判定を踏み外させる
+        reader = _reader_over_zip("noteId\tsummary\n" + "".join(lines))
+        session = MagicMock()
+
+        with patch("birdxplorer_etl.extract_ecs._flush_notes_batch") as flush:
+            _process_note_rows(reader, session, set(note_ids))
+
+        batch_sizes = [len(call.args[1]) + len(call.args[2]) for call in flush.call_args_list]
+        assert max(batch_sizes) <= 1000, f"バッチが 1000 件を超えた: {batch_sizes}"
+        # 境界を直した副作用で行を取りこぼしていないこと（重複1件を除いた全件）
+        assert sum(batch_sizes) == 1999, f"フラッシュされた件数が合わない: {batch_sizes}"
+
+
+class TestProductionReaderWiring:
+    """extract_data から実際の zip を通し、production の配線そのものを検証する。"""
+
+    @patch("birdxplorer_etl.extract_ecs.run_note_requests_phase")
+    @patch("birdxplorer_etl.extract_ecs.backfill_missing_notes")
+    @patch("birdxplorer_etl.extract_ecs.recalculate_rating_counts")
+    @patch("birdxplorer_etl.extract_ecs.extract_ratings")
+    @patch("birdxplorer_etl.extract_ecs._process_note_status_rows")
+    @patch("birdxplorer_etl.extract_ecs._process_note_rows")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_crlf_inside_a_quoted_field_is_not_rewritten(
+        self,
+        mock_requests: MagicMock,
+        mock_process_note_rows: MagicMock,
+        mock_process_note_status_rows: MagicMock,
+        mock_extract_ratings: MagicMock,
+        mock_recalculate: MagicMock,
+        mock_backfill: MagicMock,
+        mock_note_requests: MagicMock,
+    ) -> None:
+        """TextIOWrapper に newline="" を渡さないと、csv より前に CRLF が LF へ書き換わる。
+
+        行ズレは起きないが、summary の値が黙って変わる。csv のドキュメントが
+        newline="" を要求しているのはこのため。
+        """
+        import settings
+
+        from birdxplorer_etl.extract_ecs import extract_data
+
+        tsv = 'noteId\tsummary\nn1\t"line one\r\nline two"\r\n'
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("notes-00000.tsv", tsv)
+        zip_bytes = buf.getvalue()
+
+        def fake_get(url: str) -> MagicMock:
+            res = MagicMock()
+            if "notes-00000.zip" in url:
+                res.status_code = 200
+                res.content = zip_bytes
+            else:
+                res.status_code = 404
+            return res
+
+        captured: list = []
+        mock_process_note_rows.side_effect = lambda reader, _session, _ids: captured.extend(reader)
+        mock_requests.get.side_effect = fake_get
+
+        original = settings.USE_DUMMY_DATA
+        settings.USE_DUMMY_DATA = False
+        try:
+            mock_session = MagicMock()
+            mock_session.query.return_value.all.return_value = []
+            extract_data(mock_session)
+        finally:
+            settings.USE_DUMMY_DATA = original
+
+        assert [row["summary"] for row in captured] == ["line one\r\nline two"]
