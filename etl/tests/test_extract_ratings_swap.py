@@ -441,7 +441,6 @@ class TestExtractRatingsErrorRecovery:
     @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
     @patch("birdxplorer_etl.extract_ecs._swap_ratings_table")
     @patch("birdxplorer_etl.extract_ecs._build_staging_pk")
-    @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
     @patch("birdxplorer_etl.extract_ecs._process_rating_rows")
     @patch("birdxplorer_etl.extract_ecs._create_staging_table")
     @patch("birdxplorer_etl.extract_ecs.requests")
@@ -450,12 +449,16 @@ class TestExtractRatingsErrorRecovery:
         mock_requests: MagicMock,
         mock_create: MagicMock,
         mock_process: MagicMock,
-        mock_dedup: MagicMock,
         mock_build_pk: MagicMock,
         mock_swap: MagicMock,
         mock_cleanup: MagicMock,
     ) -> None:
-        """swap失敗時にstaging tableがクリーンアップされる"""
+        """swap失敗時にstaging tableがクリーンアップされる。
+
+        _build_staging_pk を直接パッチしているため IntegrityError は発生せず、
+        _build_staging_pk_with_dedup_fallback は dedup を経由しない
+        （dedup 経路自体は TestOptimisticDedup で別途検証済み）。
+        """
         import settings
 
         settings.USE_DUMMY_DATA = True
@@ -468,7 +471,6 @@ class TestExtractRatingsErrorRecovery:
         mock_requests.get.return_value = resp_ok
 
         mock_process.return_value = 1000
-        mock_dedup.return_value = 50  # 重複排除で50行削除
         mock_swap.side_effect = RuntimeError("Staging table has 100 rows, expected at least 200")
 
         mock_session = MagicMock()
@@ -1026,7 +1028,10 @@ class TestExtractRatingsSkipsDedup:
             response.content = b"noteId\traterParticipantId\n"
             mock_requests.get.return_value = response
             mock_process.return_value = 1000
-            mock_fallback.return_value = 1000
+            # fallback の戻り値を total_loaded (1000) とわざと異ならせ、その値が
+            # そのまま _swap_ratings_table の staging_count に配線されていることを検証する。
+            # total_loaded を素通ししてしまう退行が起きたらこのアサートで落ちる。
+            mock_fallback.return_value = 993
 
             mock_session = MagicMock()
             mock_session.execute.return_value.scalar.return_value = 1000
@@ -1039,3 +1044,6 @@ class TestExtractRatingsSkipsDedup:
         mock_dedup.assert_not_called()
         mock_fallback.assert_called_once()
         mock_swap.assert_called_once()
+        assert (
+            mock_swap.call_args.kwargs["staging_count"] == 993
+        ), "fallback が返した dedup 後の行数が _swap_ratings_table に配線されていない"
