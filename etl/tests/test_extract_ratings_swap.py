@@ -918,19 +918,54 @@ class TestOptimisticDedup:
     PK 構築を先に試して重複が実在したときだけ dedup する。
     """
 
-    def _integrity_error(self) -> IntegrityError:
-        return IntegrityError("ALTER TABLE ...", {}, Exception("duplicate key value violates unique constraint"))
+    def _integrity_error(self, pgcode: str = "23505") -> IntegrityError:
+        """IntegrityError を、実 psycopg2 と同じく orig.pgcode を持つ形で作る。
+
+        pgcode を指定しなければ unique_violation (23505)。dedup で解決できるのは
+        この SQLSTATE だけなので、それ以外を指定すれば再送出されるはず。
+        """
+        orig = Exception("duplicate key value violates unique constraint")
+        orig.pgcode = pgcode  # type: ignore[attr-defined]
+        return IntegrityError("ALTER TABLE ...", {}, orig)
 
     @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
     @patch("birdxplorer_etl.extract_ecs._build_staging_pk")
-    def test_skips_dedup_when_there_are_no_duplicates(self, mock_build: MagicMock, mock_dedup: MagicMock) -> None:
-        """通常日(重複0)は dedup を一度も呼ばない。これが 32分/日 の削減そのもの。"""
+    def test_skips_dedup_when_there_are_no_duplicates(
+        self, mock_build: MagicMock, mock_dedup: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """通常日(重複0)は dedup を一度も呼ばない。これが 32分/日 の削減そのもの。
+
+        spec の成功基準1「通常日には RATING_DUPLICATES_FOUND が出ないこと」もここで固定する。
+        """
         mock_session = MagicMock()
 
-        result = _build_staging_pk_with_dedup_fallback(mock_session, staging_count=1000)
+        with caplog.at_level(logging.WARNING):
+            result = _build_staging_pk_with_dedup_fallback(mock_session, staging_count=1000)
 
         assert result == 1000
         mock_build.assert_called_once()
+        mock_dedup.assert_not_called()
+        mock_session.rollback.assert_not_called()
+        assert "RATING_DUPLICATES_FOUND" not in caplog.text
+
+    @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk")
+    def test_reraises_when_the_integrity_error_is_not_a_unique_violation(
+        self, mock_build: MagicMock, mock_dedup: MagicMock
+    ) -> None:
+        """SQLSTATE が 23505 (unique_violation) 以外の integrity エラーは dedup せずに再送出する。
+
+        psycopg2 は SQLSTATE 23xxx (integrity_constraint_violation) 全般を IntegrityError に
+        マップする。例外クラス名だけで判別すると、重複と無関係な integrity エラーでも
+        32分の dedup を払ったうえで RATING_DUPLICATES_FOUND removed=0 という偽陽性を出し、
+        CloudWatch のメトリクスフィルタを誤発火させる。
+        """
+        mock_session = MagicMock()
+        mock_build.side_effect = self._integrity_error(pgcode="23503")  # foreign_key_violation
+
+        with pytest.raises(IntegrityError):
+            _build_staging_pk_with_dedup_fallback(mock_session, staging_count=1000)
+
         mock_dedup.assert_not_called()
         mock_session.rollback.assert_not_called()
 
@@ -956,7 +991,7 @@ class TestOptimisticDedup:
         rollback せずに dedup を投げると以降が全部失敗する(_run_phase のコメントにある既知の罠)。
         """
         mock_session = MagicMock()
-        order: list = []
+        order: list[str] = []
         mock_session.rollback.side_effect = lambda: order.append("rollback")
         mock_dedup.side_effect = lambda _session: order.append("dedup") or 0
         mock_build.side_effect = [self._integrity_error(), None]
@@ -979,7 +1014,7 @@ class TestOptimisticDedup:
             _build_staging_pk_with_dedup_fallback(mock_session, staging_count=1000)
 
         assert "RATING_DUPLICATES_FOUND" in caplog.text
-        assert "3" in caplog.text
+        assert "removed=3" in caplog.text
 
     @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
     @patch("birdxplorer_etl.extract_ecs._build_staging_pk")

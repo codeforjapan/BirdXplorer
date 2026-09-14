@@ -15,7 +15,7 @@ import settings
 import stringcase
 from sqlalchemy import case, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from birdxplorer_common.storage import (
@@ -732,7 +732,8 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
     指定日付の評価データをダウンロードし、staging table経由でrow_note_ratingsを全置換する。
 
     Community Notesの日次スナップショット（全期間分）をstaging tableにCOPYで高速ロードし、
-    重複排除・PK構築後にアトミックなRENAME swapで本番テーブルと入れ替える。
+    PK構築後にアトミックなRENAME swapで本番テーブルと入れ替える。重複排除は PK 構築が
+    UniqueViolation で失敗したときだけフォールバックとして走る（無条件には走らない）。
 
     Args:
         postgresql: データベースセッション
@@ -838,7 +839,7 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
         min_rows = max(int(current_count * 0.5), 1)
 
         # 高価な PK 構築（失敗時は dedup で約20分）の前に、行数不足が分かっている日を早期に落とす
-        _check_staging_row_count(total_loaded, min_rows)
+        _check_staging_row_count(staging_count=total_loaded, min_rows=min_rows)
 
         # dedup は PK 構築が UniqueViolation で落ちたときだけ走る(_build_staging_pk_with_dedup_fallback)
         staging_count = _build_staging_pk_with_dedup_fallback(postgresql, total_loaded)
@@ -972,11 +973,11 @@ def _deduplicate_staging_table(postgresql: Session) -> int:
     return deleted
 
 
-def _check_staging_row_count(staging_count: int, min_rows: int) -> None:
+def _check_staging_row_count(*, staging_count: int, min_rows: int) -> None:
     """staging table の行数を最低行数と比較。不足なら例外を送出。
 
     この同じ check は extract_ratings で早期終了用と、_swap_ratings_table で
-    最終確認用の2箇所で呼ばれる。Task 2 で dedup が走ると行数が減るため、
+    最終確認用の2箇所で呼ばれる。フォールバックで dedup が走ると行数が減るため、
     両方の check が意味を持つ。
     """
     if staging_count < min_rows:
@@ -1032,7 +1033,14 @@ def _build_staging_pk_with_dedup_fallback(postgresql: Session, staging_count: in
     try:
         _build_staging_pk(postgresql)
         return staging_count
-    except IntegrityError:
+    except DBAPIError as e:
+        # psycopg2 は SQLSTATE 23xxx (integrity_constraint_violation) を丸ごと
+        # IntegrityError にマップする。dedup で解決できるのは unique_violation (23505)
+        # だけなので、pgcode で判別してそれ以外は再送出する。ここを IntegrityError で
+        # 素通しすると、無関係な integrity エラーでも32分の dedup を払ったうえで
+        # RATING_DUPLICATES_FOUND removed=0 を出し、CloudWatch アラームを誤発火させる。
+        if getattr(e.orig, "pgcode", None) != "23505":
+            raise
         # UniqueViolation 後のセッションは InFailedSqlTransaction のままなので、
         # rollback してからでないと dedup の DELETE も落ちる。
         postgresql.rollback()
@@ -1052,8 +1060,8 @@ def _swap_ratings_table(postgresql: Session, min_rows: int, staging_count: int) 
     PK は呼び出し前に _build_staging_pk で張っておくこと。
     """
     # 最低行数チェック（不完全スナップショット防止）
-    # Task 2 で dedup が走ると行数が減るため、dedup 後の最終確認として意味を持つ。
-    _check_staging_row_count(staging_count, min_rows)
+    # フォールバックで dedup が走ると行数が減るため、dedup 後の最終確認として意味を持つ。
+    _check_staging_row_count(staging_count=staging_count, min_rows=min_rows)
     logging.info(f"Staging table row count: {staging_count} (minimum: {min_rows})")
 
     # UNLOGGED → LOGGED に変換（crash safety確保）
