@@ -58,9 +58,9 @@ def postgres_storage_settings_factory(
         __model__ = PostgresStorageSettings
         __check_model__ = False
 
-        host = "localhost"
+        host = os.environ.get("BX_STORAGE_SETTINGS__HOST", "localhost")
         username = "postgres"
-        port = 5432
+        port = int(os.environ.get("BX_STORAGE_SETTINGS__PORT", "5432"))
         database = "postgres"
         password = os.environ["BX_STORAGE_SETTINGS__PASSWORD"]
 

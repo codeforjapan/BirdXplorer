@@ -641,19 +641,188 @@ class TestExtractDataPhaseIsolation:
         """
         import settings
 
+        original = settings.USE_DUMMY_DATA
         settings.USE_DUMMY_DATA = True
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.content = b"noteId\tsummary\n"
-        mock_requests.get.return_value = mock_response
+        try:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.content = b"noteId\tsummary\n"
+            mock_requests.get.return_value = mock_response
 
-        mock_extract_ratings.side_effect = RuntimeError("end-of-copy marker corrupt")
+            mock_extract_ratings.side_effect = RuntimeError("end-of-copy marker corrupt")
 
-        mock_session = MagicMock()
-        mock_session.query.return_value.all.return_value = []
+            mock_session = MagicMock()
+            mock_session.query.return_value.all.return_value = []
 
-        extract_data(mock_session)
+            extract_data(mock_session)
+        finally:
+            settings.USE_DUMMY_DATA = original
 
         mock_extract_ratings.assert_called_once()
         mock_note_requests.assert_called_once()
         mock_backfill.assert_called_once()
+
+    @patch("birdxplorer_etl.extract_ecs.run_note_requests_phase")
+    @patch("birdxplorer_etl.extract_ecs.backfill_missing_notes")
+    @patch("birdxplorer_etl.extract_ecs.recalculate_rating_counts")
+    @patch("birdxplorer_etl.extract_ecs.extract_ratings")
+    @patch("birdxplorer_etl.extract_ecs._process_note_status_rows")
+    @patch("birdxplorer_etl.extract_ecs._process_note_rows")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_notes_failure_does_not_starve_later_phases(
+        self,
+        mock_requests: MagicMock,
+        mock_process_note_rows: MagicMock,
+        mock_process_note_status_rows: MagicMock,
+        mock_extract_ratings: MagicMock,
+        mock_recalculate: MagicMock,
+        mock_backfill: MagicMock,
+        mock_note_requests: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """notes の取り込みが途中で落ちても後段フェーズは走り、アラームトークンが出ること。
+
+        ストリーミング化で zip の CRC 検証と UTF-8 デコードが逐次になったため、
+        「ファイル途中で落ちる」が新たに到達可能になった。裸で呼んでいると
+        その日の Ratings / Status / Backfill / NoteRequests が全滅する。
+        """
+        import settings
+
+        original = settings.USE_DUMMY_DATA
+        settings.USE_DUMMY_DATA = True
+        try:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.content = b"noteId\tsummary\n"
+            mock_requests.get.return_value = mock_response
+
+            mock_process_note_rows.side_effect = RuntimeError("Bad CRC-32 for file 'notes-00002.tsv'")
+
+            mock_session = MagicMock()
+            mock_session.query.return_value.all.return_value = []
+
+            with caplog.at_level(logging.ERROR):
+                extract_data(mock_session)
+        finally:
+            settings.USE_DUMMY_DATA = original
+
+        assert "EXTRACT_PHASE_FAILED" in caplog.text
+        assert "phase=Notes" in caplog.text
+        mock_extract_ratings.assert_called_once()
+        mock_recalculate.assert_called_once()
+        mock_process_note_status_rows.assert_called_once()
+        mock_backfill.assert_called_once()
+        mock_note_requests.assert_called_once()
+
+    @patch("birdxplorer_etl.extract_ecs.run_note_requests_phase")
+    @patch("birdxplorer_etl.extract_ecs.backfill_missing_notes")
+    @patch("birdxplorer_etl.extract_ecs.recalculate_rating_counts")
+    @patch("birdxplorer_etl.extract_ecs.extract_ratings")
+    @patch("birdxplorer_etl.extract_ecs._process_note_status_rows")
+    @patch("birdxplorer_etl.extract_ecs._process_note_rows")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_note_status_failure_does_not_starve_backfill_and_note_requests(
+        self,
+        mock_requests: MagicMock,
+        mock_process_note_rows: MagicMock,
+        mock_process_note_status_rows: MagicMock,
+        mock_extract_ratings: MagicMock,
+        mock_recalculate: MagicMock,
+        mock_backfill: MagicMock,
+        mock_note_requests: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """noteStatus の取り込みが落ちても Backfill / NoteRequests は走ること。"""
+        import settings
+
+        original = settings.USE_DUMMY_DATA
+        settings.USE_DUMMY_DATA = True
+        try:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.content = b"noteId\tcurrentStatus\n"
+            mock_requests.get.return_value = mock_response
+
+            mock_process_note_status_rows.side_effect = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+            mock_session = MagicMock()
+            mock_session.query.return_value.all.return_value = []
+
+            with caplog.at_level(logging.ERROR):
+                extract_data(mock_session)
+        finally:
+            settings.USE_DUMMY_DATA = original
+
+        assert "EXTRACT_PHASE_FAILED" in caplog.text
+        assert "phase=Status" in caplog.text
+        mock_backfill.assert_called_once()
+        mock_note_requests.assert_called_once()
+
+    @patch("birdxplorer_etl.extract_ecs.run_note_requests_phase")
+    @patch("birdxplorer_etl.extract_ecs.backfill_missing_notes")
+    @patch("birdxplorer_etl.extract_ecs.extract_ratings")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_fetch_failure_does_not_fall_back_to_the_previous_day(
+        self,
+        mock_requests: MagicMock,
+        mock_extract_ratings: MagicMock,
+        mock_backfill: MagicMock,
+        mock_note_requests: MagicMock,
+    ) -> None:
+        """取得そのものが失敗した日は、前日へフォールバックせず打ち切ること。
+
+        前日フォールバックは「404 = まだ公開されていない」ための仕組み。接続断で
+        前日に流れると ratings のフルスワップ込みで前日分を丸ごと再処理して
+        1時間規模を浪費し、しかも当日分はこの実行では取り込まれない。
+        後段フェーズ(Backfill / NoteRequests)は走らせる必要がある。
+        """
+        import settings
+
+        original = settings.USE_DUMMY_DATA
+        settings.USE_DUMMY_DATA = True
+        try:
+            mock_requests.get.side_effect = OSError("Connection reset by peer")
+
+            mock_session = MagicMock()
+            mock_session.query.return_value.all.return_value = []
+
+            extract_data(mock_session)
+        finally:
+            settings.USE_DUMMY_DATA = original
+
+        assert mock_requests.get.call_count == 1, "前日にフォールバックして再取得している"
+        mock_extract_ratings.assert_not_called()
+        mock_backfill.assert_called_once()
+        mock_note_requests.assert_called_once()
+
+    @patch("birdxplorer_etl.extract_ecs.run_note_requests_phase")
+    @patch("birdxplorer_etl.extract_ecs.backfill_missing_notes")
+    @patch("birdxplorer_etl.extract_ecs.extract_ratings")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_404_still_falls_back_to_the_previous_day(
+        self,
+        mock_requests: MagicMock,
+        mock_extract_ratings: MagicMock,
+        mock_backfill: MagicMock,
+        mock_note_requests: MagicMock,
+    ) -> None:
+        """404 のときは従来どおり3日分まで遡ること（打ち切り条件を広げていない）。"""
+        import settings
+
+        original = settings.USE_DUMMY_DATA
+        settings.USE_DUMMY_DATA = False
+        try:
+            mock_response = MagicMock()
+            mock_response.status_code = 404
+            mock_requests.get.return_value = mock_response
+
+            mock_session = MagicMock()
+            mock_session.query.return_value.all.return_value = []
+
+            extract_data(mock_session)
+        finally:
+            settings.USE_DUMMY_DATA = original
+
+        assert mock_requests.get.call_count == 3, "今日・昨日・一昨日の3日分を試していない"
+        mock_extract_ratings.assert_not_called()
+        mock_note_requests.assert_called_once()

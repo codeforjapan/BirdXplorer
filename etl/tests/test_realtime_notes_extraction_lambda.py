@@ -19,7 +19,9 @@ from birdxplorer_etl.lib.x.community_notes_client import (
 )
 
 
-def _make_note(note_id: str = "note_001", post_id: str = "post_001", created_at: int | None = 1700000000000) -> CommunityNote:
+def _make_note(
+    note_id: str = "note_001", post_id: str = "post_001", created_at: int | None = 1700000000000
+) -> CommunityNote:
     return CommunityNote(note_id=note_id, summary="test summary", post_id=post_id, created_at=created_at)
 
 
