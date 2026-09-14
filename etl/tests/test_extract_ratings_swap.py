@@ -5,6 +5,7 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 # extract_ecs.py transitively imports psycopg2 (via birdxplorer_common.storage)
 # and settings, which are only available in the ECS/Lambda runtime.
@@ -18,6 +19,7 @@ from birdxplorer_etl.extract_ecs import (  # noqa: E402
     _RATING_COLUMNS,
     _STAGING_TABLE,
     _build_staging_pk,
+    _build_staging_pk_with_dedup_fallback,
     _cleanup_staging_table,
     _create_staging_table,
     _deduplicate_staging_table,
@@ -478,64 +480,22 @@ class TestExtractRatingsErrorRecovery:
         mock_cleanup.assert_called_once_with(mock_session)
 
     @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
-    @patch("birdxplorer_etl.extract_ecs._build_staging_pk")
-    @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk_with_dedup_fallback")
     @patch("birdxplorer_etl.extract_ecs._process_rating_rows")
     @patch("birdxplorer_etl.extract_ecs._create_staging_table")
     @patch("birdxplorer_etl.extract_ecs.requests")
-    def test_dedup_runs_unconditionally(
+    def test_does_not_build_pk_when_total_loaded_below_min_rows(
         self,
         mock_requests: MagicMock,
         mock_create: MagicMock,
         mock_process: MagicMock,
-        mock_dedup: MagicMock,
-        mock_build_pk: MagicMock,
+        mock_fallback: MagicMock,
         mock_cleanup: MagicMock,
     ) -> None:
-        """dedup は min_rows 判定前に無条件に走る（Task 1 の不変条件）。"""
-        import settings
+        """total_loaded が min_rows を下回るときは、高価な PK 構築(fallback)を一度も呼ばずに落ちる。
 
-        settings.USE_DUMMY_DATA = True
-
-        # ダミーデータとして有効なTSVレスポンスを返す
-        tsv_content = "noteId\traterParticipantId\n"
-        resp_ok = MagicMock()
-        resp_ok.status_code = 200
-        resp_ok.content = tsv_content.encode("utf-8")
-        mock_requests.get.return_value = resp_ok
-
-        mock_process.return_value = 1000
-        mock_dedup.return_value = 0
-
-        mock_session = MagicMock()
-        # reltuples が 5000 を返す場合、min_rows = 2500 となり fail だが、
-        # dedup は呼ばれているはず
-        mock_session.execute.return_value.scalar.return_value = 5000
-
-        with pytest.raises(RuntimeError, match="expected at least"):
-            extract_ratings(mock_session, "2026/03/01", {"n1"})
-
-        # dedup は必ず呼ばれてきた
-        mock_dedup.assert_called_once()
-
-    @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
-    @patch("birdxplorer_etl.extract_ecs._build_staging_pk")
-    @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
-    @patch("birdxplorer_etl.extract_ecs._process_rating_rows")
-    @patch("birdxplorer_etl.extract_ecs._create_staging_table")
-    @patch("birdxplorer_etl.extract_ecs.requests")
-    def test_does_not_build_pk_when_staging_count_below_min_rows(
-        self,
-        mock_requests: MagicMock,
-        mock_create: MagicMock,
-        mock_process: MagicMock,
-        mock_dedup: MagicMock,
-        mock_build_pk: MagicMock,
-        mock_cleanup: MagicMock,
-    ) -> None:
-        """dedup 後に staging_count < min_rows のとき _build_staging_pk を呼ばない。
-
-        20分かかるPK構築を無駄に実行しない。
+        Task 2: 早期チェックが _build_staging_pk_with_dedup_fallback より前に来る。
+        32分の dedup も20分の PK 構築も、行数不足が分かっている日には払わない。
         """
         import settings
 
@@ -548,10 +508,8 @@ class TestExtractRatingsErrorRecovery:
         resp_ok.content = tsv_content.encode("utf-8")
         mock_requests.get.return_value = resp_ok
 
-        # total_loaded = 1000, dedup_deleted = 850 → staging_count = 150
-        # reltuples = 500 → min_rows = 250 → staging_count < min_rows で fail
-        mock_process.return_value = 1000
-        mock_dedup.return_value = 850
+        # total_loaded = 100, reltuples = 500 → min_rows = 250 → 早期チェックで落ちる
+        mock_process.return_value = 100
 
         mock_session = MagicMock()
         mock_session.execute.return_value.scalar.return_value = 500
@@ -559,9 +517,8 @@ class TestExtractRatingsErrorRecovery:
         with pytest.raises(RuntimeError, match="expected at least"):
             extract_ratings(mock_session, "2026/03/01", {"n1"})
 
-        # dedup は走ったが、_build_staging_pk は呼ばれないはず
-        mock_dedup.assert_called_once()
-        mock_build_pk.assert_not_called()
+        # 高価な PK 構築(fallback 経由)は一度も呼ばれない
+        mock_fallback.assert_not_called()
         mock_cleanup.assert_called_once_with(mock_session)
 
 
@@ -950,3 +907,135 @@ class TestExtractDataPhaseIsolation:
         assert mock_requests.get.call_count == 3, "今日・昨日・一昨日の3日分を試していない"
         mock_extract_ratings.assert_not_called()
         mock_note_requests.assert_called_once()
+
+
+class TestOptimisticDedup:
+    """_build_staging_pk_with_dedup_fallback のユニットテスト
+
+    過去30日の dedup 19回はすべて removed 0 rows だった。32分かけて0行を消すのをやめ、
+    PK 構築を先に試して重複が実在したときだけ dedup する。
+    """
+
+    def _integrity_error(self) -> IntegrityError:
+        return IntegrityError("ALTER TABLE ...", {}, Exception("duplicate key value violates unique constraint"))
+
+    @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk")
+    def test_skips_dedup_when_there_are_no_duplicates(self, mock_build: MagicMock, mock_dedup: MagicMock) -> None:
+        """通常日(重複0)は dedup を一度も呼ばない。これが 32分/日 の削減そのもの。"""
+        mock_session = MagicMock()
+
+        result = _build_staging_pk_with_dedup_fallback(mock_session, staging_count=1000)
+
+        assert result == 1000
+        mock_build.assert_called_once()
+        mock_dedup.assert_not_called()
+        mock_session.rollback.assert_not_called()
+
+    @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk")
+    def test_deduplicates_and_retries_when_duplicates_exist(self, mock_build: MagicMock, mock_dedup: MagicMock) -> None:
+        """重複があれば dedup して作り直す。行数は削除ぶんを差し引く。"""
+        mock_session = MagicMock()
+        mock_build.side_effect = [self._integrity_error(), None]
+        mock_dedup.return_value = 7
+
+        result = _build_staging_pk_with_dedup_fallback(mock_session, staging_count=1000)
+
+        assert result == 993, "min_rows チェックに使う行数から削除ぶんを引いていない"
+        assert mock_build.call_count == 2
+        mock_dedup.assert_called_once()
+
+    @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk")
+    def test_rolls_back_before_deduplicating(self, mock_build: MagicMock, mock_dedup: MagicMock) -> None:
+        """UniqueViolation 後のセッションは InFailedSqlTransaction。
+
+        rollback せずに dedup を投げると以降が全部失敗する(_run_phase のコメントにある既知の罠)。
+        """
+        mock_session = MagicMock()
+        order: list = []
+        mock_session.rollback.side_effect = lambda: order.append("rollback")
+        mock_dedup.side_effect = lambda _session: order.append("dedup") or 0
+        mock_build.side_effect = [self._integrity_error(), None]
+
+        _build_staging_pk_with_dedup_fallback(mock_session, staging_count=1000)
+
+        assert order == ["rollback", "dedup"], f"rollback が dedup より前にない: {order}"
+
+    @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk")
+    def test_logs_an_alarm_token_when_duplicates_exist(
+        self, mock_build: MagicMock, mock_dedup: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """重複は19日間一度も起きていない。起きたら気付けるようトークンを出す。"""
+        mock_session = MagicMock()
+        mock_build.side_effect = [self._integrity_error(), None]
+        mock_dedup.return_value = 3
+
+        with caplog.at_level(logging.WARNING):
+            _build_staging_pk_with_dedup_fallback(mock_session, staging_count=1000)
+
+        assert "RATING_DUPLICATES_FOUND" in caplog.text
+        assert "3" in caplog.text
+
+    @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk")
+    def test_propagates_when_the_retry_also_fails(self, mock_build: MagicMock, mock_dedup: MagicMock) -> None:
+        """dedup 後も落ちるなら諦めて例外を投げる。無限ループやリトライの繰り返しをしない。
+
+        フェーズは失敗するが swap されないので前日のデータが残る(フェイルセーフ)。
+        """
+        mock_session = MagicMock()
+        mock_build.side_effect = [self._integrity_error(), self._integrity_error()]
+        mock_dedup.return_value = 0
+
+        with pytest.raises(IntegrityError):
+            _build_staging_pk_with_dedup_fallback(mock_session, staging_count=1000)
+
+        assert mock_build.call_count == 2
+
+
+class TestExtractRatingsSkipsDedup:
+    """extract_ratings が無条件 dedup を呼ばなくなったことの確認"""
+
+    @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._swap_ratings_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk_with_dedup_fallback")
+    @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._process_rating_rows")
+    @patch("birdxplorer_etl.extract_ecs._create_staging_table")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_does_not_call_deduplicate_directly(
+        self,
+        mock_requests: MagicMock,
+        mock_create: MagicMock,
+        mock_process: MagicMock,
+        mock_dedup: MagicMock,
+        mock_fallback: MagicMock,
+        mock_swap: MagicMock,
+        mock_cleanup: MagicMock,
+    ) -> None:
+        import settings
+
+        original = settings.USE_DUMMY_DATA
+        settings.USE_DUMMY_DATA = True
+        try:
+            response = MagicMock()
+            response.status_code = 200
+            response.content = b"noteId\traterParticipantId\n"
+            mock_requests.get.return_value = response
+            mock_process.return_value = 1000
+            mock_fallback.return_value = 1000
+
+            mock_session = MagicMock()
+            mock_session.execute.return_value.scalar.return_value = 1000
+
+            extract_ratings(mock_session, "2026/09/14", {"n1"})
+        finally:
+            settings.USE_DUMMY_DATA = original
+
+        # dedup は fallback 経路からしか呼ばれない
+        mock_dedup.assert_not_called()
+        mock_fallback.assert_called_once()
+        mock_swap.assert_called_once()

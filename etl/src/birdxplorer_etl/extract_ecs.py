@@ -15,6 +15,7 @@ import settings
 import stringcase
 from sqlalchemy import case, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from birdxplorer_common.storage import (
@@ -814,16 +815,9 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
             _cleanup_staging_table(postgresql)
             return
 
-        # 重複排除
-        dedup_start = time.time()
-        dedup_deleted = _deduplicate_staging_table(postgresql)
-        logging.info(f"[PHASE_COMPLETE] Rating dedup: {time.time() - dedup_start:.1f}s")
-
-        # 安全チェック + PK構築 + swap
-        # staging tableの行数はCOPY総数 - 重複排除数（COUNT(*)不要）
-        staging_count = total_loaded - dedup_deleted
         # 最低行数: 現在テーブルの推定行数の50%（COUNT(*)はタイムアウトするのでreltuples使用）
-        # reltuples はANALYZE未実行時に-1を返すため、その場合はstaging_countの50%をフォールバックとして使用
+        # reltuples はANALYZE未実行時に-1を返すため、その場合はtotal_loadedをフォールバックとして使用
+        # （この時点では dedup 前なので staging_count はまだ確定しておらず total_loaded しかない）
         current_count = (
             postgresql.execute(
                 text(
@@ -834,12 +828,21 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
             or 0
         )
         if current_count <= 0:
-            current_count = staging_count
+            # 「reltuples が取れない」かつ「dedup が50%超を削除する」が同時に成立した日だけ、
+            # 旧コードなら通った swap が _swap_ratings_table 内の最終チェックで落ちうる。
+            # 過去30日19回すべて dedup は0行で、かつ live テーブルは毎日 swap されるため
+            # reltuples が長期間 -1/0 のまま放置される状況とは両立しにくい。
+            # 万一両立しても、フェイルセーフ（前日データが残り EXTRACT_PHASE_FAILED が鳴る）
+            # として働くだけなのでここでは許容する。
+            current_count = total_loaded
         min_rows = max(int(current_count * 0.5), 1)
 
-        # PK構築前の安全チェック（不完全スナップショット防止）
-        _check_staging_row_count(staging_count, min_rows)
-        _build_staging_pk(postgresql)
+        # 高価な PK 構築（失敗時は dedup で約20分）の前に、行数不足が分かっている日を早期に落とす
+        _check_staging_row_count(total_loaded, min_rows)
+
+        # dedup は PK 構築が UniqueViolation で落ちたときだけ走る(_build_staging_pk_with_dedup_fallback)
+        staging_count = _build_staging_pk_with_dedup_fallback(postgresql, total_loaded)
+        # dedup が走った日は行数が減るため、swap 直前の最終確認として意味を持つ
         _swap_ratings_table(postgresql, min_rows=min_rows, staging_count=staging_count)
 
         logging.info(f"Rating table swap complete: {total_loaded} rows loaded")
@@ -1012,6 +1015,35 @@ def _build_staging_pk(postgresql: Session) -> None:
     )
     postgresql.commit()
     logging.info(f"PK index built on staging table in {time.time() - pk_start:.1f}s")
+
+
+def _build_staging_pk_with_dedup_fallback(postgresql: Session, staging_count: int) -> int:
+    """PK 構築を先に試し、重複が実在したときだけ dedup して作り直す。
+
+    dedup(_deduplicate_staging_table)は 215M 行を全件ソートするので32分かかる。
+    過去30日の19回はすべて removed 0 rows だった。毎日0行のために32分払う代わりに、
+    PK 構築を先に投げて UniqueViolation が出たときだけ払う。
+
+    重複が出た日は失敗した PK 構築ぶん(約20分)を余計に払うが、ALTER TABLE の失敗は
+    ロールバックされるだけで staging table は無傷なので、やり直せる。
+
+    戻り値は min_rows チェックに使う行数(dedup で削除したぶんを差し引いたもの)。
+    """
+    try:
+        _build_staging_pk(postgresql)
+        return staging_count
+    except IntegrityError:
+        # UniqueViolation 後のセッションは InFailedSqlTransaction のままなので、
+        # rollback してからでないと dedup の DELETE も落ちる。
+        postgresql.rollback()
+        dedup_start = time.time()
+        deleted = _deduplicate_staging_table(postgresql)
+        logging.warning(
+            f"RATING_DUPLICATES_FOUND removed={deleted} elapsed={time.time() - dedup_start:.1f}s "
+            "PK build failed on duplicates; deduplicated and rebuilding"
+        )
+        _build_staging_pk(postgresql)
+        return staging_count - deleted
 
 
 def _swap_ratings_table(postgresql: Session, min_rows: int, staging_count: int) -> None:
