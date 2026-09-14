@@ -17,6 +17,7 @@ sys.modules.setdefault("settings", MagicMock())
 from birdxplorer_etl.extract_ecs import (  # noqa: E402
     _RATING_COLUMNS,
     _STAGING_TABLE,
+    _build_staging_pk,
     _cleanup_staging_table,
     _create_staging_table,
     _deduplicate_staging_table,
@@ -169,6 +170,41 @@ class TestDeduplicateStagingTable:
         assert "removed 42 duplicate rows" in caplog.text
 
 
+class TestBuildStagingPk:
+    """_build_staging_pk のユニットテスト"""
+
+    def test_adds_primary_key_constraint(self) -> None:
+        mock_session = MagicMock()
+        mock_session.execute.return_value.scalar.return_value = None
+
+        _build_staging_pk(mock_session)
+
+        sql_calls = [str(c.args[0].text) for c in mock_session.execute.call_args_list]
+        assert any("ADD CONSTRAINT" in s and "PRIMARY KEY (note_id, rater_participant_id)" in s for s in sql_calls)
+        mock_session.commit.assert_called_once()
+
+    def test_renames_a_leftover_index_owned_by_another_table(self) -> None:
+        """過去の swap 失敗で本番テーブルに同名 PK が残っていると、新しい PK が張れない。"""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.scalar.return_value = "row_note_ratings"
+
+        _build_staging_pk(mock_session)
+
+        sql_calls = [str(c.args[0].text) for c in mock_session.execute.call_args_list]
+        rename_at = next(i for i, s in enumerate(sql_calls) if "RENAME TO" in s and "_pkey_old" in s)
+        pk_at = next(i for i, s in enumerate(sql_calls) if "ADD CONSTRAINT" in s)
+        assert rename_at < pk_at, "リネームは PK 構築より前でなければ意味がない"
+
+    def test_does_not_rename_when_the_index_belongs_to_the_staging_table(self) -> None:
+        mock_session = MagicMock()
+        mock_session.execute.return_value.scalar.return_value = _STAGING_TABLE
+
+        _build_staging_pk(mock_session)
+
+        sql_calls = [str(c.args[0].text) for c in mock_session.execute.call_args_list]
+        assert not any("_pkey_old" in s for s in sql_calls)
+
+
 class TestSwapRatingsTable:
     """_swap_ratings_table のユニットテスト"""
 
@@ -180,23 +216,21 @@ class TestSwapRatingsTable:
 
     def test_succeeds_when_above_min_rows(self) -> None:
         mock_session = MagicMock()
-        # scalar()呼び出し順: PK衝突チェック(None=衝突なし), 旧PK名, 新PK名
+        # scalar()呼び出し順: 旧PK名, 新PK名（PK衝突チェックは _build_staging_pk へ移動した）
         mock_session.execute.return_value.scalar.side_effect = [
-            None,  # PK衝突チェック: 同名インデックスは存在しない
             "row_note_ratings_pkey",  # 旧テーブルのPK名
             "row_note_ratings_new_pkey",  # 新テーブルのPK名
         ]
 
         _swap_ratings_table(mock_session, min_rows=500, staging_count=1000)
 
-        # 各フェーズがcommitされている（PK, LOGGED, SWAP+PK_RENAME, DROP_OLD）
-        assert mock_session.commit.call_count >= 3
+        # 各フェーズがcommitされている（LOGGED, SWAP+PK_RENAME, DROP_OLD）
+        assert mock_session.commit.call_count >= 2
 
     def test_swap_sql_sequence(self) -> None:
         mock_session = MagicMock()
-        # scalar()呼び出し順: PK衝突チェック(None=衝突なし), 旧PK名, 新PK名
+        # scalar()呼び出し順: 旧PK名, 新PK名（PK衝突チェックは _build_staging_pk へ移動した）
         mock_session.execute.return_value.scalar.side_effect = [
-            None,  # PK衝突チェック: 同名インデックスは存在しない
             "row_note_ratings_pkey",  # 旧テーブルのPK名
             "row_note_ratings_new_pkey",  # 新テーブルのPK名
         ]
@@ -204,7 +238,7 @@ class TestSwapRatingsTable:
         _swap_ratings_table(mock_session, min_rows=1, staging_count=1000)
 
         sql_calls = [str(c.args[0].text) for c in mock_session.execute.call_args_list]
-        assert any("ADD CONSTRAINT" in s and "PRIMARY KEY" in s for s in sql_calls)
+        assert not any("ADD CONSTRAINT" in s for s in sql_calls), "PK 構築は _build_staging_pk の責務"
         assert any("SET LOGGED" in s for s in sql_calls)
         assert any("RENAME TO row_note_ratings_old" in s for s in sql_calls)
         assert any("RENAME TO row_note_ratings" in s for s in sql_calls)

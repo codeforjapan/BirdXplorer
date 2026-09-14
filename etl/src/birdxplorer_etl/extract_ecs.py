@@ -836,6 +836,7 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
         if current_count <= 0:
             current_count = staging_count
         min_rows = max(int(current_count * 0.5), 1)
+        _build_staging_pk(postgresql)
         _swap_ratings_table(postgresql, min_rows=min_rows, staging_count=staging_count)
 
         logging.info(f"Rating table swap complete: {total_loaded} rows loaded")
@@ -965,19 +966,15 @@ def _deduplicate_staging_table(postgresql: Session) -> int:
     return deleted
 
 
-def _swap_ratings_table(postgresql: Session, min_rows: int, staging_count: int) -> None:
-    """staging tableにPKを構築し、本番テーブルとアトミックにswapする。"""
-    # 最低行数チェック（不完全スナップショット防止）
-    if staging_count < min_rows:
-        raise RuntimeError(
-            f"Staging table has {staging_count} rows, expected at least {min_rows}. "
-            "Aborting swap to prevent data loss from incomplete snapshot."
-        )
-    logging.info(f"Staging table row count: {staging_count} (minimum: {min_rows})")
+def _build_staging_pk(postgresql: Session) -> None:
+    """staging table に PK を張る（シーケンシャルビルド — ランダムI/Oなし）。
 
-    # PK構築（シーケンシャルビルド — ランダムI/Oなし）
-    # 過去のswapでPKリネームが失敗した場合、同名の制約が本番テーブルに残っている可能性があるため
-    # 事前にインデックスの存在をチェックし、存在すればリネームして名前衝突を回避する
+    重複があると IntegrityError(UniqueViolation) を送出する。呼び出し側はこれを
+    「重複が実在した」シグナルとして使う（_build_staging_pk_with_dedup_fallback）。
+
+    過去のswapでPKリネームが失敗した場合、同名の制約が本番テーブルに残っている可能性があるため
+    事前にインデックスの存在をチェックし、存在すればリネームして名前衝突を回避する。
+    """
     existing_owner = postgresql.execute(
         text("SELECT tablename FROM pg_indexes " f"WHERE indexname = '{_STAGING_TABLE}_pkey'")
     ).scalar()
@@ -998,6 +995,20 @@ def _swap_ratings_table(postgresql: Session, min_rows: int, staging_count: int) 
     )
     postgresql.commit()
     logging.info(f"PK index built on staging table in {time.time() - pk_start:.1f}s")
+
+
+def _swap_ratings_table(postgresql: Session, min_rows: int, staging_count: int) -> None:
+    """PK 構築済みの staging table を本番テーブルとアトミックにswapする。
+
+    PK は呼び出し前に _build_staging_pk で張っておくこと。
+    """
+    # 最低行数チェック（不完全スナップショット防止）
+    if staging_count < min_rows:
+        raise RuntimeError(
+            f"Staging table has {staging_count} rows, expected at least {min_rows}. "
+            "Aborting swap to prevent data loss from incomplete snapshot."
+        )
+    logging.info(f"Staging table row count: {staging_count} (minimum: {min_rows})")
 
     # UNLOGGED → LOGGED に変換（crash safety確保）
     logged_start = time.time()
