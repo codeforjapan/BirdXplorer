@@ -814,16 +814,9 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
             _cleanup_staging_table(postgresql)
             return
 
-        # 重複排除
-        dedup_start = time.time()
-        dedup_deleted = _deduplicate_staging_table(postgresql)
-        logging.info(f"[PHASE_COMPLETE] Rating dedup: {time.time() - dedup_start:.1f}s")
-
-        # 安全チェック + PK構築 + swap
-        # staging tableの行数はCOPY総数 - 重複排除数（COUNT(*)不要）
-        staging_count = total_loaded - dedup_deleted
+        # 最低行数を計算（不完全スナップショット防止の早期チェック用）
         # 最低行数: 現在テーブルの推定行数の50%（COUNT(*)はタイムアウトするのでreltuples使用）
-        # reltuples はANALYZE未実行時に-1を返すため、その場合はstaging_countの50%をフォールバックとして使用
+        # reltuples はANALYZE未実行時に-1を返すため、その場合はtotal_loadedの50%をフォールバックとして使用
         current_count = (
             postgresql.execute(
                 text(
@@ -834,8 +827,21 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
             or 0
         )
         if current_count <= 0:
-            current_count = staging_count
+            current_count = total_loaded
         min_rows = max(int(current_count * 0.5), 1)
+
+        # COPY後の段階で不完全スナップショット判定（20分のPK構築を無駄に走らせない）
+        _check_staging_row_count(total_loaded, min_rows)
+
+        # 重複排除
+        dedup_start = time.time()
+        dedup_deleted = _deduplicate_staging_table(postgresql)
+        logging.info(f"[PHASE_COMPLETE] Rating dedup: {time.time() - dedup_start:.1f}s")
+
+        # PK構築 + swap（dedup後、最終確認を含む）
+        # staging tableの行数はCOPY総数 - 重複排除数（COUNT(*)不要）
+        staging_count = total_loaded - dedup_deleted
+        _check_staging_row_count(staging_count, min_rows)
         _build_staging_pk(postgresql)
         _swap_ratings_table(postgresql, min_rows=min_rows, staging_count=staging_count)
 
@@ -966,6 +972,20 @@ def _deduplicate_staging_table(postgresql: Session) -> int:
     return deleted
 
 
+def _check_staging_row_count(staging_count: int, min_rows: int) -> None:
+    """staging table の行数を最低行数と比較。不足なら例外を送出。
+
+    この同じ check は extract_ratings で早期終了用と、_swap_ratings_table で
+    最終確認用の2箇所で呼ばれる。Task 2 で dedup が走ると行数が減るため、
+    両方の check が意味を持つ。
+    """
+    if staging_count < min_rows:
+        raise RuntimeError(
+            f"Staging table has {staging_count} rows, expected at least {min_rows}. "
+            "Aborting swap to prevent data loss from incomplete snapshot."
+        )
+
+
 def _build_staging_pk(postgresql: Session) -> None:
     """staging table に PK を張る（シーケンシャルビルド — ランダムI/Oなし）。
 
@@ -1003,11 +1023,8 @@ def _swap_ratings_table(postgresql: Session, min_rows: int, staging_count: int) 
     PK は呼び出し前に _build_staging_pk で張っておくこと。
     """
     # 最低行数チェック（不完全スナップショット防止）
-    if staging_count < min_rows:
-        raise RuntimeError(
-            f"Staging table has {staging_count} rows, expected at least {min_rows}. "
-            "Aborting swap to prevent data loss from incomplete snapshot."
-        )
+    # Task 2 で dedup が走ると行数が減るため、dedup 後の最終確認として意味を持つ。
+    _check_staging_row_count(staging_count, min_rows)
     logging.info(f"Staging table row count: {staging_count} (minimum: {min_rows})")
 
     # UNLOGGED → LOGGED に変換（crash safety確保）

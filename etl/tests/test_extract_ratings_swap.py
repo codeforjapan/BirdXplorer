@@ -438,6 +438,7 @@ class TestExtractRatingsErrorRecovery:
 
     @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
     @patch("birdxplorer_etl.extract_ecs._swap_ratings_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk")
     @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
     @patch("birdxplorer_etl.extract_ecs._process_rating_rows")
     @patch("birdxplorer_etl.extract_ecs._create_staging_table")
@@ -448,6 +449,7 @@ class TestExtractRatingsErrorRecovery:
         mock_create: MagicMock,
         mock_process: MagicMock,
         mock_dedup: MagicMock,
+        mock_build_pk: MagicMock,
         mock_swap: MagicMock,
         mock_cleanup: MagicMock,
     ) -> None:
@@ -464,6 +466,7 @@ class TestExtractRatingsErrorRecovery:
         mock_requests.get.return_value = resp_ok
 
         mock_process.return_value = 1000
+        mock_dedup.return_value = 50  # 重複排除で50行削除
         mock_swap.side_effect = RuntimeError("Staging table has 100 rows, expected at least 200")
 
         mock_session = MagicMock()
@@ -472,6 +475,52 @@ class TestExtractRatingsErrorRecovery:
         with pytest.raises(RuntimeError, match="expected at least 200"):
             extract_ratings(mock_session, "2026/03/01", {"n1"})
 
+        mock_cleanup.assert_called_once_with(mock_session)
+
+    @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk")
+    @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._process_rating_rows")
+    @patch("birdxplorer_etl.extract_ecs._create_staging_table")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_does_not_build_pk_when_staging_count_below_min_rows(
+        self,
+        mock_requests: MagicMock,
+        mock_create: MagicMock,
+        mock_process: MagicMock,
+        mock_dedup: MagicMock,
+        mock_build_pk: MagicMock,
+        mock_cleanup: MagicMock,
+    ) -> None:
+        """不完全スナップショット（行数不足）のときは _build_staging_pk を呼ばない。
+
+        20分かかるPK構築を無駄に実行しない。
+        """
+        import settings
+
+        settings.USE_DUMMY_DATA = True
+
+        # ダミーデータとして有効なTSVレスポンスを返す
+        tsv_content = "noteId\traterParticipantId\n"
+        resp_ok = MagicMock()
+        resp_ok.status_code = 200
+        resp_ok.content = tsv_content.encode("utf-8")
+        mock_requests.get.return_value = resp_ok
+
+        # total_loaded = 100 だが min_rows = 200 となるシナリオ
+        # (reltuples から current_count が推定され、min_rows = current_count * 0.5 > total_loaded)
+        mock_process.return_value = 100
+        mock_dedup.return_value = 0
+
+        mock_session = MagicMock()
+        # reltuples が500 を返す場合、min_rows = 250、staging_count = 100 で fail
+        mock_session.execute.return_value.scalar.return_value = 500
+
+        with pytest.raises(RuntimeError, match="expected at least"):
+            extract_ratings(mock_session, "2026/03/01", {"n1"})
+
+        # _build_staging_pk は呼ばれないはず
+        mock_build_pk.assert_not_called()
         mock_cleanup.assert_called_once_with(mock_session)
 
 
