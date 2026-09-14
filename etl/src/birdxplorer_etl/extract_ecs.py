@@ -814,9 +814,16 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
             _cleanup_staging_table(postgresql)
             return
 
-        # 最低行数を計算（不完全スナップショット防止の早期チェック用）
+        # 重複排除
+        dedup_start = time.time()
+        dedup_deleted = _deduplicate_staging_table(postgresql)
+        logging.info(f"[PHASE_COMPLETE] Rating dedup: {time.time() - dedup_start:.1f}s")
+
+        # 安全チェック + PK構築 + swap
+        # staging tableの行数はCOPY総数 - 重複排除数（COUNT(*)不要）
+        staging_count = total_loaded - dedup_deleted
         # 最低行数: 現在テーブルの推定行数の50%（COUNT(*)はタイムアウトするのでreltuples使用）
-        # reltuples はANALYZE未実行時に-1を返すため、その場合はtotal_loadedの50%をフォールバックとして使用
+        # reltuples はANALYZE未実行時に-1を返すため、その場合はstaging_countの50%をフォールバックとして使用
         current_count = (
             postgresql.execute(
                 text(
@@ -827,20 +834,10 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
             or 0
         )
         if current_count <= 0:
-            current_count = total_loaded
+            current_count = staging_count
         min_rows = max(int(current_count * 0.5), 1)
 
-        # COPY後の段階で不完全スナップショット判定（20分のPK構築を無駄に走らせない）
-        _check_staging_row_count(total_loaded, min_rows)
-
-        # 重複排除
-        dedup_start = time.time()
-        dedup_deleted = _deduplicate_staging_table(postgresql)
-        logging.info(f"[PHASE_COMPLETE] Rating dedup: {time.time() - dedup_start:.1f}s")
-
-        # PK構築 + swap（dedup後、最終確認を含む）
-        # staging tableの行数はCOPY総数 - 重複排除数（COUNT(*)不要）
-        staging_count = total_loaded - dedup_deleted
+        # PK構築前の安全チェック（不完全スナップショット防止）
         _check_staging_row_count(staging_count, min_rows)
         _build_staging_pk(postgresql)
         _swap_ratings_table(postgresql, min_rows=min_rows, staging_count=staging_count)
