@@ -15,6 +15,7 @@ import settings
 import stringcase
 from sqlalchemy import case, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from birdxplorer_common.storage import (
@@ -731,7 +732,8 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
     指定日付の評価データをダウンロードし、staging table経由でrow_note_ratingsを全置換する。
 
     Community Notesの日次スナップショット（全期間分）をstaging tableにCOPYで高速ロードし、
-    重複排除・PK構築後にアトミックなRENAME swapで本番テーブルと入れ替える。
+    PK構築後にアトミックなRENAME swapで本番テーブルと入れ替える。重複排除は PK 構築が
+    UniqueViolation で失敗したときだけフォールバックとして走る（無条件には走らない）。
 
     Args:
         postgresql: データベースセッション
@@ -814,16 +816,9 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
             _cleanup_staging_table(postgresql)
             return
 
-        # 重複排除
-        dedup_start = time.time()
-        dedup_deleted = _deduplicate_staging_table(postgresql)
-        logging.info(f"[PHASE_COMPLETE] Rating dedup: {time.time() - dedup_start:.1f}s")
-
-        # 安全チェック + PK構築 + swap
-        # staging tableの行数はCOPY総数 - 重複排除数（COUNT(*)不要）
-        staging_count = total_loaded - dedup_deleted
         # 最低行数: 現在テーブルの推定行数の50%（COUNT(*)はタイムアウトするのでreltuples使用）
-        # reltuples はANALYZE未実行時に-1を返すため、その場合はstaging_countの50%をフォールバックとして使用
+        # reltuples はANALYZE未実行時に-1を返すため、その場合はtotal_loadedをフォールバックとして使用
+        # （この時点では dedup 前なので staging_count はまだ確定しておらず total_loaded しかない）
         current_count = (
             postgresql.execute(
                 text(
@@ -834,8 +829,21 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
             or 0
         )
         if current_count <= 0:
-            current_count = staging_count
+            # 「reltuples が取れない」かつ「dedup が50%超を削除する」が同時に成立した日だけ、
+            # 旧コードなら通った swap が _swap_ratings_table 内の最終チェックで落ちうる。
+            # 過去30日19回すべて dedup は0行で、かつ live テーブルは毎日 swap されるため
+            # reltuples が長期間 -1/0 のまま放置される状況とは両立しにくい。
+            # 万一両立しても、フェイルセーフ（前日データが残り EXTRACT_PHASE_FAILED が鳴る）
+            # として働くだけなのでここでは許容する。
+            current_count = total_loaded
         min_rows = max(int(current_count * 0.5), 1)
+
+        # 高価な PK 構築（失敗時は dedup で約20分）の前に、行数不足が分かっている日を早期に落とす
+        _check_staging_row_count(staging_count=total_loaded, min_rows=min_rows)
+
+        # dedup は PK 構築が UniqueViolation で落ちたときだけ走る(_build_staging_pk_with_dedup_fallback)
+        staging_count = _build_staging_pk_with_dedup_fallback(postgresql, total_loaded)
+        # dedup が走った日は行数が減るため、swap 直前の最終確認として意味を持つ
         _swap_ratings_table(postgresql, min_rows=min_rows, staging_count=staging_count)
 
         logging.info(f"Rating table swap complete: {total_loaded} rows loaded")
@@ -965,19 +973,29 @@ def _deduplicate_staging_table(postgresql: Session) -> int:
     return deleted
 
 
-def _swap_ratings_table(postgresql: Session, min_rows: int, staging_count: int) -> None:
-    """staging tableにPKを構築し、本番テーブルとアトミックにswapする。"""
-    # 最低行数チェック（不完全スナップショット防止）
+def _check_staging_row_count(*, staging_count: int, min_rows: int) -> None:
+    """staging table の行数を最低行数と比較。不足なら例外を送出。
+
+    この同じ check は extract_ratings で早期終了用と、_swap_ratings_table で
+    最終確認用の2箇所で呼ばれる。フォールバックで dedup が走ると行数が減るため、
+    両方の check が意味を持つ。
+    """
     if staging_count < min_rows:
         raise RuntimeError(
             f"Staging table has {staging_count} rows, expected at least {min_rows}. "
             "Aborting swap to prevent data loss from incomplete snapshot."
         )
-    logging.info(f"Staging table row count: {staging_count} (minimum: {min_rows})")
 
-    # PK構築（シーケンシャルビルド — ランダムI/Oなし）
-    # 過去のswapでPKリネームが失敗した場合、同名の制約が本番テーブルに残っている可能性があるため
-    # 事前にインデックスの存在をチェックし、存在すればリネームして名前衝突を回避する
+
+def _build_staging_pk(postgresql: Session) -> None:
+    """staging table に PK を張る（シーケンシャルビルド — ランダムI/Oなし）。
+
+    重複があると IntegrityError(UniqueViolation) を送出する。呼び出し側はこれを
+    「重複が実在した」シグナルとして使う（_build_staging_pk_with_dedup_fallback）。
+
+    過去のswapでPKリネームが失敗した場合、同名の制約が本番テーブルに残っている可能性があるため
+    事前にインデックスの存在をチェックし、存在すればリネームして名前衝突を回避する。
+    """
     existing_owner = postgresql.execute(
         text("SELECT tablename FROM pg_indexes " f"WHERE indexname = '{_STAGING_TABLE}_pkey'")
     ).scalar()
@@ -998,6 +1016,55 @@ def _swap_ratings_table(postgresql: Session, min_rows: int, staging_count: int) 
     )
     postgresql.commit()
     logging.info(f"PK index built on staging table in {time.time() - pk_start:.1f}s")
+
+
+def _build_staging_pk_with_dedup_fallback(postgresql: Session, staging_count: int) -> int:
+    """PK 構築を先に試し、重複が実在したときだけ dedup して作り直す。
+
+    dedup(_deduplicate_staging_table)は 215M 行を全件ソートするので32分かかる。
+    過去30日の19回はすべて removed 0 rows だった。毎日0行のために32分払う代わりに、
+    PK 構築を先に投げて UniqueViolation が出たときだけ払う。
+
+    重複が出た日は失敗した PK 構築ぶん(約20分)を余計に払うが、ALTER TABLE の失敗は
+    ロールバックされるだけで staging table は無傷なので、やり直せる。
+
+    戻り値は min_rows チェックに使う行数(dedup で削除したぶんを差し引いたもの)。
+    """
+    try:
+        _build_staging_pk(postgresql)
+        return staging_count
+    except DBAPIError as e:
+        # psycopg2 は SQLSTATE 23xxx (integrity_constraint_violation) を丸ごと
+        # IntegrityError にマップする。dedup で解決できるのは unique_violation (23505)
+        # だけなので、pgcode で判別してそれ以外は再送出する。ここを IntegrityError で
+        # 素通しすると、無関係な integrity エラーでも32分の dedup を払ったうえで
+        # RATING_DUPLICATES_FOUND removed=0 という偽陽性を出す。このトークンは
+        # 現状メトリクスフィルタに繋がっていない(ratings 経路のトークンで繋がっているのは
+        # EXTRACT_PHASE_FAILED だけ)ので今はログ調査用だが、繋いだ時点で偽陽性は誤発火になる。
+        if getattr(e.orig, "pgcode", None) != "23505":
+            raise
+        # UniqueViolation 後のセッションは InFailedSqlTransaction のままなので、
+        # rollback してからでないと dedup の DELETE も落ちる。
+        postgresql.rollback()
+        dedup_start = time.time()
+        deleted = _deduplicate_staging_table(postgresql)
+        logging.warning(
+            f"RATING_DUPLICATES_FOUND removed={deleted} elapsed={time.time() - dedup_start:.1f}s "
+            "PK build failed on duplicates; deduplicated and rebuilding"
+        )
+        _build_staging_pk(postgresql)
+        return staging_count - deleted
+
+
+def _swap_ratings_table(postgresql: Session, min_rows: int, staging_count: int) -> None:
+    """PK 構築済みの staging table を本番テーブルとアトミックにswapする。
+
+    PK は呼び出し前に _build_staging_pk で張っておくこと。
+    """
+    # 最低行数チェック（不完全スナップショット防止）
+    # フォールバックで dedup が走ると行数が減るため、dedup 後の最終確認として意味を持つ。
+    _check_staging_row_count(staging_count=staging_count, min_rows=min_rows)
+    logging.info(f"Staging table row count: {staging_count} (minimum: {min_rows})")
 
     # UNLOGGED → LOGGED に変換（crash safety確保）
     logged_start = time.time()
