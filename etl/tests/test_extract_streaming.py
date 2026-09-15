@@ -53,8 +53,8 @@ class TestProcessNoteRows:
         with patch("birdxplorer_etl.extract_ecs._flush_notes_batch") as flush:
             _process_note_rows(reader, session, {"n1"})
 
-        pending = flush.call_args_list[-1].args[2]
-        assert list(pending) == ["n1"]
+        rows = flush.call_args_list[-1].args[1]
+        assert list(rows) == ["n1"]
 
     def test_a_quoted_newline_is_preserved(self) -> None:
         """クォート内の改行が値として保たれること。
@@ -72,9 +72,9 @@ class TestProcessNoteRows:
         with patch("birdxplorer_etl.extract_ecs._flush_notes_batch") as flush:
             _process_note_rows(reader, session, {"n1"})
 
-        pending = flush.call_args_list[-1].args[2]
-        assert list(pending) == ["n1"]
-        assert pending["n1"]["summary"] == "line one\nline two"
+        rows = flush.call_args_list[-1].args[1]
+        assert list(rows) == ["n1"]
+        assert rows["n1"]["summary"] == "line one\nline two"
 
     def test_nul_byte_does_not_crash(self) -> None:
         """csv は NUL を含む行で _csv.Error を投げる。読み取り前に落とす。"""
@@ -84,8 +84,8 @@ class TestProcessNoteRows:
         with patch("birdxplorer_etl.extract_ecs._flush_notes_batch") as flush:
             _process_note_rows(reader, session, {"n1"})
 
-        pending = flush.call_args_list[-1].args[2]
-        assert pending["n1"]["summary"] == "badvalue"
+        rows = flush.call_args_list[-1].args[1]
+        assert rows["n1"]["summary"] == "badvalue"
 
     def test_flushes_every_1000_rows(self) -> None:
         """バッチ境界を保つ。1回にまとめると結局メモリに全件溜まる。"""
@@ -147,7 +147,7 @@ class TestFlushBoundary:
         with patch("birdxplorer_etl.extract_ecs._flush_notes_batch") as flush:
             _process_note_rows(reader, session, set(note_ids))
 
-        batch_sizes = [len(call.args[1]) + len(call.args[2]) for call in flush.call_args_list]
+        batch_sizes = [len(call.args[1]) for call in flush.call_args_list]
         assert max(batch_sizes) <= 1000, f"バッチが 1000 件を超えた: {batch_sizes}"
         # 境界を直した副作用で行を取りこぼしていないこと（重複1件を除いた全件）
         assert sum(batch_sizes) == 1999, f"フラッシュされた件数が合わない: {batch_sizes}"

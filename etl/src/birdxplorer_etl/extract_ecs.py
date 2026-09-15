@@ -412,12 +412,11 @@ def _process_note_rows(reader, postgresql: Session, existing_row_note_ids: set) 
     あったため reader を作る時点で全件をメモリに載せるしかなく、それが
     2026-09-08 の OOM(exit 137) の原因になっていた。
     """
-    rows_to_add = {}  # note_idをキーにして重複を防ぐ
-    pending_rows = {}  # 既存ノートの更新候補（バッチ取得用）
+    # 新規か既存かはここでは振り分けない。_flush_notes_batch が直前に DB へ問い合わせて決める。
+    rows = {}  # note_idをキーにして重複を防ぐ（同一ファイル内では先勝ち）
     for row in reader:
         note_id = row["note_id"]
-        # 既にrows_to_addまたはpending_rowsに追加済みの場合はスキップ
-        if note_id in rows_to_add or note_id in pending_rows:
+        if note_id in rows:
             continue
 
         # BinaryBoolフィールドの値を正規化
@@ -505,52 +504,65 @@ def _process_note_rows(reader, postgresql: Session, existing_row_note_ids: set) 
             if value == "" and key not in ["harmful", "validation_difficulty"]:
                 row[key] = None
 
-        if note_id in existing_row_note_ids:
-            pending_rows[note_id] = dict(row)  # バッチ取得用に蓄積
-        else:
-            note_record = RowNoteRecord(**row)
-            rows_to_add[note_id] = note_record
+        rows[note_id] = dict(row)
 
         # 境界は「溜まった件数」で判定する。enumerate の index で判定すると、
         # 重複 note_id の continue が 1000 の倍数を飛ばし、次の境界まで溜め込み続ける。
-        if len(rows_to_add) + len(pending_rows) >= 1000:
-            _flush_notes_batch(postgresql, rows_to_add, pending_rows, existing_row_note_ids)
-            rows_to_add = {}
-            pending_rows = {}
+        if len(rows) >= 1000:
+            _flush_notes_batch(postgresql, rows, existing_row_note_ids)
+            rows = {}
 
     # 最後のバッチを処理
-    _flush_notes_batch(postgresql, rows_to_add, pending_rows, existing_row_note_ids)
+    _flush_notes_batch(postgresql, rows, existing_row_note_ids)
 
 
-def _flush_notes_batch(postgresql: Session, rows_to_add: dict, pending_rows: dict, existing_row_note_ids: set):
-    """ノート処理の1バッチ分をDB保存+SQS送信する。"""
-    if not rows_to_add and not pending_rows:
+def _flush_notes_batch(postgresql: Session, rows: dict, existing_row_note_ids: set):
+    """ノート処理の1バッチ分をDB保存+SQS送信する。
+
+    新規か既存かは、起動時のスナップショットではなく**このフラッシュの直前に DB へ問い合わせて**
+    判断する。row_notes には書き手が2つある(日次 Extract と、realtime_notes_extraction 経由の
+    db_writer)。起動時スナップショットで31分間ずっと振り分けていたため、その間に db_writer が
+    入れたノートを新規と誤認して素の INSERT を投げ、UniqueViolation で Notes フェーズごと
+    落ちた(2026-09-15)。この照会で競合窓は31分からミリ秒に縮む。
+    """
+    if not rows:
         return
 
-    # 新規レコードの挿入
-    if rows_to_add:
-        postgresql.bulk_save_objects(list(rows_to_add.values()))
+    ids = list(rows.keys())
+    existing = {r.note_id: r for r in postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id.in_(ids)).all()}
 
-    # 既存レコードのバッチ取得+差分更新
-    if pending_rows:
-        existing_notes = (
-            postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id.in_(list(pending_rows.keys()))).all()
-        )
-        for existing_note in existing_notes:
-            row_data = pending_rows[existing_note.note_id]
-            for key, value in row_data.items():
-                if hasattr(existing_note, key) and getattr(existing_note, key) != value:
-                    setattr(existing_note, key, value)
+    # 既存レコードの差分更新。変わった列だけ UPDATE する。全列を無条件に上書きすると
+    # 317万行を毎日書き換えることになり、dead tuples と WAL を量産する。
+    for note_id, record in existing.items():
+        for key, value in rows[note_id].items():
+            if hasattr(record, key) and getattr(record, key) != value:
+                setattr(record, key, value)
+
+    # 新規レコードの挿入。SELECT と INSERT の隙間は残るので ON CONFLICT を保険に置く。
+    # DO UPDATE にしてはいけない。rowcount が更新行も数えるため下の警告が構造的に発火せず、
+    # 振り分けが大規模に壊れても無音になる。
+    to_insert = [rows[note_id] for note_id in ids if note_id not in existing]
+    if to_insert:
+        stmt = insert(RowNoteRecord).values(to_insert).on_conflict_do_nothing(index_elements=["note_id"])
+        result = postgresql.execute(stmt)
+        skipped = len(to_insert) - (result.rowcount or 0)
+        if skipped > 0:
+            logging.warning(
+                f"NOTE_INSERT_CONFLICT skipped={skipped} of={len(to_insert)} "
+                "rows were inserted by another writer between the SELECT and the INSERT"
+            )
 
     postgresql.flush()
     postgresql.commit()
 
-    # 新規追加したnote_idをセットに追加
-    existing_row_note_ids.update(rows_to_add.keys())
+    # ratings(_validate_rating_row)と status(_process_note_status_rows)がこのセットを使う。
+    # 更新を落とすとその日の新規ノートの評価とステータスが無言でスキップされる。
+    # flush 後はバッチの全 ID が DB に実在するので全件入れる。
+    existing_row_note_ids.update(ids)
 
-    # SQSバッチ送信（新規追加のみ）
-    if rows_to_add:
-        batch = [(n.note_id, n.summary or "", n.tweet_id, n.language) for n in rows_to_add.values()]
+    # SQSバッチ送信（新規追加のみ）。TSV に language 列は無いので get で読む。
+    if to_insert:
+        batch = [(d["note_id"], d.get("summary") or "", d["tweet_id"], d.get("language")) for d in to_insert]
         enqueue_notes_batch(batch)
 
 
