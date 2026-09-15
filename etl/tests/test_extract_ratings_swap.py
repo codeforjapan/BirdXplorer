@@ -496,28 +496,31 @@ class TestExtractRatingsErrorRecovery:
     ) -> None:
         """total_loaded が min_rows を下回るときは、高価な PK 構築(fallback)を一度も呼ばずに落ちる。
 
-        Task 2: 早期チェックが _build_staging_pk_with_dedup_fallback より前に来る。
+        早期チェックは _build_staging_pk_with_dedup_fallback より前に来る。
         32分の dedup も20分の PK 構築も、行数不足が分かっている日には払わない。
         """
         import settings
 
+        original = settings.USE_DUMMY_DATA
         settings.USE_DUMMY_DATA = True
+        try:
+            # ダミーデータとして有効なTSVレスポンスを返す
+            tsv_content = "noteId\traterParticipantId\n"
+            resp_ok = MagicMock()
+            resp_ok.status_code = 200
+            resp_ok.content = tsv_content.encode("utf-8")
+            mock_requests.get.return_value = resp_ok
 
-        # ダミーデータとして有効なTSVレスポンスを返す
-        tsv_content = "noteId\traterParticipantId\n"
-        resp_ok = MagicMock()
-        resp_ok.status_code = 200
-        resp_ok.content = tsv_content.encode("utf-8")
-        mock_requests.get.return_value = resp_ok
+            # total_loaded = 100, reltuples = 500 → min_rows = 250 → 早期チェックで落ちる
+            mock_process.return_value = 100
 
-        # total_loaded = 100, reltuples = 500 → min_rows = 250 → 早期チェックで落ちる
-        mock_process.return_value = 100
+            mock_session = MagicMock()
+            mock_session.execute.return_value.scalar.return_value = 500
 
-        mock_session = MagicMock()
-        mock_session.execute.return_value.scalar.return_value = 500
-
-        with pytest.raises(RuntimeError, match="expected at least"):
-            extract_ratings(mock_session, "2026/03/01", {"n1"})
+            with pytest.raises(RuntimeError, match="expected at least"):
+                extract_ratings(mock_session, "2026/03/01", {"n1"})
+        finally:
+            settings.USE_DUMMY_DATA = original
 
         # 高価な PK 構築(fallback 経由)は一度も呼ばれない
         mock_fallback.assert_not_called()
@@ -935,7 +938,7 @@ class TestOptimisticDedup:
     ) -> None:
         """通常日(重複0)は dedup を一度も呼ばない。これが 32分/日 の削減そのもの。
 
-        spec の成功基準1「通常日には RATING_DUPLICATES_FOUND が出ないこと」もここで固定する。
+        「通常日には RATING_DUPLICATES_FOUND が出ないこと」もここで固定する。
         """
         mock_session = MagicMock()
 
@@ -958,8 +961,8 @@ class TestOptimisticDedup:
         psycopg2 は SQLSTATE 23xxx (integrity_constraint_violation) 全般を IntegrityError に
         マップする。例外クラス名だけで判別すると、重複と無関係な integrity エラーでも
         32分の dedup を払ったうえで RATING_DUPLICATES_FOUND removed=0 という偽陽性を出す。
-        このトークンは現状メトリクスフィルタに繋がっていない(実在するのは EXTRACT_PHASE_FAILED
-        のみ)が、繋いだ時点で偽陽性はそのままアラーム誤発火になる。
+        このトークンは現状メトリクスフィルタに繋がっていない(ratings 経路で繋がっているのは
+        EXTRACT_PHASE_FAILED だけ)が、繋いだ時点で偽陽性はそのまま誤発火になる。
         """
         mock_session = MagicMock()
         mock_build.side_effect = self._integrity_error(pgcode="23503")  # foreign_key_violation
