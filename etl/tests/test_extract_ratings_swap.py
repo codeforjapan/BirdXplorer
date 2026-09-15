@@ -957,8 +957,9 @@ class TestOptimisticDedup:
 
         psycopg2 は SQLSTATE 23xxx (integrity_constraint_violation) 全般を IntegrityError に
         マップする。例外クラス名だけで判別すると、重複と無関係な integrity エラーでも
-        32分の dedup を払ったうえで RATING_DUPLICATES_FOUND removed=0 という偽陽性を出し、
-        CloudWatch のメトリクスフィルタを誤発火させる。
+        32分の dedup を払ったうえで RATING_DUPLICATES_FOUND removed=0 という偽陽性を出す。
+        このトークンは現状メトリクスフィルタに繋がっていない(実在するのは EXTRACT_PHASE_FAILED
+        のみ)が、繋いだ時点で偽陽性はそのままアラーム誤発火になる。
         """
         mock_session = MagicMock()
         mock_build.side_effect = self._integrity_error(pgcode="23503")  # foreign_key_violation

@@ -1038,7 +1038,9 @@ def _build_staging_pk_with_dedup_fallback(postgresql: Session, staging_count: in
         # IntegrityError にマップする。dedup で解決できるのは unique_violation (23505)
         # だけなので、pgcode で判別してそれ以外は再送出する。ここを IntegrityError で
         # 素通しすると、無関係な integrity エラーでも32分の dedup を払ったうえで
-        # RATING_DUPLICATES_FOUND removed=0 を出し、CloudWatch アラームを誤発火させる。
+        # RATING_DUPLICATES_FOUND removed=0 という偽陽性を出す。このトークンは
+        # 現状メトリクスフィルタに繋がっていない(実在するのは EXTRACT_PHASE_FAILED のみ)ので
+        # 今はログ調査用だが、繋いだ時点で偽陽性はそのままアラーム誤発火になる。
         if getattr(e.orig, "pgcode", None) != "23505":
             raise
         # UniqueViolation 後のセッションは InFailedSqlTransaction のままなので、
