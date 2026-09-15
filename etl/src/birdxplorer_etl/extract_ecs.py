@@ -413,7 +413,9 @@ def _process_note_rows(reader, postgresql: Session, existing_row_note_ids: set) 
     2026-09-08 の OOM(exit 137) の原因になっていた。
     """
     # 新規か既存かはここでは振り分けない。_flush_notes_batch が直前に DB へ問い合わせて決める。
-    rows = {}  # note_idをキーにして重複を防ぐ（同一ファイル内では先勝ち）
+    # 重複 note_id は1バッチ(1000件)の中では先勝ち。バッチ境界を跨いだ同一 note_id は
+    # 次のバッチで既存扱いになり UPDATE 経路に回るため後勝ちになる(main と同じ挙動)。
+    rows = {}
     for row in reader:
         note_id = row["note_id"]
         if note_id in rows:
@@ -516,7 +518,7 @@ def _process_note_rows(reader, postgresql: Session, existing_row_note_ids: set) 
     _flush_notes_batch(postgresql, rows, existing_row_note_ids)
 
 
-def _flush_notes_batch(postgresql: Session, rows: dict, existing_row_note_ids: set):
+def _flush_notes_batch(postgresql: Session, rows: dict, existing_row_note_ids: set) -> None:
     """ノート処理の1バッチ分をDB保存+SQS送信する。
 
     新規か既存かは、起動時のスナップショットではなく**このフラッシュの直前に DB へ問い合わせて**
@@ -531,8 +533,12 @@ def _flush_notes_batch(postgresql: Session, rows: dict, existing_row_note_ids: s
     ids = list(rows.keys())
     existing = {r.note_id: r for r in postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id.in_(ids)).all()}
 
-    # 既存レコードの差分更新。変わった列だけ UPDATE する。全列を無条件に上書きすると
-    # 317万行を毎日書き換えることになり、dead tuples と WAL を量産する。
+    # 既存レコードの更新。変わった列だけ setattr する差分ガードを通しているが、
+    # ★このガードは現状ほぼ効いていない。created_at_millis は ORM 側が DECIMAL
+    # (storage.py の type_annotation_map)で Decimal を返すのに対し TSV 側は str のままで、
+    # Decimal != str が常に True になるため、実質すべての行が毎日 UPDATE される
+    # (再フラッシュで xmin が変わることを実測済み)。317万行ぶんの dead tuples と WAL は
+    # 今も発生している。比較の正規化で消せるが、書き込み量が激変するので別途対応する。
     for note_id, record in existing.items():
         for key, value in rows[note_id].items():
             if hasattr(record, key) and getattr(record, key) != value:

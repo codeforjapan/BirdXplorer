@@ -66,7 +66,7 @@ class TestFlushNotesBatch:
 
         _flush_notes_batch(session, {"n1": _row("n1")}, set())  # ← セットは空(新規だと思っている)
 
-        session.execute.assert_not_called(), "DB に在る行を INSERT しようとしている"
+        assert not session.execute.called, "DB に在る行を INSERT しようとしている"
         assert record.summary == "summary of n1", "既存行が差分更新されていない"
 
     def test_inserts_only_rows_absent_from_the_database(self) -> None:
