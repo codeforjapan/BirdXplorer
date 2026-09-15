@@ -864,7 +864,7 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
         # dedup が走った日は行数が減るため、swap 直前の最終確認として意味を持つ
         _swap_ratings_table(postgresql, min_rows=min_rows, staging_count=staging_count)
 
-        logging.info(f"Rating table swap complete: {total_loaded} rows loaded")
+        logging.info(f"Rating table swap complete: {staging_count} rows loaded")
 
     except Exception as e:
         logging.error(f"Rating extraction failed, cleaning up staging table: {e}")
@@ -922,6 +922,15 @@ _STAGING_TABLE = "row_note_ratings_new"
 _OLD_TABLE = "row_note_ratings_old"
 
 # _process_rating_rows で COPY に使うカラム順
+# テーブルの PK インデックス名を引く。indexdef の文字列マッチは使わない（上の理由）。
+_PK_NAME_SQL = (
+    "SELECT i.relname FROM pg_index x "
+    "JOIN pg_class i ON i.oid = x.indexrelid "
+    "JOIN pg_class t ON t.oid = x.indrelid "
+    "JOIN pg_namespace n ON n.oid = t.relnamespace "
+    "WHERE t.relname = :table_name AND n.nspname = current_schema() AND x.indisprimary"
+)
+
 _RATING_COLUMNS = [
     "note_id",
     "rater_participant_id",
@@ -1097,23 +1106,21 @@ def _swap_ratings_table(postgresql: Session, min_rows: int, staging_count: int) 
     postgresql.execute(text(f"ALTER TABLE row_note_ratings RENAME TO {_OLD_TABLE}"))
     postgresql.execute(text(f"ALTER TABLE {_STAGING_TABLE} RENAME TO row_note_ratings"))
 
-    # 旧テーブルのPKインデックスをリネーム（名前衝突回避）
-    old_pk_name = postgresql.execute(
-        text(
-            "SELECT indexname FROM pg_indexes " f"WHERE tablename = '{_OLD_TABLE}' " "AND indexdef LIKE '%PRIMARY KEY%'"
-        )
-    ).scalar()
+    # RENAME TABLE はインデックス名を追随させないので、swap 直後は
+    #   live(row_note_ratings)      -> row_note_ratings_new_pkey   (staging のときの名前)
+    #   旧(row_note_ratings_old)    -> row_note_ratings_pkey       (正規名を持っていってしまう)
+    # という捻れが残る。旧テーブルを先に退かさないと live を正規名にできない（名前衝突）。
+    #
+    # PK の特定に pg_indexes.indexdef の文字列マッチを使ってはいけない。indexdef は
+    # `CREATE UNIQUE INDEX ... USING btree (...)` で "PRIMARY KEY" を含まないため
+    # LIKE '%PRIMARY KEY%' は常に何も返さず、この正規化は毎日 no-op になっていた。
+    # その結果 live の PK は row_note_ratings_new_pkey のまま残り、翌日
+    # _build_staging_pk の「過去の swap 失敗時のみ」のはずの回避リネームが毎日発火していた。
+    old_pk_name = postgresql.execute(text(_PK_NAME_SQL), {"table_name": _OLD_TABLE}).scalar()
     if old_pk_name and old_pk_name != f"{_OLD_TABLE}_pkey":
         postgresql.execute(text(f'ALTER INDEX "{old_pk_name}" RENAME TO {_OLD_TABLE}_pkey'))
 
-    # 新テーブルのPKインデックスを正規名にリネーム
-    new_pk_name = postgresql.execute(
-        text(
-            "SELECT indexname FROM pg_indexes "
-            "WHERE tablename = 'row_note_ratings' "
-            "AND indexdef LIKE '%PRIMARY KEY%'"
-        )
-    ).scalar()
+    new_pk_name = postgresql.execute(text(_PK_NAME_SQL), {"table_name": "row_note_ratings"}).scalar()
     if new_pk_name and new_pk_name != "row_note_ratings_pkey":
         postgresql.execute(text(f'ALTER INDEX "{new_pk_name}" RENAME TO row_note_ratings_pkey'))
 
