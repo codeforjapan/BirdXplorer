@@ -1,8 +1,10 @@
 name: Release to Production
 
+# 自動起動を止めている（2026-09-16）。手動起動のみ。
+#
+# ⚠️ これにより release-please によるバージョン管理と CHANGELOG 生成も止まる。
+#    リリース管理を再開したい場合は release ジョブだけ別ワークフローに切り出すこと。
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
 
 permissions:
