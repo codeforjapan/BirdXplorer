@@ -5,6 +5,7 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 # extract_ecs.py transitively imports psycopg2 (via birdxplorer_common.storage)
 # and settings, which are only available in the ECS/Lambda runtime.
@@ -17,6 +18,8 @@ sys.modules.setdefault("settings", MagicMock())
 from birdxplorer_etl.extract_ecs import (  # noqa: E402
     _RATING_COLUMNS,
     _STAGING_TABLE,
+    _build_staging_pk,
+    _build_staging_pk_with_dedup_fallback,
     _cleanup_staging_table,
     _create_staging_table,
     _deduplicate_staging_table,
@@ -169,6 +172,41 @@ class TestDeduplicateStagingTable:
         assert "removed 42 duplicate rows" in caplog.text
 
 
+class TestBuildStagingPk:
+    """_build_staging_pk のユニットテスト"""
+
+    def test_adds_primary_key_constraint(self) -> None:
+        mock_session = MagicMock()
+        mock_session.execute.return_value.scalar.return_value = None
+
+        _build_staging_pk(mock_session)
+
+        sql_calls = [str(c.args[0].text) for c in mock_session.execute.call_args_list]
+        assert any("ADD CONSTRAINT" in s and "PRIMARY KEY (note_id, rater_participant_id)" in s for s in sql_calls)
+        mock_session.commit.assert_called_once()
+
+    def test_renames_a_leftover_index_owned_by_another_table(self) -> None:
+        """過去の swap 失敗で本番テーブルに同名 PK が残っていると、新しい PK が張れない。"""
+        mock_session = MagicMock()
+        mock_session.execute.return_value.scalar.return_value = "row_note_ratings"
+
+        _build_staging_pk(mock_session)
+
+        sql_calls = [str(c.args[0].text) for c in mock_session.execute.call_args_list]
+        rename_at = next(i for i, s in enumerate(sql_calls) if "RENAME TO" in s and "_pkey_old" in s)
+        pk_at = next(i for i, s in enumerate(sql_calls) if "ADD CONSTRAINT" in s)
+        assert rename_at < pk_at, "リネームは PK 構築より前でなければ意味がない"
+
+    def test_does_not_rename_when_the_index_belongs_to_the_staging_table(self) -> None:
+        mock_session = MagicMock()
+        mock_session.execute.return_value.scalar.return_value = _STAGING_TABLE
+
+        _build_staging_pk(mock_session)
+
+        sql_calls = [str(c.args[0].text) for c in mock_session.execute.call_args_list]
+        assert not any("_pkey_old" in s for s in sql_calls)
+
+
 class TestSwapRatingsTable:
     """_swap_ratings_table のユニットテスト"""
 
@@ -180,23 +218,21 @@ class TestSwapRatingsTable:
 
     def test_succeeds_when_above_min_rows(self) -> None:
         mock_session = MagicMock()
-        # scalar()呼び出し順: PK衝突チェック(None=衝突なし), 旧PK名, 新PK名
+        # scalar()呼び出し順: 旧PK名, 新PK名（PK衝突チェックは _build_staging_pk へ移動した）
         mock_session.execute.return_value.scalar.side_effect = [
-            None,  # PK衝突チェック: 同名インデックスは存在しない
             "row_note_ratings_pkey",  # 旧テーブルのPK名
             "row_note_ratings_new_pkey",  # 新テーブルのPK名
         ]
 
         _swap_ratings_table(mock_session, min_rows=500, staging_count=1000)
 
-        # 各フェーズがcommitされている（PK, LOGGED, SWAP+PK_RENAME, DROP_OLD）
-        assert mock_session.commit.call_count >= 3
+        # 各フェーズがcommitされている（LOGGED, SWAP+PK_RENAME, DROP_OLD）
+        assert mock_session.commit.call_count >= 2
 
     def test_swap_sql_sequence(self) -> None:
         mock_session = MagicMock()
-        # scalar()呼び出し順: PK衝突チェック(None=衝突なし), 旧PK名, 新PK名
+        # scalar()呼び出し順: 旧PK名, 新PK名（PK衝突チェックは _build_staging_pk へ移動した）
         mock_session.execute.return_value.scalar.side_effect = [
-            None,  # PK衝突チェック: 同名インデックスは存在しない
             "row_note_ratings_pkey",  # 旧テーブルのPK名
             "row_note_ratings_new_pkey",  # 新テーブルのPK名
         ]
@@ -204,7 +240,7 @@ class TestSwapRatingsTable:
         _swap_ratings_table(mock_session, min_rows=1, staging_count=1000)
 
         sql_calls = [str(c.args[0].text) for c in mock_session.execute.call_args_list]
-        assert any("ADD CONSTRAINT" in s and "PRIMARY KEY" in s for s in sql_calls)
+        assert not any("ADD CONSTRAINT" in s for s in sql_calls), "PK 構築は _build_staging_pk の責務"
         assert any("SET LOGGED" in s for s in sql_calls)
         assert any("RENAME TO row_note_ratings_old" in s for s in sql_calls)
         assert any("RENAME TO row_note_ratings" in s for s in sql_calls)
@@ -404,7 +440,7 @@ class TestExtractRatingsErrorRecovery:
 
     @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
     @patch("birdxplorer_etl.extract_ecs._swap_ratings_table")
-    @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk")
     @patch("birdxplorer_etl.extract_ecs._process_rating_rows")
     @patch("birdxplorer_etl.extract_ecs._create_staging_table")
     @patch("birdxplorer_etl.extract_ecs.requests")
@@ -413,11 +449,16 @@ class TestExtractRatingsErrorRecovery:
         mock_requests: MagicMock,
         mock_create: MagicMock,
         mock_process: MagicMock,
-        mock_dedup: MagicMock,
+        mock_build_pk: MagicMock,
         mock_swap: MagicMock,
         mock_cleanup: MagicMock,
     ) -> None:
-        """swap失敗時にstaging tableがクリーンアップされる"""
+        """swap失敗時にstaging tableがクリーンアップされる。
+
+        _build_staging_pk を直接パッチしているため IntegrityError は発生せず、
+        _build_staging_pk_with_dedup_fallback は dedup を経由しない
+        （dedup 経路自体は TestOptimisticDedup で別途検証済み）。
+        """
         import settings
 
         settings.USE_DUMMY_DATA = True
@@ -438,6 +479,51 @@ class TestExtractRatingsErrorRecovery:
         with pytest.raises(RuntimeError, match="expected at least 200"):
             extract_ratings(mock_session, "2026/03/01", {"n1"})
 
+        mock_cleanup.assert_called_once_with(mock_session)
+
+    @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk_with_dedup_fallback")
+    @patch("birdxplorer_etl.extract_ecs._process_rating_rows")
+    @patch("birdxplorer_etl.extract_ecs._create_staging_table")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_does_not_build_pk_when_total_loaded_below_min_rows(
+        self,
+        mock_requests: MagicMock,
+        mock_create: MagicMock,
+        mock_process: MagicMock,
+        mock_fallback: MagicMock,
+        mock_cleanup: MagicMock,
+    ) -> None:
+        """total_loaded が min_rows を下回るときは、高価な PK 構築(fallback)を一度も呼ばずに落ちる。
+
+        早期チェックは _build_staging_pk_with_dedup_fallback より前に来る。
+        32分の dedup も20分の PK 構築も、行数不足が分かっている日には払わない。
+        """
+        import settings
+
+        original = settings.USE_DUMMY_DATA
+        settings.USE_DUMMY_DATA = True
+        try:
+            # ダミーデータとして有効なTSVレスポンスを返す
+            tsv_content = "noteId\traterParticipantId\n"
+            resp_ok = MagicMock()
+            resp_ok.status_code = 200
+            resp_ok.content = tsv_content.encode("utf-8")
+            mock_requests.get.return_value = resp_ok
+
+            # total_loaded = 100, reltuples = 500 → min_rows = 250 → 早期チェックで落ちる
+            mock_process.return_value = 100
+
+            mock_session = MagicMock()
+            mock_session.execute.return_value.scalar.return_value = 500
+
+            with pytest.raises(RuntimeError, match="expected at least"):
+                extract_ratings(mock_session, "2026/03/01", {"n1"})
+        finally:
+            settings.USE_DUMMY_DATA = original
+
+        # 高価な PK 構築(fallback 経由)は一度も呼ばれない
+        mock_fallback.assert_not_called()
         mock_cleanup.assert_called_once_with(mock_session)
 
 
@@ -826,3 +912,177 @@ class TestExtractDataPhaseIsolation:
         assert mock_requests.get.call_count == 3, "今日・昨日・一昨日の3日分を試していない"
         mock_extract_ratings.assert_not_called()
         mock_note_requests.assert_called_once()
+
+
+class TestOptimisticDedup:
+    """_build_staging_pk_with_dedup_fallback のユニットテスト
+
+    過去30日の dedup 19回はすべて removed 0 rows だった。32分かけて0行を消すのをやめ、
+    PK 構築を先に試して重複が実在したときだけ dedup する。
+    """
+
+    def _integrity_error(self, pgcode: str = "23505") -> IntegrityError:
+        """IntegrityError を、実 psycopg2 と同じく orig.pgcode を持つ形で作る。
+
+        pgcode を指定しなければ unique_violation (23505)。dedup で解決できるのは
+        この SQLSTATE だけなので、それ以外を指定すれば再送出されるはず。
+        """
+        orig = Exception("duplicate key value violates unique constraint")
+        orig.pgcode = pgcode  # type: ignore[attr-defined]
+        return IntegrityError("ALTER TABLE ...", {}, orig)
+
+    @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk")
+    def test_skips_dedup_when_there_are_no_duplicates(
+        self, mock_build: MagicMock, mock_dedup: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """通常日(重複0)は dedup を一度も呼ばない。これが 32分/日 の削減そのもの。
+
+        「通常日には RATING_DUPLICATES_FOUND が出ないこと」もここで固定する。
+        """
+        mock_session = MagicMock()
+
+        with caplog.at_level(logging.WARNING):
+            result = _build_staging_pk_with_dedup_fallback(mock_session, staging_count=1000)
+
+        assert result == 1000
+        mock_build.assert_called_once()
+        mock_dedup.assert_not_called()
+        mock_session.rollback.assert_not_called()
+        assert "RATING_DUPLICATES_FOUND" not in caplog.text
+
+    @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk")
+    def test_reraises_when_the_integrity_error_is_not_a_unique_violation(
+        self, mock_build: MagicMock, mock_dedup: MagicMock
+    ) -> None:
+        """SQLSTATE が 23505 (unique_violation) 以外の integrity エラーは dedup せずに再送出する。
+
+        psycopg2 は SQLSTATE 23xxx (integrity_constraint_violation) 全般を IntegrityError に
+        マップする。例外クラス名だけで判別すると、重複と無関係な integrity エラーでも
+        32分の dedup を払ったうえで RATING_DUPLICATES_FOUND removed=0 という偽陽性を出す。
+        このトークンは現状メトリクスフィルタに繋がっていない(ratings 経路で繋がっているのは
+        EXTRACT_PHASE_FAILED だけ)が、繋いだ時点で偽陽性はそのまま誤発火になる。
+        """
+        mock_session = MagicMock()
+        mock_build.side_effect = self._integrity_error(pgcode="23503")  # foreign_key_violation
+
+        with pytest.raises(IntegrityError):
+            _build_staging_pk_with_dedup_fallback(mock_session, staging_count=1000)
+
+        mock_dedup.assert_not_called()
+        mock_session.rollback.assert_not_called()
+
+    @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk")
+    def test_deduplicates_and_retries_when_duplicates_exist(self, mock_build: MagicMock, mock_dedup: MagicMock) -> None:
+        """重複があれば dedup して作り直す。行数は削除ぶんを差し引く。"""
+        mock_session = MagicMock()
+        mock_build.side_effect = [self._integrity_error(), None]
+        mock_dedup.return_value = 7
+
+        result = _build_staging_pk_with_dedup_fallback(mock_session, staging_count=1000)
+
+        assert result == 993, "min_rows チェックに使う行数から削除ぶんを引いていない"
+        assert mock_build.call_count == 2
+        mock_dedup.assert_called_once()
+
+    @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk")
+    def test_rolls_back_before_deduplicating(self, mock_build: MagicMock, mock_dedup: MagicMock) -> None:
+        """UniqueViolation 後のセッションは InFailedSqlTransaction。
+
+        rollback せずに dedup を投げると以降が全部失敗する(_run_phase のコメントにある既知の罠)。
+        """
+        mock_session = MagicMock()
+        order: list[str] = []
+        mock_session.rollback.side_effect = lambda: order.append("rollback")
+        mock_dedup.side_effect = lambda _session: order.append("dedup") or 0
+        mock_build.side_effect = [self._integrity_error(), None]
+
+        _build_staging_pk_with_dedup_fallback(mock_session, staging_count=1000)
+
+        assert order == ["rollback", "dedup"], f"rollback が dedup より前にない: {order}"
+
+    @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk")
+    def test_logs_an_alarm_token_when_duplicates_exist(
+        self, mock_build: MagicMock, mock_dedup: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """重複は19日間一度も起きていない。起きたら気付けるようトークンを出す。"""
+        mock_session = MagicMock()
+        mock_build.side_effect = [self._integrity_error(), None]
+        mock_dedup.return_value = 3
+
+        with caplog.at_level(logging.WARNING):
+            _build_staging_pk_with_dedup_fallback(mock_session, staging_count=1000)
+
+        assert "RATING_DUPLICATES_FOUND" in caplog.text
+        assert "removed=3" in caplog.text
+
+    @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk")
+    def test_propagates_when_the_retry_also_fails(self, mock_build: MagicMock, mock_dedup: MagicMock) -> None:
+        """dedup 後も落ちるなら諦めて例外を投げる。無限ループやリトライの繰り返しをしない。
+
+        フェーズは失敗するが swap されないので前日のデータが残る(フェイルセーフ)。
+        """
+        mock_session = MagicMock()
+        mock_build.side_effect = [self._integrity_error(), self._integrity_error()]
+        mock_dedup.return_value = 0
+
+        with pytest.raises(IntegrityError):
+            _build_staging_pk_with_dedup_fallback(mock_session, staging_count=1000)
+
+        assert mock_build.call_count == 2
+
+
+class TestExtractRatingsSkipsDedup:
+    """extract_ratings が無条件 dedup を呼ばなくなったことの確認"""
+
+    @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._swap_ratings_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk_with_dedup_fallback")
+    @patch("birdxplorer_etl.extract_ecs._deduplicate_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._process_rating_rows")
+    @patch("birdxplorer_etl.extract_ecs._create_staging_table")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_does_not_call_deduplicate_directly(
+        self,
+        mock_requests: MagicMock,
+        mock_create: MagicMock,
+        mock_process: MagicMock,
+        mock_dedup: MagicMock,
+        mock_fallback: MagicMock,
+        mock_swap: MagicMock,
+        mock_cleanup: MagicMock,
+    ) -> None:
+        import settings
+
+        original = settings.USE_DUMMY_DATA
+        settings.USE_DUMMY_DATA = True
+        try:
+            response = MagicMock()
+            response.status_code = 200
+            response.content = b"noteId\traterParticipantId\n"
+            mock_requests.get.return_value = response
+            mock_process.return_value = 1000
+            # fallback の戻り値を total_loaded (1000) とわざと異ならせ、その値が
+            # そのまま _swap_ratings_table の staging_count に配線されていることを検証する。
+            # total_loaded を素通ししてしまう退行が起きたらこのアサートで落ちる。
+            mock_fallback.return_value = 993
+
+            mock_session = MagicMock()
+            mock_session.execute.return_value.scalar.return_value = 1000
+
+            extract_ratings(mock_session, "2026/09/14", {"n1"})
+        finally:
+            settings.USE_DUMMY_DATA = original
+
+        # dedup は fallback 経路からしか呼ばれない
+        mock_dedup.assert_not_called()
+        mock_fallback.assert_called_once()
+        mock_swap.assert_called_once()
+        assert (
+            mock_swap.call_args.kwargs["staging_count"] == 993
+        ), "fallback が返した dedup 後の行数が _swap_ratings_table に配線されていない"
