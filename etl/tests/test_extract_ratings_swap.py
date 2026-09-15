@@ -268,8 +268,9 @@ class TestSwapRatingsTable:
         _swap_ratings_table(mock_session, min_rows=1, staging_count=1000)
 
         sql_calls = [str(c.args[0].text) for c in mock_session.execute.call_args_list]
-        old_rename = next(i for i, s in enumerate(sql_calls) if "row_note_ratings_old_pkey" in s)
-        new_rename = next(i for i, s in enumerate(sql_calls) if "RENAME TO row_note_ratings_pkey" in s)
+        old_rename = next((i for i, s in enumerate(sql_calls) if "row_note_ratings_old_pkey" in s), -1)
+        new_rename = next((i for i, s in enumerate(sql_calls) if "RENAME TO row_note_ratings_pkey" in s), -1)
+        assert old_rename >= 0 and new_rename >= 0, f"リネームが発行されていない: {sql_calls}"
         assert old_rename < new_rename, "旧テーブルの退避が後回しになっていて名前が衝突する"
 
     def test_swap_sql_sequence(self) -> None:

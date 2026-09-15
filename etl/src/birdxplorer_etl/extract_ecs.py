@@ -921,8 +921,8 @@ def recalculate_rating_counts(postgresql: Session) -> int:
 _STAGING_TABLE = "row_note_ratings_new"
 _OLD_TABLE = "row_note_ratings_old"
 
-# _process_rating_rows で COPY に使うカラム順
-# テーブルの PK インデックス名を引く。indexdef の文字列マッチは使わない（上の理由）。
+# テーブルの PK インデックス名を引く。indexdef の文字列マッチは使わない
+# （理由は _swap_ratings_table のコメントを参照）。
 _PK_NAME_SQL = (
     "SELECT i.relname FROM pg_index x "
     "JOIN pg_class i ON i.oid = x.indexrelid "
@@ -931,6 +931,7 @@ _PK_NAME_SQL = (
     "WHERE t.relname = :table_name AND n.nspname = current_schema() AND x.indisprimary"
 )
 
+# _process_rating_rows で COPY に使うカラム順
 _RATING_COLUMNS = [
     "note_id",
     "rater_participant_id",
@@ -1100,8 +1101,6 @@ def _swap_ratings_table(postgresql: Session, min_rows: int, staging_count: int) 
     logging.info(f"Staging table SET LOGGED in {time.time() - logged_start:.1f}s")
 
     # アトミックswap: RENAME + PK制約名の正規化を1トランザクションで実行
-    # PostgreSQLはテーブルRENAME時にPKインデックスを自動リネームする場合があるため、
-    # カタログから実際のインデックス名を取得して確実にリネームする
     postgresql.execute(text(f"DROP TABLE IF EXISTS {_OLD_TABLE}"))
     postgresql.execute(text(f"ALTER TABLE row_note_ratings RENAME TO {_OLD_TABLE}"))
     postgresql.execute(text(f"ALTER TABLE {_STAGING_TABLE} RENAME TO row_note_ratings"))
