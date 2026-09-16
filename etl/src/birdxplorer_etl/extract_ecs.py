@@ -412,12 +412,13 @@ def _process_note_rows(reader, postgresql: Session, existing_row_note_ids: set) 
     あったため reader を作る時点で全件をメモリに載せるしかなく、それが
     2026-09-08 の OOM(exit 137) の原因になっていた。
     """
-    rows_to_add = {}  # note_idをキーにして重複を防ぐ
-    pending_rows = {}  # 既存ノートの更新候補（バッチ取得用）
+    # 新規か既存かはここでは振り分けない。_flush_notes_batch が直前に DB へ問い合わせて決める。
+    # 重複 note_id は1バッチ(1000件)の中では先勝ち。バッチ境界を跨いだ同一 note_id は
+    # 次のバッチで既存扱いになり UPDATE 経路に回るため後勝ちになる(main と同じ挙動)。
+    rows = {}
     for row in reader:
         note_id = row["note_id"]
-        # 既にrows_to_addまたはpending_rowsに追加済みの場合はスキップ
-        if note_id in rows_to_add or note_id in pending_rows:
+        if note_id in rows:
             continue
 
         # BinaryBoolフィールドの値を正規化
@@ -505,52 +506,69 @@ def _process_note_rows(reader, postgresql: Session, existing_row_note_ids: set) 
             if value == "" and key not in ["harmful", "validation_difficulty"]:
                 row[key] = None
 
-        if note_id in existing_row_note_ids:
-            pending_rows[note_id] = dict(row)  # バッチ取得用に蓄積
-        else:
-            note_record = RowNoteRecord(**row)
-            rows_to_add[note_id] = note_record
+        rows[note_id] = dict(row)
 
         # 境界は「溜まった件数」で判定する。enumerate の index で判定すると、
         # 重複 note_id の continue が 1000 の倍数を飛ばし、次の境界まで溜め込み続ける。
-        if len(rows_to_add) + len(pending_rows) >= 1000:
-            _flush_notes_batch(postgresql, rows_to_add, pending_rows, existing_row_note_ids)
-            rows_to_add = {}
-            pending_rows = {}
+        if len(rows) >= 1000:
+            _flush_notes_batch(postgresql, rows, existing_row_note_ids)
+            rows = {}
 
     # 最後のバッチを処理
-    _flush_notes_batch(postgresql, rows_to_add, pending_rows, existing_row_note_ids)
+    _flush_notes_batch(postgresql, rows, existing_row_note_ids)
 
 
-def _flush_notes_batch(postgresql: Session, rows_to_add: dict, pending_rows: dict, existing_row_note_ids: set):
-    """ノート処理の1バッチ分をDB保存+SQS送信する。"""
-    if not rows_to_add and not pending_rows:
+def _flush_notes_batch(postgresql: Session, rows: dict, existing_row_note_ids: set) -> None:
+    """ノート処理の1バッチ分をDB保存+SQS送信する。
+
+    新規か既存かは、起動時のスナップショットではなく**このフラッシュの直前に DB へ問い合わせて**
+    判断する。row_notes には書き手が2つある(日次 Extract と、realtime_notes_extraction 経由の
+    db_writer)。起動時スナップショットで31分間ずっと振り分けていたため、その間に db_writer が
+    入れたノートを新規と誤認して素の INSERT を投げ、UniqueViolation で Notes フェーズごと
+    落ちた(2026-09-15)。この照会で競合窓は31分からミリ秒に縮む。
+    """
+    if not rows:
         return
 
-    # 新規レコードの挿入
-    if rows_to_add:
-        postgresql.bulk_save_objects(list(rows_to_add.values()))
+    ids = list(rows.keys())
+    existing = {r.note_id: r for r in postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id.in_(ids)).all()}
 
-    # 既存レコードのバッチ取得+差分更新
-    if pending_rows:
-        existing_notes = (
-            postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id.in_(list(pending_rows.keys()))).all()
-        )
-        for existing_note in existing_notes:
-            row_data = pending_rows[existing_note.note_id]
-            for key, value in row_data.items():
-                if hasattr(existing_note, key) and getattr(existing_note, key) != value:
-                    setattr(existing_note, key, value)
+    # 既存レコードの更新。変わった列だけ setattr する差分ガードを通しているが、
+    # ★このガードは現状ほぼ効いていない。created_at_millis は ORM 側が DECIMAL
+    # (storage.py の type_annotation_map)で Decimal を返すのに対し TSV 側は str のままで、
+    # Decimal != str が常に True になるため、実質すべての行が毎日 UPDATE される
+    # (再フラッシュで xmin が変わることを実測済み)。317万行ぶんの dead tuples と WAL は
+    # 今も発生している。比較の正規化で消せるが、書き込み量が激変するので別途対応する。
+    for note_id, record in existing.items():
+        for key, value in rows[note_id].items():
+            if hasattr(record, key) and getattr(record, key) != value:
+                setattr(record, key, value)
+
+    # 新規レコードの挿入。SELECT と INSERT の隙間は残るので ON CONFLICT を保険に置く。
+    # DO UPDATE にしてはいけない。rowcount が更新行も数えるため下の警告が構造的に発火せず、
+    # 振り分けが大規模に壊れても無音になる。
+    to_insert = [rows[note_id] for note_id in ids if note_id not in existing]
+    if to_insert:
+        stmt = insert(RowNoteRecord).values(to_insert).on_conflict_do_nothing(index_elements=["note_id"])
+        result = postgresql.execute(stmt)
+        skipped = len(to_insert) - (result.rowcount or 0)
+        if skipped > 0:
+            logging.warning(
+                f"NOTE_INSERT_CONFLICT skipped={skipped} of={len(to_insert)} "
+                "rows were inserted by another writer between the SELECT and the INSERT"
+            )
 
     postgresql.flush()
     postgresql.commit()
 
-    # 新規追加したnote_idをセットに追加
-    existing_row_note_ids.update(rows_to_add.keys())
+    # ratings(_validate_rating_row)と status(_process_note_status_rows)がこのセットを使う。
+    # 更新を落とすとその日の新規ノートの評価とステータスが無言でスキップされる。
+    # flush 後はバッチの全 ID が DB に実在するので全件入れる。
+    existing_row_note_ids.update(ids)
 
-    # SQSバッチ送信（新規追加のみ）
-    if rows_to_add:
-        batch = [(n.note_id, n.summary or "", n.tweet_id, n.language) for n in rows_to_add.values()]
+    # SQSバッチ送信（新規追加のみ）。TSV に language 列は無いので get で読む。
+    if to_insert:
+        batch = [(d["note_id"], d.get("summary") or "", d["tweet_id"], d.get("language")) for d in to_insert]
         enqueue_notes_batch(batch)
 
 
@@ -846,7 +864,7 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
         # dedup が走った日は行数が減るため、swap 直前の最終確認として意味を持つ
         _swap_ratings_table(postgresql, min_rows=min_rows, staging_count=staging_count)
 
-        logging.info(f"Rating table swap complete: {total_loaded} rows loaded")
+        logging.info(f"Rating table swap complete: {staging_count} rows loaded")
 
     except Exception as e:
         logging.error(f"Rating extraction failed, cleaning up staging table: {e}")
@@ -902,6 +920,16 @@ def recalculate_rating_counts(postgresql: Session) -> int:
 
 _STAGING_TABLE = "row_note_ratings_new"
 _OLD_TABLE = "row_note_ratings_old"
+
+# テーブルの PK インデックス名を引く。indexdef の文字列マッチは使わない
+# （理由は _swap_ratings_table のコメントを参照）。
+_PK_NAME_SQL = (
+    "SELECT i.relname FROM pg_index x "
+    "JOIN pg_class i ON i.oid = x.indexrelid "
+    "JOIN pg_class t ON t.oid = x.indrelid "
+    "JOIN pg_namespace n ON n.oid = t.relnamespace "
+    "WHERE t.relname = :table_name AND n.nspname = current_schema() AND x.indisprimary"
+)
 
 # _process_rating_rows で COPY に使うカラム順
 _RATING_COLUMNS = [
@@ -1039,8 +1067,8 @@ def _build_staging_pk_with_dedup_fallback(postgresql: Session, staging_count: in
         # だけなので、pgcode で判別してそれ以外は再送出する。ここを IntegrityError で
         # 素通しすると、無関係な integrity エラーでも32分の dedup を払ったうえで
         # RATING_DUPLICATES_FOUND removed=0 という偽陽性を出す。このトークンは
-        # 現状メトリクスフィルタに繋がっていない(ratings 経路のトークンで繋がっているのは
-        # EXTRACT_PHASE_FAILED だけ)ので今はログ調査用だが、繋いだ時点で偽陽性は誤発火になる。
+        # CloudWatch のメトリクスフィルタとアラームに繋がっている(BirdXplorer-cdk #37、
+        # dev-bird-xplorer-RatingDuplicatesFound)ので、偽陽性はそのままアラーム誤発火になる。
         if getattr(e.orig, "pgcode", None) != "23505":
             raise
         # UniqueViolation 後のセッションは InFailedSqlTransaction のままなので、
@@ -1073,29 +1101,25 @@ def _swap_ratings_table(postgresql: Session, min_rows: int, staging_count: int) 
     logging.info(f"Staging table SET LOGGED in {time.time() - logged_start:.1f}s")
 
     # アトミックswap: RENAME + PK制約名の正規化を1トランザクションで実行
-    # PostgreSQLはテーブルRENAME時にPKインデックスを自動リネームする場合があるため、
-    # カタログから実際のインデックス名を取得して確実にリネームする
     postgresql.execute(text(f"DROP TABLE IF EXISTS {_OLD_TABLE}"))
     postgresql.execute(text(f"ALTER TABLE row_note_ratings RENAME TO {_OLD_TABLE}"))
     postgresql.execute(text(f"ALTER TABLE {_STAGING_TABLE} RENAME TO row_note_ratings"))
 
-    # 旧テーブルのPKインデックスをリネーム（名前衝突回避）
-    old_pk_name = postgresql.execute(
-        text(
-            "SELECT indexname FROM pg_indexes " f"WHERE tablename = '{_OLD_TABLE}' " "AND indexdef LIKE '%PRIMARY KEY%'"
-        )
-    ).scalar()
+    # RENAME TABLE はインデックス名を追随させないので、swap 直後は
+    #   live(row_note_ratings)      -> row_note_ratings_new_pkey   (staging のときの名前)
+    #   旧(row_note_ratings_old)    -> row_note_ratings_pkey       (正規名を持っていってしまう)
+    # という捻れが残る。旧テーブルを先に退かさないと live を正規名にできない（名前衝突）。
+    #
+    # PK の特定に pg_indexes.indexdef の文字列マッチを使ってはいけない。indexdef は
+    # `CREATE UNIQUE INDEX ... USING btree (...)` で "PRIMARY KEY" を含まないため
+    # LIKE '%PRIMARY KEY%' は常に何も返さず、この正規化は毎日 no-op になっていた。
+    # その結果 live の PK は row_note_ratings_new_pkey のまま残り、翌日
+    # _build_staging_pk の「過去の swap 失敗時のみ」のはずの回避リネームが毎日発火していた。
+    old_pk_name = postgresql.execute(text(_PK_NAME_SQL), {"table_name": _OLD_TABLE}).scalar()
     if old_pk_name and old_pk_name != f"{_OLD_TABLE}_pkey":
         postgresql.execute(text(f'ALTER INDEX "{old_pk_name}" RENAME TO {_OLD_TABLE}_pkey'))
 
-    # 新テーブルのPKインデックスを正規名にリネーム
-    new_pk_name = postgresql.execute(
-        text(
-            "SELECT indexname FROM pg_indexes "
-            "WHERE tablename = 'row_note_ratings' "
-            "AND indexdef LIKE '%PRIMARY KEY%'"
-        )
-    ).scalar()
+    new_pk_name = postgresql.execute(text(_PK_NAME_SQL), {"table_name": "row_note_ratings"}).scalar()
     if new_pk_name and new_pk_name != "row_note_ratings_pkey":
         postgresql.execute(text(f'ALTER INDEX "{new_pk_name}" RENAME TO row_note_ratings_pkey'))
 

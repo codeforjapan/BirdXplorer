@@ -229,6 +229,50 @@ class TestSwapRatingsTable:
         # 各フェーズがcommitされている（LOGGED, SWAP+PK_RENAME, DROP_OLD）
         assert mock_session.commit.call_count >= 2
 
+    def test_finds_the_pk_by_indisprimary_not_by_indexdef_text(self) -> None:
+        """PK の特定に pg_indexes.indexdef の文字列マッチを使わないこと。
+
+        indexdef は `CREATE UNIQUE INDEX ... USING btree (...)` で "PRIMARY KEY" を含まない
+        （実 PostgreSQL 15.4 で確認）。LIKE '%PRIMARY KEY%' は常に何も返さないため、
+        swap 後の PK 名の正規化が毎日 no-op になっていた。その結果、本番テーブルの PK は
+        row_note_ratings_new_pkey のまま残り、翌日 _build_staging_pk の
+        「過去の swap 失敗時のみ」のはずの回避リネームが毎日発火して WARNING を出していた。
+        アラーム形状のログが常時点灯するので、本当に残骸が残った日と見分けられない。
+        """
+        mock_session = MagicMock()
+        mock_session.execute.return_value.scalar.side_effect = [
+            "row_note_ratings_old_pkey",
+            "row_note_ratings_pkey",
+        ]
+
+        _swap_ratings_table(mock_session, min_rows=1, staging_count=1000)
+
+        sql_calls = [str(c.args[0].text) for c in mock_session.execute.call_args_list]
+        pk_lookups = [s for s in sql_calls if "indisprimary" in s]
+        assert len(pk_lookups) == 2, f"indisprimary での PK 特定が2本ない: {len(pk_lookups)}"
+        assert not any("PRIMARY KEY%" in s for s in sql_calls), "indexdef の文字列マッチが残っている"
+
+    def test_renames_the_old_table_pk_before_the_new_one(self) -> None:
+        """順序が逆だと名前が衝突する。
+
+        RENAME TABLE はインデックス名を追随させないので、swap 直後は旧テーブル側が
+        row_note_ratings_pkey という名前を持っている（実 PostgreSQL で確認）。
+        先に旧テーブルを退かさないと、新テーブルを正規名にできない。
+        """
+        mock_session = MagicMock()
+        mock_session.execute.return_value.scalar.side_effect = [
+            "row_note_ratings_pkey",  # 旧テーブルが正規名を持っている（RENAME の副作用）
+            "row_note_ratings_new_pkey",  # live 側は staging のときの名前のまま
+        ]
+
+        _swap_ratings_table(mock_session, min_rows=1, staging_count=1000)
+
+        sql_calls = [str(c.args[0].text) for c in mock_session.execute.call_args_list]
+        old_rename = next((i for i, s in enumerate(sql_calls) if "row_note_ratings_old_pkey" in s), -1)
+        new_rename = next((i for i, s in enumerate(sql_calls) if "RENAME TO row_note_ratings_pkey" in s), -1)
+        assert old_rename >= 0 and new_rename >= 0, f"リネームが発行されていない: {sql_calls}"
+        assert old_rename < new_rename, "旧テーブルの退避が後回しになっていて名前が衝突する"
+
     def test_swap_sql_sequence(self) -> None:
         mock_session = MagicMock()
         # scalar()呼び出し順: 旧PK名, 新PK名（PK衝突チェックは _build_staging_pk へ移動した）
@@ -961,8 +1005,8 @@ class TestOptimisticDedup:
         psycopg2 は SQLSTATE 23xxx (integrity_constraint_violation) 全般を IntegrityError に
         マップする。例外クラス名だけで判別すると、重複と無関係な integrity エラーでも
         32分の dedup を払ったうえで RATING_DUPLICATES_FOUND removed=0 という偽陽性を出す。
-        このトークンは現状メトリクスフィルタに繋がっていない(ratings 経路で繋がっているのは
-        EXTRACT_PHASE_FAILED だけ)が、繋いだ時点で偽陽性はそのまま誤発火になる。
+        このトークンは CloudWatch のメトリクスフィルタとアラームに繋がっている
+        (BirdXplorer-cdk #37)ので、偽陽性はそのままアラーム誤発火になる。
         """
         mock_session = MagicMock()
         mock_build.side_effect = self._integrity_error(pgcode="23503")  # foreign_key_violation
