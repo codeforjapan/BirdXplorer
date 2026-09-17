@@ -382,6 +382,14 @@ def _process_note_status_rows(reader, postgresql: Session, existing_row_note_ids
         if row["note_id"] not in existing_row_note_ids:
             continue
 
+        # _detect_status_changes が比較する3列のうち、この列だけ DB 側が Decimal になる。
+        # 揃えないとタプル比較が常に不一致になり、全行が「変更あり」として enqueue される。
+        row["timestamp_millis_of_current_status"] = _to_timestamp_decimal(
+            row.get("timestamp_millis_of_current_status"),
+            "timestamp_millis_of_current_status",
+            row["note_id"],
+        )
+
         rows_to_process.append(row)
 
         if len(rows_to_process) >= 1000:

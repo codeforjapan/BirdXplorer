@@ -4,8 +4,9 @@
 ORM は Decimal を返す。一方 TSV 側は str のままなので `Decimal(...) != '...'` が常に True になり、
 「変わった行だけ書く」はずの判定が全行を通してしまう。実測(2026-09-16, dev):
 
-  row_notes: 差分ガードが素通りし 317万行が毎日 UPDATE される。
-            WAL 1.5〜2.5 GB/日 と、テーブルサイズがほぼ倍増するぶんの autovacuum 負荷。
+  row_notes  : 差分ガードが素通りし 317万行が毎日 UPDATE される
+  status 経路: 毎日 2,932,072 件が「変更あり」と判定されるが、実際の変更は 53,513 件(1.8%)。
+               残りは SQS -> note_status_update Lambda(20.2 時間/日) -> notes の UPDATE を空回りさせる
 
 入口で型を揃えれば、比較ロジックに触らずに期待どおり動く。
 """
@@ -24,7 +25,9 @@ sys.modules.setdefault("psycopg2.extensions", _mock_psycopg2.extensions)
 sys.modules.setdefault("settings", MagicMock())
 
 from birdxplorer_etl.extract_ecs import (  # noqa: E402
+    _detect_status_changes,
     _process_note_rows,
+    _process_note_status_rows,
     _to_timestamp_decimal,
 )
 
@@ -49,6 +52,24 @@ def _note_row(note_id: str, created_at_millis: str) -> dict:
         "tweet_id": f"t{note_id}",
         "summary": f"summary of {note_id}",
     }
+
+
+def _status_row(note_id: str, ts: str, current: str = "CURRENTLY_RATED_HELPFUL", locked: str = "") -> dict:
+    return {
+        "note_id": note_id,
+        "current_status": current,
+        "locked_status": locked,
+        "timestamp_millis_of_current_status": ts,
+    }
+
+
+def _db_status_row(note_id: str, ts, current: str = "CURRENTLY_RATED_HELPFUL", locked=None) -> MagicMock:
+    row = MagicMock()
+    row.note_id = note_id
+    row.current_status = current
+    row.locked_status = locked
+    row.timestamp_millis_of_current_status = ts
+    return row
 
 
 class TestToTimestampDecimal:
@@ -117,6 +138,69 @@ class TestNotesPath:
         assert ("created_at_millis", Decimal("1614298357181")) in record.assigned
 
 
+class TestStatusPath:
+    @pytest.fixture(autouse=True)
+    def _no_sqs(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr("birdxplorer_etl.extract_ecs.enqueue_note_status_batch", lambda ids: None)
+
+    def _run(self, rows: list, db_rows: list) -> list:
+        """_process_note_status_rows を通し、_detect_status_changes が返した note_id を得る。"""
+        session = MagicMock()
+        session.query.return_value.all.return_value = []
+        session.execute.return_value.all.return_value = db_rows
+        captured: list = []
+        real_detect = _detect_status_changes
+
+        import birdxplorer_etl.extract_ecs as mod
+
+        def spy(pg, rows_):
+            result = real_detect(pg, rows_)
+            captured.extend(result)
+            return result
+
+        original = mod._detect_status_changes
+        mod._detect_status_changes = spy
+        try:
+            _process_note_status_rows(iter(rows), session, {r["note_id"] for r in rows})
+        finally:
+            mod._detect_status_changes = original
+        return captured
+
+    def test_unchanged_status_is_not_reported_as_changed(self) -> None:
+        """同じ値を再投入したときに「変更あり」にならないこと。2.93M/日 の空回りの本体。"""
+        changed = self._run(
+            [_status_row("n1", "1614298357180")],
+            [_db_status_row("n1", Decimal("1614298357180"))],
+        )
+        assert changed == []
+
+    def test_a_changed_current_status_is_reported(self) -> None:
+        changed = self._run(
+            [_status_row("n1", "1614298357180", current="NEEDS_MORE_RATINGS")],
+            [_db_status_row("n1", Decimal("1614298357180"), current="CURRENTLY_RATED_HELPFUL")],
+        )
+        assert changed == ["n1"]
+
+    def test_a_changed_locked_status_is_reported(self) -> None:
+        changed = self._run(
+            [_status_row("n1", "1614298357180", locked="LOCKED")],
+            [_db_status_row("n1", Decimal("1614298357180"), locked=None)],
+        )
+        assert changed == ["n1"]
+
+    def test_a_changed_timestamp_is_reported(self) -> None:
+        """3つ並ぶ比較対象のうち、壊れていた列そのもの。"""
+        changed = self._run(
+            [_status_row("n1", "1614298357181")],
+            [_db_status_row("n1", Decimal("1614298357180"))],
+        )
+        assert changed == ["n1"]
+
+    def test_a_note_absent_from_the_table_is_reported_as_new(self) -> None:
+        changed = self._run([_status_row("n1", "1614298357180")], [])
+        assert changed == ["n1"]
+
+
 class TestColumnTypeRegressionGuard:
     """str 以外の列が増えたら気付けるようにする。
 
@@ -136,3 +220,13 @@ class TestColumnTypeRegressionGuard:
         }
         actual = {c.name for c in inspect(RowNoteRecord).columns if c.type.python_type is not str}
         assert actual == known
+
+    def test_row_note_status_has_no_unexpected_non_string_column_among_the_compared_ones(self) -> None:
+        from sqlalchemy import inspect
+
+        from birdxplorer_common.storage import RowNoteStatusRecord
+
+        compared = {"current_status", "locked_status", "timestamp_millis_of_current_status"}
+        columns = {c.name: c.type.python_type for c in inspect(RowNoteStatusRecord).columns}
+        non_str = {name for name in compared if columns[name] is not str}
+        assert non_str == {"timestamp_millis_of_current_status"}
