@@ -7,6 +7,7 @@ import sys
 import time
 import zipfile
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Callable, Iterable, Iterator, Optional
 
 import boto3
@@ -381,6 +382,14 @@ def _process_note_status_rows(reader, postgresql: Session, existing_row_note_ids
         if row["note_id"] not in existing_row_note_ids:
             continue
 
+        # _detect_status_changes が比較する3列のうち、この列だけ DB 側が Decimal になる。
+        # 揃えないとタプル比較が常に不一致になり、全行が「変更あり」として enqueue される。
+        row["timestamp_millis_of_current_status"] = _to_timestamp_decimal(
+            row.get("timestamp_millis_of_current_status"),
+            "timestamp_millis_of_current_status",
+            row["note_id"],
+        )
+
         rows_to_process.append(row)
 
         if len(rows_to_process) >= 1000:
@@ -402,6 +411,27 @@ def _process_note_status_rows(reader, postgresql: Session, existing_row_note_ids
 
         notes_to_update_status = [nid for nid in changed_note_ids if nid in existing_note_record_ids]
         enqueue_note_status_batch(notes_to_update_status)
+
+
+def _to_timestamp_decimal(value: Optional[str], field: str, note_id: str) -> Optional[Decimal]:
+    """TwitterTimestamp 列の TSV 値を、ORM が返すのと同じ Decimal に揃える。
+
+    storage.py の type_annotation_map が `TwitterTimestamp: DECIMAL` をマップしているため
+    ORM 側は Decimal を返す。TSV 側を str のままにすると `Decimal(...) != '...'` が常に真になり、
+    「変わった行だけ書く」はずの差分判定が全行を素通しする。
+
+    非数値は握りつぶさずに落とす。タイムスタンプに代わりに置ける正しい既定値が無いためで、
+    無言で None にすれば値が消え、素通しすれば flush 時の DataError になってどの行が原因か
+    分からなくなる。落ちたあとは _run_phase が EXTRACT_PHASE_FAILED を出す。
+    (row_notes.created_at_millis は NOT NULL、row_note_status 側は nullable だが方針は同じ)
+    """
+    if value is None:
+        return None
+    try:
+        return Decimal(value)
+    except InvalidOperation:
+        logging.error(f"TIMESTAMP_PARSE_FAILED note_id={note_id} field={field} value={value!r}")
+        raise
 
 
 def _process_note_rows(reader, postgresql: Session, existing_row_note_ids: set) -> None:
@@ -506,6 +536,9 @@ def _process_note_rows(reader, postgresql: Session, existing_row_note_ids: set) 
             if value == "" and key not in ["harmful", "validation_difficulty"]:
                 row[key] = None
 
+        # 差分判定の相手は ORM から読んだ Decimal なので、ここで型を揃える。
+        row["created_at_millis"] = _to_timestamp_decimal(row.get("created_at_millis"), "created_at_millis", note_id)
+
         rows[note_id] = dict(row)
 
         # 境界は「溜まった件数」で判定する。enumerate の index で判定すると、
@@ -533,12 +566,11 @@ def _flush_notes_batch(postgresql: Session, rows: dict, existing_row_note_ids: s
     ids = list(rows.keys())
     existing = {r.note_id: r for r in postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id.in_(ids)).all()}
 
-    # 既存レコードの更新。変わった列だけ setattr する差分ガードを通しているが、
-    # ★このガードは現状ほぼ効いていない。created_at_millis は ORM 側が DECIMAL
-    # (storage.py の type_annotation_map)で Decimal を返すのに対し TSV 側は str のままで、
-    # Decimal != str が常に True になるため、実質すべての行が毎日 UPDATE される
-    # (再フラッシュで xmin が変わることを実測済み)。317万行ぶんの dead tuples と WAL は
-    # 今も発生している。比較の正規化で消せるが、書き込み量が激変するので別途対応する。
+    # 既存レコードの更新。変わった列だけ setattr する差分ガードを通す。
+    # このガードは created_at_millis の型が揃っていて初めて機能する。ORM 側は DECIMAL
+    # (storage.py の type_annotation_map)で Decimal を返すため、TSV 由来の str をそのまま
+    # 比べると常に不一致になり、全行が毎日 UPDATE される。揃えるのは _process_note_rows の
+    # 入口(_to_timestamp_decimal)の役目で、ここで型を意識する必要はない。
     for note_id, record in existing.items():
         for key, value in rows[note_id].items():
             if hasattr(record, key) and getattr(record, key) != value:
