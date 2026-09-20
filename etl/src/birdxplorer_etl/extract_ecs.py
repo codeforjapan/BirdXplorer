@@ -107,10 +107,40 @@ def enqueue_note_status_batch(note_ids: list):
     logging.info(f"Batch enqueued {len(note_ids)} notes to status-update queue")
 
 
+# 一度警告した (テーブル, 未知列) の組み合わせ。毎バッチ出すと1日数千行のノイズになる。
+_warned_unknown_columns: set = set()
+
+
+def _drop_unknown_columns(rows: list[dict], model, warned: set) -> list[dict]:
+    """モデルに無い列を落とす。TSV に列が増えても止まらないようにするため。
+
+    2026-09-19、X が noteStatusHistory に timestampMillisAbovePcrhThreshold を足した
+    (23列 -> 24列)だけで Status フェーズが KeyError で全滅した。上流のスキーマは
+    予告なく増えるので、知らない列は捨てて処理を続ける。
+
+    ただし無言で捨てると列の追加に永久に気付けない。組み合わせごとに1度だけ警告を出す。
+    保存したくなったらモデルに足せばよく、そのとき警告も自然に消える。
+    """
+    known = {c.name for c in model.__table__.columns}
+    unknown = [c for c in rows[0].keys() if c not in known]
+    if not unknown:
+        return rows
+
+    key = (model.__tablename__, tuple(sorted(unknown)))
+    if key not in warned:
+        warned.add(key)
+        logging.warning(
+            f"UNKNOWN_TSV_COLUMNS table={model.__tablename__} ignored={sorted(unknown)} "
+            "upstream added columns the model does not have; they are dropped"
+        )
+    return [{k: v for k, v in row.items() if k in known} for row in rows]
+
+
 def _upsert_note_status_batch(postgresql: Session, rows: list[dict]):
     """row_note_status を UPSERT（DELETE→INSERT による dead tuples を回避）"""
     if not rows:
         return
+    rows = _drop_unknown_columns(rows, RowNoteStatusRecord, _warned_unknown_columns)
     stmt = insert(RowNoteStatusRecord).on_conflict_do_update(
         index_elements=["note_id"],
         set_={col: insert(RowNoteStatusRecord).excluded[col] for col in rows[0].keys() if col != "note_id"},
@@ -581,6 +611,9 @@ def _flush_notes_batch(postgresql: Session, rows: dict, existing_row_note_ids: s
     # 振り分けが大規模に壊れても無音になる。
     to_insert = [rows[note_id] for note_id in ids if note_id not in existing]
     if to_insert:
+        # 更新側は hasattr で弾けるが、INSERT はモデルに無い列が1つ混じるだけで
+        # CompileError: Unconsumed column names になりフェーズごと落ちる。
+        to_insert = _drop_unknown_columns(to_insert, RowNoteRecord, _warned_unknown_columns)
         stmt = insert(RowNoteRecord).values(to_insert).on_conflict_do_nothing(index_elements=["note_id"])
         result = postgresql.execute(stmt)
         skipped = len(to_insert) - (result.rowcount or 0)
