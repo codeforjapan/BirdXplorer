@@ -8,6 +8,7 @@ import time
 import zipfile
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from functools import lru_cache
 from typing import Callable, Iterable, Iterator, Optional
 
 import boto3
@@ -111,6 +112,18 @@ def enqueue_note_status_batch(note_ids: list):
 _warned_unknown_columns: set = set()
 
 
+@lru_cache(maxsize=None)
+def _model_columns(model) -> frozenset:
+    """モデルの列名。
+
+    hasattr は列でない属性(row_post のようなリレーション、metadata / registry /
+    type_annotation_map、_sa_* の内部属性)にも True を返す。TSV 由来のキーを
+    振り分けるときに hasattr を使うと、増えた列の名前がそれらと衝突した場合に
+    素通りして setattr され、リレーションや SQLAlchemy の内部構造が壊れる。
+    """
+    return frozenset(c.name for c in model.__table__.columns)
+
+
 def _drop_unknown_columns(rows: list[dict], model, warned: set) -> list[dict]:
     """モデルに無い列を落とす。TSV に列が増えても止まらないようにするため。
 
@@ -121,7 +134,7 @@ def _drop_unknown_columns(rows: list[dict], model, warned: set) -> list[dict]:
     ただし無言で捨てると列の追加に永久に気付けない。組み合わせごとに1度だけ警告を出す。
     保存したくなったらモデルに足せばよく、そのとき警告も自然に消える。
     """
-    known = {c.name for c in model.__table__.columns}
+    known = _model_columns(model)
     unknown = [c for c in rows[0].keys() if c not in known]
     if not unknown:
         return rows
@@ -601,9 +614,11 @@ def _flush_notes_batch(postgresql: Session, rows: dict, existing_row_note_ids: s
     # (storage.py の type_annotation_map)で Decimal を返すため、TSV 由来の str をそのまま
     # 比べると常に不一致になり、全行が毎日 UPDATE される。揃えるのは _process_note_rows の
     # 入口(_to_timestamp_decimal)の役目で、ここで型を意識する必要はない。
+    # 振り分けは hasattr ではなく列集合で行う(理由は _model_columns)。INSERT 側と揃える。
+    known = _model_columns(RowNoteRecord)
     for note_id, record in existing.items():
         for key, value in rows[note_id].items():
-            if hasattr(record, key) and getattr(record, key) != value:
+            if key in known and getattr(record, key) != value:
                 setattr(record, key, value)
 
     # 新規レコードの挿入。SELECT と INSERT の隙間は残るので ON CONFLICT を保険に置く。

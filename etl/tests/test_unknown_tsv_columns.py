@@ -125,3 +125,51 @@ class TestNotesPathHasTheSameGuard:
         mod._flush_notes_batch(session, rows, set())
         inserted = session.execute.call_args[0][0].compile().params
         assert not any("some_brand_new_column" in str(k) for k in inserted)
+
+
+class TestNotesUpdatePathUsesColumnsNotHasattr:
+    """更新側の振り分けを hasattr に頼らない。
+
+    hasattr は列でない属性にも True を返す(row_post / metadata / registry /
+    type_annotation_map / _sa_* の8個)。TSV に増えた列の snake_case 名がこれらと
+    衝突すると、ガードを素通りして setattr され、リレーションや SQLAlchemy の
+    内部構造に TSV の文字列が入る。INSERT 側は列集合で弾いているので、
+    更新側だけ判定方法が違う状態でもある。
+    """
+
+    def _record(self):
+        from birdxplorer_common.storage import RowNoteRecord
+
+        return RowNoteRecord(note_id="n1", tweet_id="t1", summary="s")
+
+    def test_a_relationship_attribute_is_never_assigned(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        record = self._record()
+        session = MagicMock()
+        session.query.return_value.filter.return_value.all.return_value = [record]
+        monkeypatch.setattr(mod, "enqueue_notes_batch", lambda batch: None)
+
+        mod._flush_notes_batch(session, {"n1": {"note_id": "n1", "row_post": "うっかり入る文字列"}}, set())
+
+        assert record.row_post != "うっかり入る文字列"
+
+    def test_a_sqlalchemy_internal_attribute_is_never_assigned(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        record = self._record()
+        before = record.metadata
+        session = MagicMock()
+        session.query.return_value.filter.return_value.all.return_value = [record]
+        monkeypatch.setattr(mod, "enqueue_notes_batch", lambda batch: None)
+
+        mod._flush_notes_batch(session, {"n1": {"note_id": "n1", "metadata": "壊す文字列"}}, set())
+
+        assert record.metadata is before
+
+    def test_real_columns_are_still_updated(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """未知の名前を弾くついでに本物の列まで弾いていないこと。"""
+        record = self._record()
+        session = MagicMock()
+        session.query.return_value.filter.return_value.all.return_value = [record]
+        monkeypatch.setattr(mod, "enqueue_notes_batch", lambda batch: None)
+
+        mod._flush_notes_batch(session, {"n1": {"note_id": "n1", "summary": "新しい要約"}}, set())
+
+        assert record.summary == "新しい要約"
