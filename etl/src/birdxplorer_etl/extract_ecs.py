@@ -7,6 +7,8 @@ import sys
 import time
 import zipfile
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
+from functools import lru_cache
 from typing import Callable, Iterable, Iterator, Optional
 
 import boto3
@@ -106,10 +108,52 @@ def enqueue_note_status_batch(note_ids: list):
     logging.info(f"Batch enqueued {len(note_ids)} notes to status-update queue")
 
 
+# 一度警告した (テーブル, 未知列) の組み合わせ。毎バッチ出すと1日数千行のノイズになる。
+_warned_unknown_columns: set = set()
+
+
+@lru_cache(maxsize=None)
+def _model_columns(model) -> frozenset:
+    """モデルの列名。
+
+    hasattr は列でない属性(row_post のようなリレーション、metadata / registry /
+    type_annotation_map、_sa_* の内部属性)にも True を返す。TSV 由来のキーを
+    振り分けるときに hasattr を使うと、増えた列の名前がそれらと衝突した場合に
+    素通りして setattr され、リレーションや SQLAlchemy の内部構造が壊れる。
+    """
+    return frozenset(c.name for c in model.__table__.columns)
+
+
+def _drop_unknown_columns(rows: list[dict], model, warned: set) -> list[dict]:
+    """モデルに無い列を落とす。TSV に列が増えても止まらないようにするため。
+
+    2026-09-19、X が noteStatusHistory に timestampMillisAbovePcrhThreshold を足した
+    (23列 -> 24列)だけで Status フェーズが KeyError で全滅した。上流のスキーマは
+    予告なく増えるので、知らない列は捨てて処理を続ける。
+
+    ただし無言で捨てると列の追加に永久に気付けない。組み合わせごとに1度だけ警告を出す。
+    保存したくなったらモデルに足せばよく、そのとき警告も自然に消える。
+    """
+    known = _model_columns(model)
+    unknown = [c for c in rows[0].keys() if c not in known]
+    if not unknown:
+        return rows
+
+    key = (model.__tablename__, tuple(sorted(unknown)))
+    if key not in warned:
+        warned.add(key)
+        logging.warning(
+            f"UNKNOWN_TSV_COLUMNS table={model.__tablename__} ignored={sorted(unknown)} "
+            "upstream added columns the model does not have; they are dropped"
+        )
+    return [{k: v for k, v in row.items() if k in known} for row in rows]
+
+
 def _upsert_note_status_batch(postgresql: Session, rows: list[dict]):
     """row_note_status を UPSERT（DELETE→INSERT による dead tuples を回避）"""
     if not rows:
         return
+    rows = _drop_unknown_columns(rows, RowNoteStatusRecord, _warned_unknown_columns)
     stmt = insert(RowNoteStatusRecord).on_conflict_do_update(
         index_elements=["note_id"],
         set_={col: insert(RowNoteStatusRecord).excluded[col] for col in rows[0].keys() if col != "note_id"},
@@ -381,6 +425,14 @@ def _process_note_status_rows(reader, postgresql: Session, existing_row_note_ids
         if row["note_id"] not in existing_row_note_ids:
             continue
 
+        # _detect_status_changes が比較する3列のうち、この列だけ DB 側が Decimal になる。
+        # 揃えないとタプル比較が常に不一致になり、全行が「変更あり」として enqueue される。
+        row["timestamp_millis_of_current_status"] = _to_timestamp_decimal(
+            row.get("timestamp_millis_of_current_status"),
+            "timestamp_millis_of_current_status",
+            row["note_id"],
+        )
+
         rows_to_process.append(row)
 
         if len(rows_to_process) >= 1000:
@@ -402,6 +454,27 @@ def _process_note_status_rows(reader, postgresql: Session, existing_row_note_ids
 
         notes_to_update_status = [nid for nid in changed_note_ids if nid in existing_note_record_ids]
         enqueue_note_status_batch(notes_to_update_status)
+
+
+def _to_timestamp_decimal(value: Optional[str], field: str, note_id: str) -> Optional[Decimal]:
+    """TwitterTimestamp 列の TSV 値を、ORM が返すのと同じ Decimal に揃える。
+
+    storage.py の type_annotation_map が `TwitterTimestamp: DECIMAL` をマップしているため
+    ORM 側は Decimal を返す。TSV 側を str のままにすると `Decimal(...) != '...'` が常に真になり、
+    「変わった行だけ書く」はずの差分判定が全行を素通しする。
+
+    非数値は握りつぶさずに落とす。タイムスタンプに代わりに置ける正しい既定値が無いためで、
+    無言で None にすれば値が消え、素通しすれば flush 時の DataError になってどの行が原因か
+    分からなくなる。落ちたあとは _run_phase が EXTRACT_PHASE_FAILED を出す。
+    (row_notes.created_at_millis は NOT NULL、row_note_status 側は nullable だが方針は同じ)
+    """
+    if value is None:
+        return None
+    try:
+        return Decimal(value)
+    except InvalidOperation:
+        logging.error(f"TIMESTAMP_PARSE_FAILED note_id={note_id} field={field} value={value!r}")
+        raise
 
 
 def _process_note_rows(reader, postgresql: Session, existing_row_note_ids: set) -> None:
@@ -506,6 +579,9 @@ def _process_note_rows(reader, postgresql: Session, existing_row_note_ids: set) 
             if value == "" and key not in ["harmful", "validation_difficulty"]:
                 row[key] = None
 
+        # 差分判定の相手は ORM から読んだ Decimal なので、ここで型を揃える。
+        row["created_at_millis"] = _to_timestamp_decimal(row.get("created_at_millis"), "created_at_millis", note_id)
+
         rows[note_id] = dict(row)
 
         # 境界は「溜まった件数」で判定する。enumerate の index で判定すると、
@@ -533,15 +609,16 @@ def _flush_notes_batch(postgresql: Session, rows: dict, existing_row_note_ids: s
     ids = list(rows.keys())
     existing = {r.note_id: r for r in postgresql.query(RowNoteRecord).filter(RowNoteRecord.note_id.in_(ids)).all()}
 
-    # 既存レコードの更新。変わった列だけ setattr する差分ガードを通しているが、
-    # ★このガードは現状ほぼ効いていない。created_at_millis は ORM 側が DECIMAL
-    # (storage.py の type_annotation_map)で Decimal を返すのに対し TSV 側は str のままで、
-    # Decimal != str が常に True になるため、実質すべての行が毎日 UPDATE される
-    # (再フラッシュで xmin が変わることを実測済み)。317万行ぶんの dead tuples と WAL は
-    # 今も発生している。比較の正規化で消せるが、書き込み量が激変するので別途対応する。
+    # 既存レコードの更新。変わった列だけ setattr する差分ガードを通す。
+    # このガードは created_at_millis の型が揃っていて初めて機能する。ORM 側は DECIMAL
+    # (storage.py の type_annotation_map)で Decimal を返すため、TSV 由来の str をそのまま
+    # 比べると常に不一致になり、全行が毎日 UPDATE される。揃えるのは _process_note_rows の
+    # 入口(_to_timestamp_decimal)の役目で、ここで型を意識する必要はない。
+    # 振り分けは hasattr ではなく列集合で行う(理由は _model_columns)。INSERT 側と揃える。
+    known = _model_columns(RowNoteRecord)
     for note_id, record in existing.items():
         for key, value in rows[note_id].items():
-            if hasattr(record, key) and getattr(record, key) != value:
+            if key in known and getattr(record, key) != value:
                 setattr(record, key, value)
 
     # 新規レコードの挿入。SELECT と INSERT の隙間は残るので ON CONFLICT を保険に置く。
@@ -549,6 +626,9 @@ def _flush_notes_batch(postgresql: Session, rows: dict, existing_row_note_ids: s
     # 振り分けが大規模に壊れても無音になる。
     to_insert = [rows[note_id] for note_id in ids if note_id not in existing]
     if to_insert:
+        # 更新側は hasattr で弾けるが、INSERT はモデルに無い列が1つ混じるだけで
+        # CompileError: Unconsumed column names になりフェーズごと落ちる。
+        to_insert = _drop_unknown_columns(to_insert, RowNoteRecord, _warned_unknown_columns)
         stmt = insert(RowNoteRecord).values(to_insert).on_conflict_do_nothing(index_elements=["note_id"])
         result = postgresql.execute(stmt)
         skipped = len(to_insert) - (result.rowcount or 0)
