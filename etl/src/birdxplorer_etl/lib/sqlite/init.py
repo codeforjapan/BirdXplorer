@@ -128,8 +128,10 @@ def init_postgresql(use_pool: bool = False):
                 "pool_recycle": 3600,
             }
         )
+    # ★ ドライバを省かないこと。SQLAlchemy 2.1 で `postgresql://` の既定が
+    # psycopg2 から psycopg(v3) に変わり、ModuleNotFoundError で全滅した(2026-09-25)。
     engine = create_engine(
-        f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}",
+        f"postgresql+psycopg2://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}",
         **engine_kwargs,
     )
 
