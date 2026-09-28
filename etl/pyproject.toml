@@ -25,7 +25,7 @@ classifiers = [
 
 dependencies = [
     "pandas",
-    "sqlalchemy",
+    "sqlalchemy<2.1",  # 2.1 で postgresql:// の既定ドライバが psycopg(v3) に変わる
     "psycopg2-binary",
     "requests",
     "pytest",

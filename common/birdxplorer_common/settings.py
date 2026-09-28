@@ -33,8 +33,12 @@ class PostgresStorageSettings(BaseSettings):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def sqlalchemy_database_url(self) -> str:
+        # ★ ドライバを省かないこと。SQLAlchemy 2.1 で `postgresql://` の既定が
+        # psycopg2 から psycopg(v3) に変わり、psycopg 未インストールのまま
+        # ModuleNotFoundError で ETL と DB 系 Lambda が4日間全滅した(2026-09-25)。
+        # 明示しておけば既定が何に変わっても影響を受けない。
         return PostgresDsn(
-            url=f"postgresql://{self.username}:"
+            url=f"postgresql+psycopg2://{self.username}:"
             f"{self.password.replace('@', '%40')}@{self.host}:{self.port}/{self.database}"
         ).unicode_string()
 

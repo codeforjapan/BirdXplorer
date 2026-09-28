@@ -24,7 +24,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "sqlalchemy",
+    "sqlalchemy<2.1",  # 2.1 で postgresql:// の既定ドライバが psycopg(v3) に変わる
     "python-dotenv",
     "alembic",
 ]

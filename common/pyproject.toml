@@ -26,7 +26,7 @@ classifiers = [
 dependencies = [
     "pydantic",
     "python-dateutil",
-    "sqlalchemy",
+    "sqlalchemy<2.1",  # 2.1 で postgresql:// の既定ドライバが psycopg(v3) に変わる
     "pydantic_settings",
     "JSON-log-formatter",
     "ulid-py",
