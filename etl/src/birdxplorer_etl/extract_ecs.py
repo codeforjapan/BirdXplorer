@@ -15,7 +15,7 @@ import boto3
 import requests
 import settings
 import stringcase
-from sqlalchemy import case, func, select, text, update
+from sqlalchemy import case, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
@@ -111,6 +111,23 @@ def enqueue_note_status_batch(note_ids: list):
 # 一度警告した (テーブル, 未知列) の組み合わせ。毎バッチ出すと1日数千行のノイズになる。
 _warned_unknown_columns: set = set()
 
+# X のスコアリング実行時刻。公式ドキュメントに "For internal use. Timestamp of scoring run."
+# とあるとおりノート単位の情報ではなく、実測でも全行が同一値（2026-09-25 時点で
+# TSV 331万行・本番 DB 296万行のいずれも distinct=1）。値は毎日変わる。
+_SCORING_RUN_COLUMN = "timestamp_minute_of_final_scoring_output"
+
+# 観測用に集める値の上限。1種類でないと分かれば十分で、全件集める必要はない。
+_SCORING_RUN_SAMPLE_CAP = 10
+
+# モデルには在るが意図的に保存しない列。書き込みからも差分比較からも外す。
+# _SCORING_RUN_COLUMN を残すと全行が毎日「真に差分あり」になり、差分ゲートが
+# 丸ごと無意味になる（WAL 1.67 GB/日）。除くと日次の変化は 1.56% に落ちる。
+# ここに入れた列は UNKNOWN_TSV_COLUMNS の警告対象からも外れる。上流が勝手に足した
+# 未知の列と、こちらが意図して捨てている列を混同しないため。
+_INTENTIONALLY_IGNORED_COLUMNS: dict = {
+    "row_note_status": frozenset({_SCORING_RUN_COLUMN}),
+}
+
 
 @lru_cache(maxsize=None)
 def _model_columns(model) -> frozenset:
@@ -124,6 +141,12 @@ def _model_columns(model) -> frozenset:
     return frozenset(c.name for c in model.__table__.columns)
 
 
+@lru_cache(maxsize=None)
+def _writable_columns(model) -> frozenset:
+    """実際に書き込む列。モデルの列から、意図的に保存しない列を除いたもの。"""
+    return _model_columns(model) - _INTENTIONALLY_IGNORED_COLUMNS.get(model.__tablename__, frozenset())
+
+
 def _drop_unknown_columns(rows: list[dict], model, warned: set) -> list[dict]:
     """モデルに無い列を落とす。TSV に列が増えても止まらないようにするため。
 
@@ -134,13 +157,15 @@ def _drop_unknown_columns(rows: list[dict], model, warned: set) -> list[dict]:
     ただし無言で捨てると列の追加に永久に気付けない。組み合わせごとに1度だけ警告を出す。
     保存したくなったらモデルに足せばよく、そのとき警告も自然に消える。
     """
-    known = _model_columns(model)
-    unknown = [c for c in rows[0].keys() if c not in known]
-    if not unknown:
+    known = _writable_columns(model)
+    ignored = _INTENTIONALLY_IGNORED_COLUMNS.get(model.__tablename__, frozenset())
+    surplus = [c for c in rows[0].keys() if c not in known]
+    unknown = [c for c in surplus if c not in ignored]
+    if not surplus:
         return rows
 
     key = (model.__tablename__, tuple(sorted(unknown)))
-    if key not in warned:
+    if unknown and key not in warned:
         warned.add(key)
         logging.warning(
             f"UNKNOWN_TSV_COLUMNS table={model.__tablename__} ignored={sorted(unknown)} "
@@ -154,9 +179,26 @@ def _upsert_note_status_batch(postgresql: Session, rows: list[dict]):
     if not rows:
         return
     rows = _drop_unknown_columns(rows, RowNoteStatusRecord, _warned_unknown_columns)
-    stmt = insert(RowNoteStatusRecord).on_conflict_do_update(
+
+    # 書き込む列と比較する列は必ず同じ集合から作る。ズレると、ズレた列の変更が
+    # WHERE に引っかからず黙って書かれなくなる（静かなデータ欠損）。
+    cols = [col for col in rows[0].keys() if col != "note_id"]
+    if not cols:
+        return
+
+    # 値が同じ行は書かない。PostgreSQL の DO UPDATE は同値でも新タプルを書くため、
+    # ゲートが無いと毎日全行ぶんの WAL と dead tuples が出る。
+    # 判定を PG 側に任せるので Python 側で型を揃える必要が無い（この表には
+    # str/Decimal の不一致が10列ほどある）。
+    # ★ `!=` ではなく IS DISTINCT FROM を使うこと。SQL の `NULL != 5` は UNKNOWN で
+    # WHERE では偽になるため、`!=` にすると NULL から値・値から NULL への変更が
+    # 静かに書かれなくなる。このコミットが最悪と定義しているのがまさにその方向。
+    table = RowNoteStatusRecord.__table__
+    stmt = insert(RowNoteStatusRecord)
+    stmt = stmt.on_conflict_do_update(
         index_elements=["note_id"],
-        set_={col: insert(RowNoteStatusRecord).excluded[col] for col in rows[0].keys() if col != "note_id"},
+        set_={col: stmt.excluded[col] for col in cols},
+        where=or_(*[table.c[col].is_distinct_from(stmt.excluded[col]) for col in cols]),
     )
     postgresql.execute(stmt, rows)
 
@@ -407,6 +449,30 @@ def _extract_note_status_files(postgresql: Session, dateString: str, existing_ro
         file_index += 1
 
 
+def _log_scoring_run_observation(values: set) -> None:
+    """保存しない scoring 列について、前提が崩れていないかだけ記録する。
+
+    この列は全行が同一値のはずで、それが「ノート単位の情報を持たないから捨ててよい」
+    という判断の根拠になっている。値が複数種類になったら前提が崩れており、
+    無視し続けてよいか再判断が要る。
+    """
+    if not values:
+        return
+    if len(values) == 1:
+        logging.info(f"SCORING_RUN_TIMESTAMP value={next(iter(values))}")
+        return
+    # 空文字は行ループで None になるので値に None が混ざりうる。str を挟まずに
+    # sorted すると TypeError になり、「前提が崩れた」ことを報せるはずの監視が
+    # 逆にフェーズを落とす。
+    sample = sorted(map(repr, values))[:5]
+    # 収集は上限で打ち切っているので、到達していたら実際の種類数はこれ以上ある。
+    distinct = f">={len(values)}" if len(values) >= _SCORING_RUN_SAMPLE_CAP else str(len(values))
+    logging.warning(
+        f"SCORING_RUN_TIMESTAMP_NOT_CONSTANT distinct={distinct} sample={sample} "
+        f"column={_SCORING_RUN_COLUMN} is no longer uniform; revisit whether it can stay ignored"
+    )
+
+
 def _process_note_status_rows(reader, postgresql: Session, existing_row_note_ids: set) -> None:
     """noteStatusHistory の TSV 行を1行ずつ処理し、1000件ごとに差分検出・UPSERT・enqueue する。
 
@@ -416,6 +482,9 @@ def _process_note_status_rows(reader, postgresql: Session, existing_row_note_ids
     logging.info(f"Loaded {len(existing_note_record_ids)} existing note IDs from notes table")
 
     rows_to_process = []
+    # 保存しない列(_SCORING_RUN_COLUMN)の値だけは毎回観測する。無視リストに入れた列を
+    # 完全に見なくすると、上流が per-note の意味に変えても永久に気付けないため。
+    scoring_run_values: set = set()
     for index, row in enumerate(reader):
         for key, value in list(row.items()):
             if value == "":
@@ -424,6 +493,11 @@ def _process_note_status_rows(reader, postgresql: Session, existing_row_note_ids
         # 対応するnote_idがrow_notesテーブルに存在するかをセットで確認
         if row["note_id"] not in existing_row_note_ids:
             continue
+
+        # 上流が per-note の値に変えると 331万件たまって数百MB になる。
+        # 前提が崩れたことさえ分かればよいので、少し集めたら打ち切る。
+        if _SCORING_RUN_COLUMN in row and len(scoring_run_values) < _SCORING_RUN_SAMPLE_CAP:
+            scoring_run_values.add(row[_SCORING_RUN_COLUMN])
 
         # _detect_status_changes が比較する3列のうち、この列だけ DB 側が Decimal になる。
         # 揃えないとタプル比較が常に不一致になり、全行が「変更あり」として enqueue される。
@@ -454,6 +528,9 @@ def _process_note_status_rows(reader, postgresql: Session, existing_row_note_ids
 
         notes_to_update_status = [nid for nid in changed_note_ids if nid in existing_note_record_ids]
         enqueue_note_status_batch(notes_to_update_status)
+
+    # 観測は全バッチを書き終えてから行う。ここで落ちても取り込み済みのデータは失われない。
+    _log_scoring_run_observation(scoring_run_values)
 
 
 def _to_timestamp_decimal(value: Optional[str], field: str, note_id: str) -> Optional[Decimal]:
