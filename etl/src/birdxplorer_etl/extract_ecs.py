@@ -6,6 +6,7 @@ import os
 import sys
 import time
 import zipfile
+from collections import Counter
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
@@ -754,8 +755,18 @@ def backfill_missing_notes(postgresql: Session, batch_limit: int = 50000):
     logging.info(f"Backfill complete: enqueued {len(batch)} notes")
 
 
-def _validate_rating_row(row: dict, existing_row_note_ids: set) -> bool:
-    """rating行を検証・正規化する。有効ならTrue、スキップならFalseを返す。rowは破壊的に更新される。"""
+def _validate_rating_row(row: dict, existing_row_note_ids: set, skipped: Counter | None = None) -> bool:
+    """rating行を検証・正規化する。有効ならTrue、スキップならFalseを返す。rowは破壊的に更新される。
+
+    skipped を渡すと落選理由を加算する。捨てた行数を記録しないと、
+    正常な落選（削除済みノートの評価）と異常な欠損を区別できない。
+    """
+
+    def _skip(reason: str) -> bool:
+        if skipped is not None:
+            skipped[reason] += 1
+        return False
+
     binary_bool_fields = [
         "agree",
         "disagree",
@@ -789,10 +800,10 @@ def _validate_rating_row(row: dict, existing_row_note_ids: set) -> bool:
     rater_participant_id = row.get("rater_participant_id")
 
     if not note_id or not rater_participant_id:
-        return False
+        return _skip("missing_ids")
 
     if note_id not in existing_row_note_ids:
-        return False
+        return _skip("unknown_note")
 
     # BinaryBoolフィールドの正規化
     for field in binary_bool_fields:
@@ -826,7 +837,7 @@ def _validate_rating_row(row: dict, existing_row_note_ids: set) -> bool:
     # NOT NULLカラム（BinaryBool以外）が空の行はスキップ
     for field in ("created_at_millis", "version", "rated_on_tweet_id"):
         if not row.get(field):
-            return False
+            return _skip("missing_required")
 
     return True
 
@@ -878,11 +889,14 @@ def _process_rating_rows(reader, postgresql: Session, existing_row_note_ids: set
     buffer = io.StringIO()
     row_count = 0
     total_rows = 0
+    skipped: Counter = Counter()
+    read_rows = 0
 
     columns_csv = ",".join(_RATING_COLUMNS)
 
     for index, row in enumerate(reader):
-        if not _validate_rating_row(row, existing_row_note_ids):
+        read_rows += 1
+        if not _validate_rating_row(row, existing_row_note_ids, skipped):
             continue
 
         values = []
@@ -907,6 +921,12 @@ def _process_rating_rows(reader, postgresql: Session, existing_row_note_ids: set
         total_rows += row_count
         logging.info(f"COPY final {row_count} rows (total: {total_rows}, file {file_index:05d})")
 
+    skipped_total = sum(skipped.values())
+    breakdown = " ".join(f"{k}={v}" for k, v in sorted(skipped.items())) or "none=0"
+    logging.info(
+        f"RATINGS_FILE_ROWS file={file_index:05d} read={read_rows} "
+        f"kept={total_rows} skipped={skipped_total} {breakdown}"
+    )
     return total_rows
 
 

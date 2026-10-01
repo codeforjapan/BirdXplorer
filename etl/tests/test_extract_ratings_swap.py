@@ -2,6 +2,7 @@ import csv
 import io
 import logging
 import sys
+from collections import Counter
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1300,3 +1301,66 @@ class TestExtractRatingsSkipsDedup:
         assert (
             mock_swap.call_args.kwargs["staging_count"] == 993
         ), "fallback が返した dedup 後の行数が _swap_ratings_table に配線されていない"
+
+
+class TestValidateRatingRowSkipCounter:
+    def _row(self, **overrides):
+        row = {
+            "note_id": "n1",
+            "rater_participant_id": "r1",
+            "created_at_millis": "1000",
+            "version": "1",
+            "rated_on_tweet_id": "t1",
+        }
+        row.update(overrides)
+        return row
+
+    def test_counts_unknown_note(self) -> None:
+        skipped = Counter()
+        assert _validate_rating_row(self._row(), set(), skipped) is False
+        assert skipped["unknown_note"] == 1
+
+    def test_counts_missing_ids(self) -> None:
+        skipped = Counter()
+        assert _validate_rating_row(self._row(note_id=""), {"n1"}, skipped) is False
+        assert skipped["missing_ids"] == 1
+
+    def test_counts_missing_required(self) -> None:
+        skipped = Counter()
+        assert _validate_rating_row(self._row(version=""), {"n1"}, skipped) is False
+        assert skipped["missing_required"] == 1
+
+    def test_valid_row_counts_nothing(self) -> None:
+        skipped = Counter()
+        assert _validate_rating_row(self._row(), {"n1"}, skipped) is True
+        assert sum(skipped.values()) == 0
+
+    def test_counter_is_optional(self) -> None:
+        assert _validate_rating_row(self._row(), {"n1"}) is True
+
+
+class TestProcessRatingRowsSkipLogging:
+    def test_logs_read_kept_skipped(self, caplog: pytest.LogCaptureFixture) -> None:
+        session = MagicMock()
+        rows = [
+            {"note_id": "n1", "rater_participant_id": "r1", "created_at_millis": "1",
+             "version": "1", "rated_on_tweet_id": "t1"},
+            {"note_id": "n2", "rater_participant_id": "r2", "created_at_millis": "1",
+             "version": "1", "rated_on_tweet_id": "t1"},
+        ]
+        with caplog.at_level(logging.INFO):
+            kept = _process_rating_rows(iter(rows), session, {"n1"}, 2)
+
+        assert kept == 1
+        assert "RATINGS_FILE_ROWS file=00002 read=2 kept=1 skipped=1" in caplog.text
+        assert "unknown_note=1" in caplog.text
+
+    def test_logs_even_when_nothing_skipped(self, caplog: pytest.LogCaptureFixture) -> None:
+        """skipped=0 でも行を出す。ログが無い＝観測されていない、と区別するため。"""
+        session = MagicMock()
+        rows = [{"note_id": "n1", "rater_participant_id": "r1", "created_at_millis": "1",
+                 "version": "1", "rated_on_tweet_id": "t1"}]
+        with caplog.at_level(logging.INFO):
+            _process_rating_rows(iter(rows), session, {"n1"}, 0)
+
+        assert "RATINGS_FILE_ROWS file=00000 read=1 kept=1 skipped=0" in caplog.text
