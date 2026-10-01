@@ -533,7 +533,9 @@ class TestProcessRatingRowsConnectionHandling:
             commit_positions = [i for i, name in enumerate(segment) if name == "session.commit"]
             assert copy_positions, f"copy_expert が呼ばれていない: {segment}"
             assert commit_positions, f"commit が呼ばれていない: {segment}"
-            assert max(copy_positions) < min(commit_positions), f"commit が copy_expert より先に呼ばれている（本番欠損の再現）: {segment}"
+            assert max(copy_positions) < min(
+                commit_positions
+            ), f"commit が copy_expert より先に呼ばれている（本番欠損の再現）: {segment}"
 
 
 class TestVerifyStagingRowCount:
