@@ -28,6 +28,7 @@ from birdxplorer_etl.extract_ecs import (  # noqa: E402
     _run_phase,
     _swap_ratings_table,
     _validate_rating_row,
+    _verify_staging_row_count,
     extract_data,
     extract_ratings,
 )
@@ -492,6 +493,112 @@ class TestProcessRatingRowsConnectionHandling:
         assert session.connection.call_count == 0
 
 
+class TestVerifyStagingRowCount:
+    """取り込み側が数えた行数と staging の実行数の厳密一致を固定する。
+
+    50% ガードは live の reltuples 基準なので、24% の欠損を素通しした。
+    さらに基準が欠損後の live から取られるためラチェットになっている。
+    """
+
+    def test_returns_actual_count_when_it_matches(self) -> None:
+        session = MagicMock()
+        session.execute.return_value.scalar.return_value = 1000
+        assert _verify_staging_row_count(session, 1000) == 1000
+
+    def test_raises_when_actual_is_fewer(self) -> None:
+        session = MagicMock()
+        session.execute.return_value.scalar.return_value = 940
+        with pytest.raises(RuntimeError, match="RATINGS_STAGING_COUNT_MISMATCH"):
+            _verify_staging_row_count(session, 1000)
+
+    def test_raises_when_actual_is_greater(self) -> None:
+        session = MagicMock()
+        session.execute.return_value.scalar.return_value = 1060
+        with pytest.raises(RuntimeError, match="RATINGS_STAGING_COUNT_MISMATCH"):
+            _verify_staging_row_count(session, 1000)
+
+    def test_error_message_contains_both_numbers(self) -> None:
+        session = MagicMock()
+        session.execute.return_value.scalar.return_value = 940
+        with pytest.raises(RuntimeError) as exc:
+            _verify_staging_row_count(session, 1000)
+        assert "expected=1000" in str(exc.value)
+        assert "actual=940" in str(exc.value)
+
+
+class TestExtractRatingsVerifiesStagingCount:
+    """extract_ratings が swap 前に厳密一致の検証を通すことを固定する。"""
+
+    @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._swap_ratings_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk_with_dedup_fallback")
+    @patch("birdxplorer_etl.extract_ecs._process_rating_rows")
+    @patch("birdxplorer_etl.extract_ecs._create_staging_table")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_aborts_swap_when_staging_is_short(
+        self,
+        mock_requests: MagicMock,
+        mock_create: MagicMock,
+        mock_process: MagicMock,
+        mock_fallback: MagicMock,
+        mock_swap: MagicMock,
+        mock_cleanup: MagicMock,
+    ) -> None:
+        """COPY が消えて staging が足りない日は、PK 構築も swap もせずに落ちる。"""
+        import settings
+
+        original = settings.USE_DUMMY_DATA
+        settings.USE_DUMMY_DATA = True
+        try:
+            response = MagicMock()
+            response.status_code = 200
+            response.content = b"noteId\traterParticipantId\n"
+            mock_requests.get.return_value = response
+            mock_process.return_value = 1000
+
+            mock_session = MagicMock()
+            # 1回目の scalar は reltuples(=1000, min_rows 500)、2回目が staging の実測(940)
+            mock_session.execute.return_value.scalar.side_effect = [1000, 940]
+
+            with pytest.raises(RuntimeError, match="RATINGS_STAGING_COUNT_MISMATCH"):
+                extract_ratings(mock_session, "2026/09/29", {"n1"})
+        finally:
+            settings.USE_DUMMY_DATA = original
+
+        mock_fallback.assert_not_called()
+        mock_swap.assert_not_called()
+        mock_cleanup.assert_called_once_with(mock_session)
+
+    @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._verify_staging_row_count")
+    @patch("birdxplorer_etl.extract_ecs._create_staging_table")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_zero_loaded_skips_verification_and_swap(
+        self,
+        mock_requests: MagicMock,
+        mock_create: MagicMock,
+        mock_verify: MagicMock,
+        mock_cleanup: MagicMock,
+    ) -> None:
+        """total_loaded == 0 の日は検証もせず正常に抜ける（既存挙動を壊さない）。"""
+        import settings
+
+        original = settings.USE_DUMMY_DATA
+        settings.USE_DUMMY_DATA = False
+        try:
+            response = MagicMock()
+            response.status_code = 404
+            mock_requests.get.return_value = response
+
+            mock_session = MagicMock()
+            extract_ratings(mock_session, "2026/09/29", {"n1"})
+        finally:
+            settings.USE_DUMMY_DATA = original
+
+        mock_verify.assert_not_called()
+        mock_cleanup.assert_called_once_with(mock_session)
+
+
 class TestExtractRatingsErrorRecovery:
     """extract_ratings のエラーリカバリテスト"""
 
@@ -546,6 +653,7 @@ class TestExtractRatingsErrorRecovery:
     @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
     @patch("birdxplorer_etl.extract_ecs._swap_ratings_table")
     @patch("birdxplorer_etl.extract_ecs._build_staging_pk")
+    @patch("birdxplorer_etl.extract_ecs._verify_staging_row_count")
     @patch("birdxplorer_etl.extract_ecs._process_rating_rows")
     @patch("birdxplorer_etl.extract_ecs._create_staging_table")
     @patch("birdxplorer_etl.extract_ecs.requests")
@@ -554,6 +662,7 @@ class TestExtractRatingsErrorRecovery:
         mock_requests: MagicMock,
         mock_create: MagicMock,
         mock_process: MagicMock,
+        mock_verify: MagicMock,
         mock_build_pk: MagicMock,
         mock_swap: MagicMock,
         mock_cleanup: MagicMock,

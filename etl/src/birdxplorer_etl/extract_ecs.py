@@ -1024,6 +1024,9 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
         # 高価な PK 構築（失敗時は dedup で約20分）の前に、行数不足が分かっている日を早期に落とす
         _check_staging_row_count(staging_count=total_loaded, min_rows=min_rows)
 
+        # COPY が無言で失われていないかを、PK 構築に入る前に厳密一致で止める
+        _verify_staging_row_count(postgresql, total_loaded)
+
         # dedup は PK 構築が UniqueViolation で落ちたときだけ走る(_build_staging_pk_with_dedup_fallback)
         staging_count = _build_staging_pk_with_dedup_fallback(postgresql, total_loaded)
         # dedup が走った日は行数が減るため、swap 直前の最終確認として意味を持つ
@@ -1178,6 +1181,24 @@ def _check_staging_row_count(*, staging_count: int, min_rows: int) -> None:
             f"Staging table has {staging_count} rows, expected at least {min_rows}. "
             "Aborting swap to prevent data loss from incomplete snapshot."
         )
+
+
+def _verify_staging_row_count(postgresql: Session, expected: int) -> int:
+    """staging の実 COUNT(*) と取り込み側のカウントの厳密一致を確認する。
+
+    COPY が無言で失われても total_loaded は増え続けるため、ログだけでは
+    欠損が分からない（2026-10-01 の本番欠損はこれで半年規模で見逃された）。
+    min_rows の 50% ガードは live の reltuples 基準で、欠損のたびに基準が
+    下がるラチェットなので、こちらを厳密一致の最終防衛線として置く。
+    """
+    actual = postgresql.execute(text(f"SELECT count(*) FROM {_STAGING_TABLE}")).scalar() or 0
+    if actual != expected:
+        raise RuntimeError(
+            f"RATINGS_STAGING_COUNT_MISMATCH expected={expected} actual={actual} "
+            "COPY された行が staging に入っていない。swap を中止する。"
+        )
+    logging.info(f"RATINGS_STAGING_COUNT_VERIFIED rows={actual}")
+    return actual
 
 
 def _build_staging_pk(postgresql: Session) -> None:
