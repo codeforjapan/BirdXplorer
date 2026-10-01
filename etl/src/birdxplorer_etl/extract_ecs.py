@@ -922,7 +922,11 @@ def _process_rating_rows(reader, postgresql: Session, existing_row_note_ids: set
         logging.info(f"COPY final {row_count} rows (total: {total_rows}, file {file_index:05d})")
 
     skipped_total = sum(skipped.values())
-    breakdown = " ".join(f"{k}={v}" for k, v in sorted(skipped.items())) or "none=0"
+    breakdown = (
+        f"missing_ids={skipped['missing_ids']} "
+        f"unknown_note={skipped['unknown_note']} "
+        f"missing_required={skipped['missing_required']}"
+    )
     logging.info(
         f"RATINGS_FILE_ROWS file={file_index:05d} read={read_rows} "
         f"kept={total_rows} skipped={skipped_total} {breakdown}"

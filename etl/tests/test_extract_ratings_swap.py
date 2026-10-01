@@ -493,6 +493,48 @@ class TestProcessRatingRowsConnectionHandling:
         assert total == 0
         assert session.connection.call_count == 0
 
+    def test_copy_expert_happens_before_commit_each_batch(self) -> None:
+        """connection() → copy_expert → commit の順序そのものを固定する。
+
+        connection() の呼び出し回数や cursor() の呼び出し回数だけを見るテストでは、
+        フレッシュなコネクションを取ったうえで copy_expert より先に commit してしまう
+        退行を検出できない。それは2026-10-01 の本番欠損と同じ壊れ方になる
+        （COPY が Session のトランザクション外で実行され、プールの reset-on-return で
+        無言のうちに破棄される）。session と生コネクションを1つの親 mock に
+        attach_mock し、記録された mock_calls の順序を直接検証する。
+        """
+        raw_conns = [MagicMock() for _ in range(2)]
+        session = self._session_handing_out(raw_conns)
+
+        parent = MagicMock()
+        parent.attach_mock(session, "session")
+        for i, raw in enumerate(raw_conns):
+            parent.attach_mock(raw, f"raw{i}")
+
+        existing = {f"n{i}" for i in range(3)}
+        with patch("birdxplorer_etl.extract_ecs.BATCH_SIZE", 2):
+            _process_rating_rows(self._rows(3), session, existing, 0)
+
+        call_names = [call[0] for call in parent.mock_calls]
+
+        # "session.connection" の呼び出しごとに新しいバッチのセグメントを区切る。
+        segments: list[list[str]] = []
+        for name in call_names:
+            if name == "session.connection":
+                segments.append([])
+            assert segments, "session.connection() より前に呼ばれたコールがある"
+            segments[-1].append(name)
+
+        # 2, 1 の2バッチ → connection() も2回
+        assert len(segments) == 2
+
+        for segment in segments:
+            copy_positions = [i for i, name in enumerate(segment) if name.endswith("copy_expert")]
+            commit_positions = [i for i, name in enumerate(segment) if name == "session.commit"]
+            assert copy_positions, f"copy_expert が呼ばれていない: {segment}"
+            assert commit_positions, f"commit が呼ばれていない: {segment}"
+            assert max(copy_positions) < min(commit_positions), f"commit が copy_expert より先に呼ばれている（本番欠損の再現）: {segment}"
+
 
 class TestVerifyStagingRowCount:
     """取り込み側が数えた行数と staging の実行数の厳密一致を固定する。
@@ -1343,24 +1385,46 @@ class TestProcessRatingRowsSkipLogging:
     def test_logs_read_kept_skipped(self, caplog: pytest.LogCaptureFixture) -> None:
         session = MagicMock()
         rows = [
-            {"note_id": "n1", "rater_participant_id": "r1", "created_at_millis": "1",
-             "version": "1", "rated_on_tweet_id": "t1"},
-            {"note_id": "n2", "rater_participant_id": "r2", "created_at_millis": "1",
-             "version": "1", "rated_on_tweet_id": "t1"},
+            {
+                "note_id": "n1",
+                "rater_participant_id": "r1",
+                "created_at_millis": "1",
+                "version": "1",
+                "rated_on_tweet_id": "t1",
+            },
+            {
+                "note_id": "n2",
+                "rater_participant_id": "r2",
+                "created_at_millis": "1",
+                "version": "1",
+                "rated_on_tweet_id": "t1",
+            },
         ]
         with caplog.at_level(logging.INFO):
             kept = _process_rating_rows(iter(rows), session, {"n1"}, 2)
 
         assert kept == 1
-        assert "RATINGS_FILE_ROWS file=00002 read=2 kept=1 skipped=1" in caplog.text
-        assert "unknown_note=1" in caplog.text
+        assert (
+            "RATINGS_FILE_ROWS file=00002 read=2 kept=1 skipped=1 "
+            "missing_ids=0 unknown_note=1 missing_required=0" in caplog.text
+        )
 
     def test_logs_even_when_nothing_skipped(self, caplog: pytest.LogCaptureFixture) -> None:
         """skipped=0 でも行を出す。ログが無い＝観測されていない、と区別するため。"""
         session = MagicMock()
-        rows = [{"note_id": "n1", "rater_participant_id": "r1", "created_at_millis": "1",
-                 "version": "1", "rated_on_tweet_id": "t1"}]
+        rows = [
+            {
+                "note_id": "n1",
+                "rater_participant_id": "r1",
+                "created_at_millis": "1",
+                "version": "1",
+                "rated_on_tweet_id": "t1",
+            }
+        ]
         with caplog.at_level(logging.INFO):
             _process_rating_rows(iter(rows), session, {"n1"}, 0)
 
-        assert "RATINGS_FILE_ROWS file=00000 read=1 kept=1 skipped=0" in caplog.text
+        assert (
+            "RATINGS_FILE_ROWS file=00000 read=1 kept=1 skipped=0 "
+            "missing_ids=0 unknown_note=0 missing_required=0" in caplog.text
+        )
