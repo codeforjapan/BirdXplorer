@@ -854,22 +854,37 @@ def _iter_lines_without_nul(lines: Iterable[str]) -> Iterator[str]:
         yield line.replace("\x00", "") if "\x00" in line else line
 
 
+# COPY のバッチサイズ。テストから差し替えられるようモジュール定数にする。
+BATCH_SIZE = 50000
+
+
+def _copy_buffer_to_staging(postgresql: Session, buffer: io.StringIO, columns_csv: str) -> None:
+    """buffer を staging table へ COPY して commit する。
+
+    ★ コネクションは COPY の直前に毎回取り直すこと。ループの外で1回だけ掴むと、
+    Session.commit() でプールへ返却された後の COPY が Session のトランザクション
+    外で走り、プールの reset-on-return でロールバックされて無言で消える。
+    2026-10-01 に 2.17億行中 5,200万行がこれで失われていたことが判明している。
+    """
+    buffer.seek(0)
+    dbapi_conn = postgresql.connection().connection.dbapi_connection
+    with dbapi_conn.cursor() as cur:
+        cur.copy_expert(f"COPY {_STAGING_TABLE} ({columns_csv}) FROM STDIN", buffer)
+    postgresql.commit()
+
+
 def _process_rating_rows(reader, postgresql: Session, existing_row_note_ids: set, file_index: int) -> int:
     """ratingsのTSV行をバリデーションし、COPYでstaging tableにバルクロードする。"""
-    BATCH_SIZE = 50000
     buffer = io.StringIO()
     row_count = 0
     total_rows = 0
 
-    # SessionバインドのDBAPIコネクションを直接取得（プール外コネクションリーク防止）
-    dbapi_conn = postgresql.connection().connection.dbapi_connection
     columns_csv = ",".join(_RATING_COLUMNS)
 
     for index, row in enumerate(reader):
         if not _validate_rating_row(row, existing_row_note_ids):
             continue
 
-        # COPY用のタブ区切り行を書き出し
         values = []
         for col in _RATING_COLUMNS:
             val = row.get(col)
@@ -881,21 +896,14 @@ def _process_rating_rows(reader, postgresql: Session, existing_row_note_ids: set
         row_count += 1
 
         if row_count >= BATCH_SIZE:
-            buffer.seek(0)
-            with dbapi_conn.cursor() as cur:
-                cur.copy_expert(f"COPY {_STAGING_TABLE} ({columns_csv}) FROM STDIN", buffer)
-            postgresql.commit()
+            _copy_buffer_to_staging(postgresql, buffer, columns_csv)
             total_rows += row_count
             logging.info(f"COPY {row_count} rows (total: {total_rows}, file {file_index:05d})")
             buffer = io.StringIO()
             row_count = 0
 
-    # 最後のバッチ
     if row_count > 0:
-        buffer.seek(0)
-        with dbapi_conn.cursor() as cur:
-            cur.copy_expert(f"COPY {_STAGING_TABLE} ({columns_csv}) FROM STDIN", buffer)
-        postgresql.commit()
+        _copy_buffer_to_staging(postgresql, buffer, columns_csv)
         total_rows += row_count
         logging.info(f"COPY final {row_count} rows (total: {total_rows}, file {file_index:05d})")
 

@@ -431,6 +431,67 @@ class TestProcessRatingRows:
         assert fields[_RATING_COLUMNS.index("suggestion")] == r"line1\nline2\tcol\rend"
 
 
+class TestProcessRatingRowsConnectionHandling:
+    """COPY ごとに Session からコネクションを取り直すことを固定する。
+
+    生のコネクションをループ外で1回だけ掴むと、Session.commit() でプールへ
+    返却された後の COPY が Session のトランザクション外になり、プールの
+    reset-on-return で無言のうちに破棄される（2026-10-01 の本番欠損）。
+    """
+
+    def _session_handing_out(self, raw_conns):
+        """connection() を呼ぶたびに別の生コネクションを返す Session モック。"""
+        session = MagicMock()
+        wrappers = []
+        for raw in raw_conns:
+            wrapper = MagicMock()
+            wrapper.connection.dbapi_connection = raw
+            wrappers.append(wrapper)
+        session.connection.side_effect = wrappers
+        return session
+
+    def _rows(self, count):
+        for i in range(count):
+            yield {
+                "note_id": f"n{i}",
+                "rater_participant_id": f"r{i}",
+                "created_at_millis": "1000",
+                "version": "1",
+                "rated_on_tweet_id": "t1",
+            }
+
+    def test_acquires_connection_once_per_copy(self) -> None:
+        raw_conns = [MagicMock() for _ in range(3)]
+        session = self._session_handing_out(raw_conns)
+        existing = {f"n{i}" for i in range(5)}
+
+        with patch("birdxplorer_etl.extract_ecs.BATCH_SIZE", 2):
+            total = _process_rating_rows(self._rows(5), session, existing, 0)
+
+        assert total == 5
+        # 2, 2, 1 の3回 COPY → connection() も3回
+        assert session.connection.call_count == 3
+        for raw in raw_conns:
+            assert raw.cursor.call_count == 1
+
+    def test_last_partial_batch_uses_a_fresh_connection(self) -> None:
+        raw_conns = [MagicMock() for _ in range(2)]
+        session = self._session_handing_out(raw_conns)
+        existing = {f"n{i}" for i in range(3)}
+
+        with patch("birdxplorer_etl.extract_ecs.BATCH_SIZE", 2):
+            _process_rating_rows(self._rows(3), session, existing, 0)
+
+        assert session.connection.call_count == 2
+        assert raw_conns[1].cursor.call_count == 1
+
+    def test_no_rows_acquires_no_connection(self) -> None:
+        session = self._session_handing_out([])
+        total = _process_rating_rows(iter([]), session, set(), 0)
+        assert total == 0
+        assert session.connection.call_count == 0
+
+
 class TestExtractRatingsErrorRecovery:
     """extract_ratings のエラーリカバリテスト"""
 
