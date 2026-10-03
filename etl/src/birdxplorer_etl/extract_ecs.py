@@ -6,6 +6,7 @@ import os
 import sys
 import time
 import zipfile
+from collections import Counter
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
@@ -754,8 +755,18 @@ def backfill_missing_notes(postgresql: Session, batch_limit: int = 50000):
     logging.info(f"Backfill complete: enqueued {len(batch)} notes")
 
 
-def _validate_rating_row(row: dict, existing_row_note_ids: set) -> bool:
-    """rating行を検証・正規化する。有効ならTrue、スキップならFalseを返す。rowは破壊的に更新される。"""
+def _validate_rating_row(row: dict, existing_row_note_ids: set, skipped: Counter | None = None) -> bool:
+    """rating行を検証・正規化する。有効ならTrue、スキップならFalseを返す。rowは破壊的に更新される。
+
+    skipped を渡すと落選理由を加算する。捨てた行数を記録しないと、
+    正常な落選（削除済みノートの評価）と異常な欠損を区別できない。
+    """
+
+    def _skip(reason: str) -> bool:
+        if skipped is not None:
+            skipped[reason] += 1
+        return False
+
     binary_bool_fields = [
         "agree",
         "disagree",
@@ -789,10 +800,10 @@ def _validate_rating_row(row: dict, existing_row_note_ids: set) -> bool:
     rater_participant_id = row.get("rater_participant_id")
 
     if not note_id or not rater_participant_id:
-        return False
+        return _skip("missing_ids")
 
     if note_id not in existing_row_note_ids:
-        return False
+        return _skip("unknown_note")
 
     # BinaryBoolフィールドの正規化
     for field in binary_bool_fields:
@@ -826,7 +837,7 @@ def _validate_rating_row(row: dict, existing_row_note_ids: set) -> bool:
     # NOT NULLカラム（BinaryBool以外）が空の行はスキップ
     for field in ("created_at_millis", "version", "rated_on_tweet_id"):
         if not row.get(field):
-            return False
+            return _skip("missing_required")
 
     return True
 
@@ -854,22 +865,40 @@ def _iter_lines_without_nul(lines: Iterable[str]) -> Iterator[str]:
         yield line.replace("\x00", "") if "\x00" in line else line
 
 
+# COPY のバッチサイズ。テストから差し替えられるようモジュール定数にする。
+BATCH_SIZE = 50000
+
+
+def _copy_buffer_to_staging(postgresql: Session, buffer: io.StringIO, columns_csv: str) -> None:
+    """buffer を staging table へ COPY して commit する。
+
+    ★ コネクションは COPY の直前に毎回取り直すこと。ループの外で1回だけ掴むと、
+    Session.commit() でプールへ返却された後の COPY が Session のトランザクション
+    外で走り、プールの reset-on-return でロールバックされて無言で消える。
+    2026-10-01 に 2.17億行中 5,200万行がこれで失われていたことが判明している。
+    """
+    buffer.seek(0)
+    dbapi_conn = postgresql.connection().connection.dbapi_connection
+    with dbapi_conn.cursor() as cur:
+        cur.copy_expert(f"COPY {_STAGING_TABLE} ({columns_csv}) FROM STDIN", buffer)
+    postgresql.commit()
+
+
 def _process_rating_rows(reader, postgresql: Session, existing_row_note_ids: set, file_index: int) -> int:
     """ratingsのTSV行をバリデーションし、COPYでstaging tableにバルクロードする。"""
-    BATCH_SIZE = 50000
     buffer = io.StringIO()
     row_count = 0
     total_rows = 0
+    skipped: Counter = Counter()
+    read_rows = 0
 
-    # SessionバインドのDBAPIコネクションを直接取得（プール外コネクションリーク防止）
-    dbapi_conn = postgresql.connection().connection.dbapi_connection
     columns_csv = ",".join(_RATING_COLUMNS)
 
     for index, row in enumerate(reader):
-        if not _validate_rating_row(row, existing_row_note_ids):
+        read_rows += 1
+        if not _validate_rating_row(row, existing_row_note_ids, skipped):
             continue
 
-        # COPY用のタブ区切り行を書き出し
         values = []
         for col in _RATING_COLUMNS:
             val = row.get(col)
@@ -881,24 +910,27 @@ def _process_rating_rows(reader, postgresql: Session, existing_row_note_ids: set
         row_count += 1
 
         if row_count >= BATCH_SIZE:
-            buffer.seek(0)
-            with dbapi_conn.cursor() as cur:
-                cur.copy_expert(f"COPY {_STAGING_TABLE} ({columns_csv}) FROM STDIN", buffer)
-            postgresql.commit()
+            _copy_buffer_to_staging(postgresql, buffer, columns_csv)
             total_rows += row_count
             logging.info(f"COPY {row_count} rows (total: {total_rows}, file {file_index:05d})")
             buffer = io.StringIO()
             row_count = 0
 
-    # 最後のバッチ
     if row_count > 0:
-        buffer.seek(0)
-        with dbapi_conn.cursor() as cur:
-            cur.copy_expert(f"COPY {_STAGING_TABLE} ({columns_csv}) FROM STDIN", buffer)
-        postgresql.commit()
+        _copy_buffer_to_staging(postgresql, buffer, columns_csv)
         total_rows += row_count
         logging.info(f"COPY final {row_count} rows (total: {total_rows}, file {file_index:05d})")
 
+    skipped_total = sum(skipped.values())
+    breakdown = (
+        f"missing_ids={skipped['missing_ids']} "
+        f"unknown_note={skipped['unknown_note']} "
+        f"missing_required={skipped['missing_required']}"
+    )
+    logging.info(
+        f"RATINGS_FILE_ROWS file={file_index:05d} read={read_rows} "
+        f"kept={total_rows} skipped={skipped_total} {breakdown}"
+    )
     return total_rows
 
 
@@ -1015,6 +1047,9 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
 
         # 高価な PK 構築（失敗時は dedup で約20分）の前に、行数不足が分かっている日を早期に落とす
         _check_staging_row_count(staging_count=total_loaded, min_rows=min_rows)
+
+        # COPY が無言で失われていないかを、PK 構築に入る前に厳密一致で止める
+        _verify_staging_row_count(postgresql, total_loaded)
 
         # dedup は PK 構築が UniqueViolation で落ちたときだけ走る(_build_staging_pk_with_dedup_fallback)
         staging_count = _build_staging_pk_with_dedup_fallback(postgresql, total_loaded)
@@ -1170,6 +1205,24 @@ def _check_staging_row_count(*, staging_count: int, min_rows: int) -> None:
             f"Staging table has {staging_count} rows, expected at least {min_rows}. "
             "Aborting swap to prevent data loss from incomplete snapshot."
         )
+
+
+def _verify_staging_row_count(postgresql: Session, expected: int) -> int:
+    """staging の実 COUNT(*) と取り込み側のカウントの厳密一致を確認する。
+
+    COPY が無言で失われても total_loaded は増え続けるため、ログだけでは
+    欠損が分からない（2026-10-01 の本番欠損はこれで半年規模で見逃された）。
+    min_rows の 50% ガードは live の reltuples 基準で、欠損のたびに基準が
+    下がるラチェットなので、こちらを厳密一致の最終防衛線として置く。
+    """
+    actual = postgresql.execute(text(f"SELECT count(*) FROM {_STAGING_TABLE}")).scalar() or 0
+    if actual != expected:
+        raise RuntimeError(
+            f"RATINGS_STAGING_COUNT_MISMATCH expected={expected} actual={actual} "
+            "COPY された行が staging に入っていない。swap を中止する。"
+        )
+    logging.info(f"RATINGS_STAGING_COUNT_VERIFIED rows={actual}")
+    return actual
 
 
 def _build_staging_pk(postgresql: Session) -> None:
