@@ -2,6 +2,7 @@ import csv
 import io
 import logging
 import sys
+from collections import Counter
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -28,6 +29,7 @@ from birdxplorer_etl.extract_ecs import (  # noqa: E402
     _run_phase,
     _swap_ratings_table,
     _validate_rating_row,
+    _verify_staging_row_count,
     extract_data,
     extract_ratings,
 )
@@ -431,6 +433,217 @@ class TestProcessRatingRows:
         assert fields[_RATING_COLUMNS.index("suggestion")] == r"line1\nline2\tcol\rend"
 
 
+class TestProcessRatingRowsConnectionHandling:
+    """COPY ごとに Session からコネクションを取り直すことを固定する。
+
+    生のコネクションをループ外で1回だけ掴むと、Session.commit() でプールへ
+    返却された後の COPY が Session のトランザクション外になり、プールの
+    reset-on-return で無言のうちに破棄される（2026-10-01 の本番欠損）。
+    """
+
+    def _session_handing_out(self, raw_conns):
+        """connection() を呼ぶたびに別の生コネクションを返す Session モック。"""
+        session = MagicMock()
+        wrappers = []
+        for raw in raw_conns:
+            wrapper = MagicMock()
+            wrapper.connection.dbapi_connection = raw
+            wrappers.append(wrapper)
+        session.connection.side_effect = wrappers
+        return session
+
+    def _rows(self, count):
+        for i in range(count):
+            yield {
+                "note_id": f"n{i}",
+                "rater_participant_id": f"r{i}",
+                "created_at_millis": "1000",
+                "version": "1",
+                "rated_on_tweet_id": "t1",
+            }
+
+    def test_acquires_connection_once_per_copy(self) -> None:
+        raw_conns = [MagicMock() for _ in range(3)]
+        session = self._session_handing_out(raw_conns)
+        existing = {f"n{i}" for i in range(5)}
+
+        with patch("birdxplorer_etl.extract_ecs.BATCH_SIZE", 2):
+            total = _process_rating_rows(self._rows(5), session, existing, 0)
+
+        assert total == 5
+        # 2, 2, 1 の3回 COPY → connection() も3回
+        assert session.connection.call_count == 3
+        for raw in raw_conns:
+            assert raw.cursor.call_count == 1
+
+    def test_last_partial_batch_uses_a_fresh_connection(self) -> None:
+        raw_conns = [MagicMock() for _ in range(2)]
+        session = self._session_handing_out(raw_conns)
+        existing = {f"n{i}" for i in range(3)}
+
+        with patch("birdxplorer_etl.extract_ecs.BATCH_SIZE", 2):
+            _process_rating_rows(self._rows(3), session, existing, 0)
+
+        assert session.connection.call_count == 2
+        assert raw_conns[1].cursor.call_count == 1
+
+    def test_no_rows_acquires_no_connection(self) -> None:
+        session = self._session_handing_out([])
+        total = _process_rating_rows(iter([]), session, set(), 0)
+        assert total == 0
+        assert session.connection.call_count == 0
+
+    def test_copy_expert_happens_before_commit_each_batch(self) -> None:
+        """connection() → copy_expert → commit の順序そのものを固定する。
+
+        connection() の呼び出し回数や cursor() の呼び出し回数だけを見るテストでは、
+        フレッシュなコネクションを取ったうえで copy_expert より先に commit してしまう
+        退行を検出できない。それは2026-10-01 の本番欠損と同じ壊れ方になる
+        （COPY が Session のトランザクション外で実行され、プールの reset-on-return で
+        無言のうちに破棄される）。session と生コネクションを1つの親 mock に
+        attach_mock し、記録された mock_calls の順序を直接検証する。
+        """
+        raw_conns = [MagicMock() for _ in range(2)]
+        session = self._session_handing_out(raw_conns)
+
+        parent = MagicMock()
+        parent.attach_mock(session, "session")
+        for i, raw in enumerate(raw_conns):
+            parent.attach_mock(raw, f"raw{i}")
+
+        existing = {f"n{i}" for i in range(3)}
+        with patch("birdxplorer_etl.extract_ecs.BATCH_SIZE", 2):
+            _process_rating_rows(self._rows(3), session, existing, 0)
+
+        call_names = [call[0] for call in parent.mock_calls]
+
+        # "session.connection" の呼び出しごとに新しいバッチのセグメントを区切る。
+        segments: list[list[str]] = []
+        for name in call_names:
+            if name == "session.connection":
+                segments.append([])
+            assert segments, "session.connection() より前に呼ばれたコールがある"
+            segments[-1].append(name)
+
+        # 2, 1 の2バッチ → connection() も2回
+        assert len(segments) == 2
+
+        for segment in segments:
+            copy_positions = [i for i, name in enumerate(segment) if name.endswith("copy_expert")]
+            commit_positions = [i for i, name in enumerate(segment) if name == "session.commit"]
+            assert copy_positions, f"copy_expert が呼ばれていない: {segment}"
+            assert commit_positions, f"commit が呼ばれていない: {segment}"
+            assert max(copy_positions) < min(
+                commit_positions
+            ), f"commit が copy_expert より先に呼ばれている（本番欠損の再現）: {segment}"
+
+
+class TestVerifyStagingRowCount:
+    """取り込み側が数えた行数と staging の実行数の厳密一致を固定する。
+
+    50% ガードは live の reltuples 基準なので、24% の欠損を素通しした。
+    さらに基準が欠損後の live から取られるためラチェットになっている。
+    """
+
+    def test_returns_actual_count_when_it_matches(self) -> None:
+        session = MagicMock()
+        session.execute.return_value.scalar.return_value = 1000
+        assert _verify_staging_row_count(session, 1000) == 1000
+
+    def test_raises_when_actual_is_fewer(self) -> None:
+        session = MagicMock()
+        session.execute.return_value.scalar.return_value = 940
+        with pytest.raises(RuntimeError, match="RATINGS_STAGING_COUNT_MISMATCH"):
+            _verify_staging_row_count(session, 1000)
+
+    def test_raises_when_actual_is_greater(self) -> None:
+        session = MagicMock()
+        session.execute.return_value.scalar.return_value = 1060
+        with pytest.raises(RuntimeError, match="RATINGS_STAGING_COUNT_MISMATCH"):
+            _verify_staging_row_count(session, 1000)
+
+    def test_error_message_contains_both_numbers(self) -> None:
+        session = MagicMock()
+        session.execute.return_value.scalar.return_value = 940
+        with pytest.raises(RuntimeError) as exc:
+            _verify_staging_row_count(session, 1000)
+        assert "expected=1000" in str(exc.value)
+        assert "actual=940" in str(exc.value)
+
+
+class TestExtractRatingsVerifiesStagingCount:
+    """extract_ratings が swap 前に厳密一致の検証を通すことを固定する。"""
+
+    @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._swap_ratings_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk_with_dedup_fallback")
+    @patch("birdxplorer_etl.extract_ecs._process_rating_rows")
+    @patch("birdxplorer_etl.extract_ecs._create_staging_table")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_aborts_swap_when_staging_is_short(
+        self,
+        mock_requests: MagicMock,
+        mock_create: MagicMock,
+        mock_process: MagicMock,
+        mock_fallback: MagicMock,
+        mock_swap: MagicMock,
+        mock_cleanup: MagicMock,
+    ) -> None:
+        """COPY が消えて staging が足りない日は、PK 構築も swap もせずに落ちる。"""
+        import settings
+
+        original = settings.USE_DUMMY_DATA
+        settings.USE_DUMMY_DATA = True
+        try:
+            response = MagicMock()
+            response.status_code = 200
+            response.content = b"noteId\traterParticipantId\n"
+            mock_requests.get.return_value = response
+            mock_process.return_value = 1000
+
+            mock_session = MagicMock()
+            # 1回目の scalar は reltuples(=1000, min_rows 500)、2回目が staging の実測(940)
+            mock_session.execute.return_value.scalar.side_effect = [1000, 940]
+
+            with pytest.raises(RuntimeError, match="RATINGS_STAGING_COUNT_MISMATCH"):
+                extract_ratings(mock_session, "2026/09/29", {"n1"})
+        finally:
+            settings.USE_DUMMY_DATA = original
+
+        mock_fallback.assert_not_called()
+        mock_swap.assert_not_called()
+        mock_cleanup.assert_called_once_with(mock_session)
+
+    @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._verify_staging_row_count")
+    @patch("birdxplorer_etl.extract_ecs._create_staging_table")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_zero_loaded_skips_verification_and_swap(
+        self,
+        mock_requests: MagicMock,
+        mock_create: MagicMock,
+        mock_verify: MagicMock,
+        mock_cleanup: MagicMock,
+    ) -> None:
+        """total_loaded == 0 の日は検証もせず正常に抜ける（既存挙動を壊さない）。"""
+        import settings
+
+        original = settings.USE_DUMMY_DATA
+        settings.USE_DUMMY_DATA = False
+        try:
+            response = MagicMock()
+            response.status_code = 404
+            mock_requests.get.return_value = response
+
+            mock_session = MagicMock()
+            extract_ratings(mock_session, "2026/09/29", {"n1"})
+        finally:
+            settings.USE_DUMMY_DATA = original
+
+        mock_verify.assert_not_called()
+        mock_cleanup.assert_called_once_with(mock_session)
+
+
 class TestExtractRatingsErrorRecovery:
     """extract_ratings のエラーリカバリテスト"""
 
@@ -485,6 +698,7 @@ class TestExtractRatingsErrorRecovery:
     @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
     @patch("birdxplorer_etl.extract_ecs._swap_ratings_table")
     @patch("birdxplorer_etl.extract_ecs._build_staging_pk")
+    @patch("birdxplorer_etl.extract_ecs._verify_staging_row_count")
     @patch("birdxplorer_etl.extract_ecs._process_rating_rows")
     @patch("birdxplorer_etl.extract_ecs._create_staging_table")
     @patch("birdxplorer_etl.extract_ecs.requests")
@@ -493,6 +707,7 @@ class TestExtractRatingsErrorRecovery:
         mock_requests: MagicMock,
         mock_create: MagicMock,
         mock_process: MagicMock,
+        mock_verify: MagicMock,
         mock_build_pk: MagicMock,
         mock_swap: MagicMock,
         mock_cleanup: MagicMock,
@@ -1130,3 +1345,88 @@ class TestExtractRatingsSkipsDedup:
         assert (
             mock_swap.call_args.kwargs["staging_count"] == 993
         ), "fallback が返した dedup 後の行数が _swap_ratings_table に配線されていない"
+
+
+class TestValidateRatingRowSkipCounter:
+    def _row(self, **overrides):
+        row = {
+            "note_id": "n1",
+            "rater_participant_id": "r1",
+            "created_at_millis": "1000",
+            "version": "1",
+            "rated_on_tweet_id": "t1",
+        }
+        row.update(overrides)
+        return row
+
+    def test_counts_unknown_note(self) -> None:
+        skipped = Counter()
+        assert _validate_rating_row(self._row(), set(), skipped) is False
+        assert skipped["unknown_note"] == 1
+
+    def test_counts_missing_ids(self) -> None:
+        skipped = Counter()
+        assert _validate_rating_row(self._row(note_id=""), {"n1"}, skipped) is False
+        assert skipped["missing_ids"] == 1
+
+    def test_counts_missing_required(self) -> None:
+        skipped = Counter()
+        assert _validate_rating_row(self._row(version=""), {"n1"}, skipped) is False
+        assert skipped["missing_required"] == 1
+
+    def test_valid_row_counts_nothing(self) -> None:
+        skipped = Counter()
+        assert _validate_rating_row(self._row(), {"n1"}, skipped) is True
+        assert sum(skipped.values()) == 0
+
+    def test_counter_is_optional(self) -> None:
+        assert _validate_rating_row(self._row(), {"n1"}) is True
+
+
+class TestProcessRatingRowsSkipLogging:
+    def test_logs_read_kept_skipped(self, caplog: pytest.LogCaptureFixture) -> None:
+        session = MagicMock()
+        rows = [
+            {
+                "note_id": "n1",
+                "rater_participant_id": "r1",
+                "created_at_millis": "1",
+                "version": "1",
+                "rated_on_tweet_id": "t1",
+            },
+            {
+                "note_id": "n2",
+                "rater_participant_id": "r2",
+                "created_at_millis": "1",
+                "version": "1",
+                "rated_on_tweet_id": "t1",
+            },
+        ]
+        with caplog.at_level(logging.INFO):
+            kept = _process_rating_rows(iter(rows), session, {"n1"}, 2)
+
+        assert kept == 1
+        assert (
+            "RATINGS_FILE_ROWS file=00002 read=2 kept=1 skipped=1 "
+            "missing_ids=0 unknown_note=1 missing_required=0" in caplog.text
+        )
+
+    def test_logs_even_when_nothing_skipped(self, caplog: pytest.LogCaptureFixture) -> None:
+        """skipped=0 でも行を出す。ログが無い＝観測されていない、と区別するため。"""
+        session = MagicMock()
+        rows = [
+            {
+                "note_id": "n1",
+                "rater_participant_id": "r1",
+                "created_at_millis": "1",
+                "version": "1",
+                "rated_on_tweet_id": "t1",
+            }
+        ]
+        with caplog.at_level(logging.INFO):
+            _process_rating_rows(iter(rows), session, {"n1"}, 0)
+
+        assert (
+            "RATINGS_FILE_ROWS file=00000 read=1 kept=1 skipped=0 "
+            "missing_ids=0 unknown_note=0 missing_required=0" in caplog.text
+        )
