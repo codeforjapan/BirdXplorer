@@ -3,6 +3,7 @@ import io
 import logging
 import sys
 from collections import Counter
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,6 +19,7 @@ sys.modules.setdefault("settings", MagicMock())
 
 from birdxplorer_etl.extract_ecs import (  # noqa: E402
     _RATING_COLUMNS,
+    _SNAPSHOT_FIRST_FILE,
     _STAGING_TABLE,
     _build_staging_pk,
     _build_staging_pk_with_dedup_fallback,
@@ -25,7 +27,9 @@ from birdxplorer_etl.extract_ecs import (  # noqa: E402
     _create_staging_table,
     _deduplicate_staging_table,
     _iter_lines_without_nul,
+    _probe_snapshot,
     _process_rating_rows,
+    _resolve_snapshot_date,
     _run_phase,
     _swap_ratings_table,
     _validate_rating_row,
@@ -1430,3 +1434,103 @@ class TestProcessRatingRowsSkipLogging:
             "RATINGS_FILE_ROWS file=00000 read=1 kept=1 skipped=0 "
             "missing_ids=0 unknown_note=0 missing_required=0" in caplog.text
         )
+
+
+class TestResolveSnapshotDate:
+    """日付解決のユニットテスト。HTTP も実時間の待機も使わない。"""
+
+    BASE = datetime(2026, 10, 5, 16, 30, 0)
+
+    def _recorder(self, results):
+        """results の順に返すプローブと、呼ばれた回数を数える sleep を返す。"""
+        calls = []
+        slept = []
+
+        def probe(kind, date_string):
+            calls.append((kind, date_string))
+            return results[len(calls) - 1]
+
+        def sleep(seconds):
+            slept.append(seconds)
+
+        return probe, sleep, calls, slept
+
+    def test_today_available_on_first_probe(self) -> None:
+        probe, sleep, calls, slept = self._recorder([True])
+        got = _resolve_snapshot_date("noteRatings", self.BASE, probe=probe, sleep=sleep)
+        assert got == "2026/10/05"
+        assert len(calls) == 1
+        assert slept == [], "公開済みなのに待機している"
+
+    def test_today_available_on_third_probe(self) -> None:
+        probe, sleep, calls, slept = self._recorder([False, False, True])
+        got = _resolve_snapshot_date("noteRatings", self.BASE, probe=probe, sleep=sleep)
+        assert got == "2026/10/05"
+        assert len(calls) == 3
+        assert slept == [600, 600]
+
+    def test_falls_back_to_yesterday_after_all_retries(self) -> None:
+        # 当日は初回＋6回のリトライで計7回すべて False、翌の候補(前日)で True
+        probe, sleep, calls, slept = self._recorder([False] * 7 + [True])
+        got = _resolve_snapshot_date("noteRatings", self.BASE, probe=probe, sleep=sleep)
+        assert got == "2026/10/04"
+        assert len(slept) == 6, "リトライ回数が 6 ではない"
+        assert calls[-1] == ("noteRatings", "2026/10/04")
+
+    def test_falls_back_up_to_three_days(self) -> None:
+        probe, sleep, calls, slept = self._recorder([False] * 7 + [False, False, True])
+        got = _resolve_snapshot_date("noteRatings", self.BASE, probe=probe, sleep=sleep)
+        assert got == "2026/10/02"
+
+    def test_returns_none_when_nothing_is_available(self) -> None:
+        probe, sleep, calls, slept = self._recorder([False] * 10)
+        got = _resolve_snapshot_date("noteRatings", self.BASE, probe=probe, sleep=sleep)
+        assert got is None
+        assert len(calls) == 10, "4日前まで試している、または3日前を試していない"
+
+    def test_probe_exception_propagates_without_falling_back(self) -> None:
+        """接続断でフォールバックすると前日分を丸ごと再処理して1時間規模を浪費する。"""
+        calls = []
+
+        def probe(kind, date_string):
+            calls.append(date_string)
+            raise OSError("Connection reset by peer")
+
+        with pytest.raises(OSError):
+            _resolve_snapshot_date("noteRatings", self.BASE, probe=probe, sleep=lambda s: None)
+        assert len(calls) == 1, "例外のあとも別の日付を試している"
+
+    def test_logs_waiting_fallback_and_unavailable(self, caplog: pytest.LogCaptureFixture) -> None:
+        probe, sleep, _, _ = self._recorder([False] * 7 + [True])
+        with caplog.at_level(logging.INFO):
+            _resolve_snapshot_date("noteRatings", self.BASE, probe=probe, sleep=sleep)
+        assert "SNAPSHOT_WAITING kind=noteRatings attempt=1/6 date=2026/10/05" in caplog.text
+        assert "SNAPSHOT_FALLBACK kind=noteRatings requested=2026/10/05 resolved=2026/10/04" in caplog.text
+
+        probe2, sleep2, _, _ = self._recorder([False] * 10)
+        with caplog.at_level(logging.INFO):
+            _resolve_snapshot_date("notes", self.BASE, probe=probe2, sleep=sleep2)
+        assert "SNAPSHOT_UNAVAILABLE kind=notes tried=2026/10/05..2026/10/02" in caplog.text
+
+
+class TestProbeSnapshot:
+    def test_builds_the_expected_url_and_returns_true_on_200(self) -> None:
+        with patch("birdxplorer_etl.extract_ecs.requests") as mock_requests:
+            mock_requests.head.return_value = MagicMock(status_code=200)
+            assert _probe_snapshot("noteRatings", "2026/10/05") is True
+        url = mock_requests.head.call_args[0][0]
+        assert url == (
+            "https://ton.twimg.com/birdwatch-public-data/2026/10/05/noteRatings/ratings-00000.zip"
+        )
+
+    def test_returns_false_on_404(self) -> None:
+        with patch("birdxplorer_etl.extract_ecs.requests") as mock_requests:
+            mock_requests.head.return_value = MagicMock(status_code=404)
+            assert _probe_snapshot("notes", "2026/10/05") is False
+
+    def test_knows_all_three_families(self) -> None:
+        assert _SNAPSHOT_FIRST_FILE == {
+            "notes": "notes-00000.zip",
+            "noteRatings": "ratings-00000.zip",
+            "noteStatusHistory": "noteStatusHistory-00000.zip",
+        }

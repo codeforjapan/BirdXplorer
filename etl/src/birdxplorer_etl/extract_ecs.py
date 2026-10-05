@@ -264,6 +264,62 @@ def _run_phase(name: str, postgresql: Session, phase: Callable[[], None]) -> boo
     return True
 
 
+# 各ファミリーの先頭ファイル。公開済みかの判定はこれ1つの HEAD で足りる。
+_SNAPSHOT_FIRST_FILE = {
+    "notes": "notes-00000.zip",
+    "noteRatings": "ratings-00000.zip",
+    "noteStatusHistory": "noteStatusHistory-00000.zip",
+}
+_SNAPSHOT_RETRY_INTERVAL_SECONDS = 600
+_SNAPSHOT_MAX_RETRIES = 6
+_SNAPSHOT_MAX_FALLBACK_DAYS = 3
+
+
+def _probe_snapshot(kind: str, date_string: str) -> bool:
+    """そのファミリーの 00000 が公開されているかを HEAD で確認する。
+
+    例外は握りつぶさない。404(未公開)とネットワーク障害は別物で、後者で前日に流れると
+    ratings のフルスワップ込みで前日分を丸ごと再処理して1時間規模を浪費する。
+    """
+    url = (
+        f"https://ton.twimg.com/birdwatch-public-data/{date_string}/{kind}/{_SNAPSHOT_FIRST_FILE[kind]}"
+    )
+    return requests.head(url).status_code == 200
+
+
+def _resolve_snapshot_date(
+    kind: str,
+    base: datetime,
+    *,
+    probe: Callable[[str, str], bool] = _probe_snapshot,
+    sleep: Callable[[float], None] = time.sleep,
+) -> Optional[str]:
+    """当日→リトライ→過去日 の順にスナップショットの日付を解決する。全滅なら None。
+
+    リトライは当日分にだけ掛ける。過去日は公開済みか否かが確定しており、待つ意味がない。
+    """
+    today = base.strftime("%Y/%m/%d")
+    if probe(kind, today):
+        return today
+    for attempt in range(1, _SNAPSHOT_MAX_RETRIES + 1):
+        logging.info(
+            f"SNAPSHOT_WAITING kind={kind} attempt={attempt}/{_SNAPSHOT_MAX_RETRIES} date={today}"
+        )
+        sleep(_SNAPSHOT_RETRY_INTERVAL_SECONDS)
+        if probe(kind, today):
+            return today
+
+    for days_ago in range(1, _SNAPSHOT_MAX_FALLBACK_DAYS + 1):
+        candidate = (base - timedelta(days=days_ago)).strftime("%Y/%m/%d")
+        if probe(kind, candidate):
+            logging.warning(f"SNAPSHOT_FALLBACK kind={kind} requested={today} resolved={candidate}")
+            return candidate
+
+    oldest = (base - timedelta(days=_SNAPSHOT_MAX_FALLBACK_DAYS)).strftime("%Y/%m/%d")
+    logging.error(f"SNAPSHOT_UNAVAILABLE kind={kind} tried={today}..{oldest}")
+    return None
+
+
 def extract_data(postgresql: Session):
     logging.info("Downloading community notes data")
 
