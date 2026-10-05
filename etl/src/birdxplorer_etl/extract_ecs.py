@@ -316,6 +316,31 @@ def _resolve_snapshot_date(
     return None
 
 
+def _run_notes_phase(postgresql: Session, existing_row_note_ids: set, now: datetime) -> None:
+    # probe を明示的に渡す: _resolve_snapshot_date のデフォルト引数は定義時に束縛されるため、
+    # ここで省略すると @patch("birdxplorer_etl.extract_ecs._probe_snapshot") が効かず、
+    # テストが実際の ton.twimg.com へ HTTP を発行してしまう。
+    date_string = _resolve_snapshot_date("notes", now, probe=_probe_snapshot)
+    if date_string is None:
+        raise RuntimeError("SNAPSHOT_UNAVAILABLE kind=notes")
+    _extract_notes_files(postgresql, date_string, existing_row_note_ids)
+
+
+def _run_ratings_phase(postgresql: Session, existing_row_note_ids: set, now: datetime) -> None:
+    date_string = _resolve_snapshot_date("noteRatings", now, probe=_probe_snapshot)
+    if date_string is None:
+        raise RuntimeError("SNAPSHOT_UNAVAILABLE kind=noteRatings")
+    is_fallback = date_string != now.strftime("%Y/%m/%d")
+    extract_ratings(postgresql, date_string, existing_row_note_ids, is_fallback=is_fallback)
+
+
+def _run_status_phase(postgresql: Session, existing_row_note_ids: set, now: datetime) -> None:
+    date_string = _resolve_snapshot_date("noteStatusHistory", now, probe=_probe_snapshot)
+    if date_string is None:
+        raise RuntimeError("SNAPSHOT_UNAVAILABLE kind=noteStatusHistory")
+    _extract_note_status_files(postgresql, date_string, existing_row_note_ids)
+
+
 def extract_data(postgresql: Session):
     logging.info("Downloading community notes data")
 
@@ -323,45 +348,19 @@ def extract_data(postgresql: Session):
     existing_row_note_ids = set(r[0] for r in postgresql.query(RowNoteRecord.note_id).all())
     logging.info(f"Loaded {len(existing_row_note_ids)} existing note IDs from row_notes")
 
-    # Noteデータを取得してPostgreSQLに保存
-    # 今日から遡って最新データがある日を1日分処理する
-    for days_ago in range(3):  # 今日、昨日、一昨日
-        date = datetime.now() - timedelta(days=days_ago)
-        dateString = date.strftime("%Y/%m/%d")
+    now = datetime.now()
 
-        # notes / noteStatus も _run_phase で包む。ストリーミング化で zip の CRC 検証と
-        # UTF-8 デコードが逐次になったため「ファイル途中で落ちる」が到達可能になり、
-        # 裸で呼ぶとその日の Ratings / Status / Backfill / NoteRequests が全滅する。
-        notes_state = {"date_has_notes": False}
-        notes_ok = _run_phase(
-            "Notes",
-            postgresql,
-            lambda: _extract_notes_files(postgresql, dateString, existing_row_note_ids, notes_state),
-        )
+    # 日付解決はフェーズの内側で行う。_run_phase の外で解決すると、解決中の例外が
+    # Backfill / NoteRequests まで巻き添えにする。
+    _run_phase("Notes", postgresql, lambda: _run_notes_phase(postgresql, existing_row_note_ids, now))
 
-        if not notes_state["date_has_notes"]:
-            if notes_ok:
-                # 404 = この日のデータがまだ公開されていない。前の日を試す。
-                continue
-            # 取得そのものが失敗（接続断など）。ここで前日にフォールバックすると、
-            # ratings のフルスワップまで含めて前日分を丸ごと再処理して1時間規模を浪費し、
-            # しかも当日分はこの実行では取り込まれない。ソースは累積スナップショットなので
-            # 次回の定期実行で追いつく。この日で打ち切り、後段フェーズだけ走らせる。
-            break
+    # 評価データを取得して保存（noteStatus処理より先に実行することで集計タイミングを保証）
+    _run_phase("Ratings", postgresql, lambda: _run_ratings_phase(postgresql, existing_row_note_ids, now))
 
-        # 評価データを取得して保存（noteStatus処理より先に実行することで集計タイミングを保証）
-        _run_phase("Ratings", postgresql, lambda: extract_ratings(postgresql, dateString, existing_row_note_ids))
+    # notesテーブルの評価集計カラムを再計算
+    _run_phase("Rating recalculation", postgresql, lambda: recalculate_rating_counts(postgresql))
 
-        # notesテーブルの評価集計カラムを再計算
-        _run_phase("Rating recalculation", postgresql, lambda: recalculate_rating_counts(postgresql))
-
-        _run_phase(
-            "Status",
-            postgresql,
-            lambda: _extract_note_status_files(postgresql, dateString, existing_row_note_ids),
-        )
-
-        break  # データを処理したので終了
+    _run_phase("Status", postgresql, lambda: _run_status_phase(postgresql, existing_row_note_ids, now))
 
     postgresql.commit()
 
@@ -374,14 +373,8 @@ def extract_data(postgresql: Session):
     return
 
 
-def _extract_notes_files(postgresql: Session, dateString: str, existing_row_note_ids: set, state: dict) -> None:
-    """notes-XXXXX.zip を 404 まで順に取得して取り込む。
-
-    この日の notes が1ファイルでも存在したかは戻り値ではなく `state["date_has_notes"]`
-    で返す。_run_phase の契約が Callable[[], None] であることに加え、途中で例外になっても
-    「200 を受けた」事実は呼び出し元に残す必要があるため（残さないと前日へフォールバックし、
-    別の日を丸ごと処理してしまう）。
-    """
+def _extract_notes_files(postgresql: Session, dateString: str, existing_row_note_ids: set) -> None:
+    """notes-XXXXX.zip を 404 まで順に取得して取り込む。"""
     file_index = 0
 
     while True:
@@ -409,7 +402,6 @@ def _extract_notes_files(postgresql: Session, dateString: str, existing_row_note
             continue
 
         # TSVを読み込む
-        state["date_has_notes"] = True  # この日のデータが存在する
         if settings.USE_DUMMY_DATA:
             # ダミーデータの場合はTSVファイルを直接処理
             tsv_data = res.content.decode("utf-8").splitlines()
@@ -986,7 +978,7 @@ def _process_rating_rows(reader, postgresql: Session, existing_row_note_ids: set
     return total_rows
 
 
-def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids: set):
+def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids: set, *, is_fallback: bool = False):
     """
     指定日付の評価データをダウンロードし、staging table経由でrow_note_ratingsを全置換する。
 
@@ -998,6 +990,7 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
         postgresql: データベースセッション
         dateString: 日付文字列 (YYYY/MM/DD形式)
         existing_row_note_ids: row_notesテーブルに存在するnote_idのセット（存在チェック用）
+        is_fallback: この日付が当日ではなく前日以前へのフォールバック結果かどうか
     """
     _create_staging_table(postgresql)
     total_loaded = 0

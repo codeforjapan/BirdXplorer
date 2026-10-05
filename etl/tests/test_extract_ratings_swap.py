@@ -997,6 +997,7 @@ class TestExtractDataPhaseIsolation:
             mock_response.status_code = 200
             mock_response.content = b"noteId\tsummary\n"
             mock_requests.get.return_value = mock_response
+            mock_requests.head.return_value.status_code = 200
 
             mock_extract_ratings.side_effect = RuntimeError("end-of-copy marker corrupt")
 
@@ -1044,6 +1045,7 @@ class TestExtractDataPhaseIsolation:
             mock_response.status_code = 200
             mock_response.content = b"noteId\tsummary\n"
             mock_requests.get.return_value = mock_response
+            mock_requests.head.return_value.status_code = 200
 
             mock_process_note_rows.side_effect = RuntimeError("Bad CRC-32 for file 'notes-00002.tsv'")
 
@@ -1091,6 +1093,7 @@ class TestExtractDataPhaseIsolation:
             mock_response.status_code = 200
             mock_response.content = b"noteId\tcurrentStatus\n"
             mock_requests.get.return_value = mock_response
+            mock_requests.head.return_value.status_code = 200
 
             mock_process_note_status_rows.side_effect = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
 
@@ -1109,71 +1112,131 @@ class TestExtractDataPhaseIsolation:
 
     @patch("birdxplorer_etl.extract_ecs.run_note_requests_phase")
     @patch("birdxplorer_etl.extract_ecs.backfill_missing_notes")
+    @patch("birdxplorer_etl.extract_ecs.recalculate_rating_counts")
+    @patch("birdxplorer_etl.extract_ecs._extract_note_status_files")
     @patch("birdxplorer_etl.extract_ecs.extract_ratings")
-    @patch("birdxplorer_etl.extract_ecs.requests")
-    def test_fetch_failure_does_not_fall_back_to_the_previous_day(
+    @patch("birdxplorer_etl.extract_ecs._extract_notes_files")
+    @patch("birdxplorer_etl.extract_ecs._resolve_snapshot_date")
+    def test_each_family_resolves_its_own_date(
         self,
-        mock_requests: MagicMock,
-        mock_extract_ratings: MagicMock,
+        mock_resolve: MagicMock,
+        mock_notes: MagicMock,
+        mock_ratings: MagicMock,
+        mock_status: MagicMock,
+        mock_recalc: MagicMock,
         mock_backfill: MagicMock,
         mock_note_requests: MagicMock,
     ) -> None:
-        """取得そのものが失敗した日は、前日へフォールバックせず打ち切ること。
+        """ratings だけ当日、status は前日、という混在が起き得ること。"""
+        today = datetime.now().strftime("%Y/%m/%d")
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y/%m/%d")
+        mock_resolve.side_effect = lambda kind, base, **_: {
+            "notes": today,
+            "noteRatings": today,
+            "noteStatusHistory": yesterday,
+        }[kind]
 
-        前日フォールバックは「404 = まだ公開されていない」ための仕組み。接続断で
-        前日に流れると ratings のフルスワップ込みで前日分を丸ごと再処理して
-        1時間規模を浪費し、しかも当日分はこの実行では取り込まれない。
-        後段フェーズ(Backfill / NoteRequests)は走らせる必要がある。
-        """
-        import settings
+        mock_session = MagicMock()
+        mock_session.query.return_value.all.return_value = []
+        extract_data(mock_session)
 
-        original = settings.USE_DUMMY_DATA
-        settings.USE_DUMMY_DATA = True
-        try:
-            mock_requests.get.side_effect = OSError("Connection reset by peer")
+        assert mock_notes.call_args[0][1] == today
+        assert mock_ratings.call_args[0][1] == today
+        assert mock_status.call_args[0][1] == yesterday
+        assert mock_ratings.call_args.kwargs["is_fallback"] is False
 
-            mock_session = MagicMock()
-            mock_session.query.return_value.all.return_value = []
+    @patch("birdxplorer_etl.extract_ecs.run_note_requests_phase")
+    @patch("birdxplorer_etl.extract_ecs.backfill_missing_notes")
+    @patch("birdxplorer_etl.extract_ecs.recalculate_rating_counts")
+    @patch("birdxplorer_etl.extract_ecs._extract_note_status_files")
+    @patch("birdxplorer_etl.extract_ecs.extract_ratings")
+    @patch("birdxplorer_etl.extract_ecs._extract_notes_files")
+    @patch("birdxplorer_etl.extract_ecs._resolve_snapshot_date")
+    def test_marks_is_fallback_when_ratings_date_is_not_today(
+        self,
+        mock_resolve: MagicMock,
+        mock_notes: MagicMock,
+        mock_ratings: MagicMock,
+        mock_status: MagicMock,
+        mock_recalc: MagicMock,
+        mock_backfill: MagicMock,
+        mock_note_requests: MagicMock,
+    ) -> None:
+        today = datetime.now().strftime("%Y/%m/%d")
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y/%m/%d")
+        mock_resolve.side_effect = lambda kind, base, **_: yesterday if kind == "noteRatings" else today
 
+        mock_session = MagicMock()
+        mock_session.query.return_value.all.return_value = []
+        extract_data(mock_session)
+
+        assert mock_ratings.call_args.kwargs["is_fallback"] is True
+
+    @patch("birdxplorer_etl.extract_ecs.run_note_requests_phase")
+    @patch("birdxplorer_etl.extract_ecs.backfill_missing_notes")
+    @patch("birdxplorer_etl.extract_ecs.recalculate_rating_counts")
+    @patch("birdxplorer_etl.extract_ecs._extract_note_status_files")
+    @patch("birdxplorer_etl.extract_ecs.extract_ratings")
+    @patch("birdxplorer_etl.extract_ecs._extract_notes_files")
+    @patch("birdxplorer_etl.extract_ecs._resolve_snapshot_date")
+    def test_unavailable_family_fails_only_its_own_phase(
+        self,
+        mock_resolve: MagicMock,
+        mock_notes: MagicMock,
+        mock_ratings: MagicMock,
+        mock_status: MagicMock,
+        mock_recalc: MagicMock,
+        mock_backfill: MagicMock,
+        mock_note_requests: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """ratings が全滅しても Backfill / NoteRequests は走ること。"""
+        mock_resolve.side_effect = lambda kind, base, **_: None if kind == "noteRatings" else "2026/10/05"
+
+        mock_session = MagicMock()
+        mock_session.query.return_value.all.return_value = []
+        with caplog.at_level(logging.INFO):
             extract_data(mock_session)
-        finally:
-            settings.USE_DUMMY_DATA = original
 
-        assert mock_requests.get.call_count == 1, "前日にフォールバックして再取得している"
-        mock_extract_ratings.assert_not_called()
+        mock_ratings.assert_not_called()
+        assert "EXTRACT_PHASE_FAILED" in caplog.text
+        assert "phase=Ratings" in caplog.text
+        mock_notes.assert_called_once()
+        mock_status.assert_called_once()
         mock_backfill.assert_called_once()
         mock_note_requests.assert_called_once()
 
     @patch("birdxplorer_etl.extract_ecs.run_note_requests_phase")
     @patch("birdxplorer_etl.extract_ecs.backfill_missing_notes")
+    @patch("birdxplorer_etl.extract_ecs.recalculate_rating_counts")
+    @patch("birdxplorer_etl.extract_ecs._extract_note_status_files")
     @patch("birdxplorer_etl.extract_ecs.extract_ratings")
-    @patch("birdxplorer_etl.extract_ecs.requests")
-    def test_404_still_falls_back_to_the_previous_day(
+    @patch("birdxplorer_etl.extract_ecs._extract_notes_files")
+    @patch("birdxplorer_etl.extract_ecs._probe_snapshot")
+    def test_probe_connection_error_fails_the_phase_without_falling_back(
         self,
-        mock_requests: MagicMock,
-        mock_extract_ratings: MagicMock,
+        mock_probe: MagicMock,
+        mock_notes: MagicMock,
+        mock_ratings: MagicMock,
+        mock_status: MagicMock,
+        mock_recalc: MagicMock,
         mock_backfill: MagicMock,
         mock_note_requests: MagicMock,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """404 のときは従来どおり3日分まで遡ること（打ち切り条件を広げていない）。"""
-        import settings
+        """接続断は前日へ流さず、そのフェーズを失敗させる（既存契約の維持）。"""
+        mock_probe.side_effect = OSError("Connection reset by peer")
 
-        original = settings.USE_DUMMY_DATA
-        settings.USE_DUMMY_DATA = False
-        try:
-            mock_response = MagicMock()
-            mock_response.status_code = 404
-            mock_requests.get.return_value = mock_response
-
-            mock_session = MagicMock()
-            mock_session.query.return_value.all.return_value = []
-
+        mock_session = MagicMock()
+        mock_session.query.return_value.all.return_value = []
+        with caplog.at_level(logging.INFO):
             extract_data(mock_session)
-        finally:
-            settings.USE_DUMMY_DATA = original
 
-        assert mock_requests.get.call_count == 3, "今日・昨日・一昨日の3日分を試していない"
-        mock_extract_ratings.assert_not_called()
+        assert mock_probe.call_count == 3, "1フェーズあたり1回を超えて試している"
+        mock_notes.assert_not_called()
+        mock_ratings.assert_not_called()
+        assert "EXTRACT_PHASE_FAILED" in caplog.text
+        mock_backfill.assert_called_once()
         mock_note_requests.assert_called_once()
 
 
