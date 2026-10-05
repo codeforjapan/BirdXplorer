@@ -300,9 +300,7 @@ def _resolve_snapshot_date(
     if probe(kind, today):
         return today
     for attempt in range(1, _SNAPSHOT_MAX_RETRIES + 1):
-        logging.info(
-            f"SNAPSHOT_WAITING kind={kind} attempt={attempt}/{_SNAPSHOT_MAX_RETRIES} date={today}"
-        )
+        logging.info(f"SNAPSHOT_WAITING kind={kind} attempt={attempt}/{_SNAPSHOT_MAX_RETRIES} date={today}")
         sleep(_SNAPSHOT_RETRY_INTERVAL_SECONDS)
         if probe(kind, today):
             return today
