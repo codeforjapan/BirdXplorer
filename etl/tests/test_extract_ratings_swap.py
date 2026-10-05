@@ -23,6 +23,7 @@ from birdxplorer_etl.extract_ecs import (  # noqa: E402
     _STAGING_TABLE,
     _build_staging_pk,
     _build_staging_pk_with_dedup_fallback,
+    _check_not_going_backwards,
     _cleanup_staging_table,
     _create_staging_table,
     _deduplicate_staging_table,
@@ -1595,3 +1596,106 @@ class TestProbeSnapshot:
             "noteRatings": "ratings-00000.zip",
             "noteStatusHistory": "noteStatusHistory-00000.zip",
         }
+
+
+class TestNotGoingBackwards:
+    """フォールバック時に、古いスナップショットで新しい live を上書きしないこと。"""
+
+    def test_raises_when_staging_is_smaller_than_live(self) -> None:
+        session = MagicMock()
+        session.execute.return_value.scalar.return_value = 218398084
+        with pytest.raises(RuntimeError, match="RATINGS_SNAPSHOT_OLDER_THAN_LIVE"):
+            _check_not_going_backwards(session, 217924158)
+
+    def test_passes_when_staging_is_equal_or_larger(self) -> None:
+        session = MagicMock()
+        session.execute.return_value.scalar.return_value = 218398084
+        _check_not_going_backwards(session, 218398084)
+        _check_not_going_backwards(session, 218400000)
+
+    def test_error_message_contains_both_numbers(self) -> None:
+        session = MagicMock()
+        session.execute.return_value.scalar.return_value = 218398084
+        with pytest.raises(RuntimeError) as exc:
+            _check_not_going_backwards(session, 217924158)
+        assert "staging=217924158" in str(exc.value)
+        assert "live=218398084" in str(exc.value)
+
+
+class TestExtractRatingsBackwardsGuard:
+    @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._swap_ratings_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk_with_dedup_fallback")
+    @patch("birdxplorer_etl.extract_ecs._verify_staging_row_count")
+    @patch("birdxplorer_etl.extract_ecs._process_rating_rows")
+    @patch("birdxplorer_etl.extract_ecs._create_staging_table")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_guard_does_not_fire_on_a_same_day_load(
+        self,
+        mock_requests: MagicMock,
+        mock_create: MagicMock,
+        mock_process: MagicMock,
+        mock_verify: MagicMock,
+        mock_fallback: MagicMock,
+        mock_swap: MagicMock,
+        mock_cleanup: MagicMock,
+    ) -> None:
+        """当日分の取り込みでは、staging が live を下回っても止めない。
+
+        評価の取り下げ(実測で約1,500件)で行数がわずかに減る日があるため。
+        """
+        import settings
+
+        original = settings.USE_DUMMY_DATA
+        settings.USE_DUMMY_DATA = True
+        try:
+            mock_requests.get.return_value = MagicMock(status_code=200, content=b"noteId\traterParticipantId\n")
+            mock_process.return_value = 1000
+            mock_fallback.return_value = 1000
+
+            mock_session = MagicMock()
+            # reltuples=2000 → min_rows=1000 を通過し、後退判定に使えば 1000 < 2000 で落ちる値
+            mock_session.execute.return_value.scalar.return_value = 2000
+
+            extract_ratings(mock_session, "2026/10/05", {"n1"}, is_fallback=False)
+        finally:
+            settings.USE_DUMMY_DATA = original
+
+        mock_swap.assert_called_once()
+
+    @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._swap_ratings_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk_with_dedup_fallback")
+    @patch("birdxplorer_etl.extract_ecs._verify_staging_row_count")
+    @patch("birdxplorer_etl.extract_ecs._process_rating_rows")
+    @patch("birdxplorer_etl.extract_ecs._create_staging_table")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_guard_fires_on_a_fallback_load(
+        self,
+        mock_requests: MagicMock,
+        mock_create: MagicMock,
+        mock_process: MagicMock,
+        mock_verify: MagicMock,
+        mock_fallback: MagicMock,
+        mock_swap: MagicMock,
+        mock_cleanup: MagicMock,
+    ) -> None:
+        import settings
+
+        original = settings.USE_DUMMY_DATA
+        settings.USE_DUMMY_DATA = True
+        try:
+            mock_requests.get.return_value = MagicMock(status_code=200, content=b"noteId\traterParticipantId\n")
+            mock_process.return_value = 1000
+            mock_fallback.return_value = 1000
+
+            mock_session = MagicMock()
+            mock_session.execute.return_value.scalar.return_value = 2000
+
+            with pytest.raises(RuntimeError, match="RATINGS_SNAPSHOT_OLDER_THAN_LIVE"):
+                extract_ratings(mock_session, "2026/10/04", {"n1"}, is_fallback=True)
+        finally:
+            settings.USE_DUMMY_DATA = original
+
+        mock_swap.assert_not_called()
+        mock_cleanup.assert_called_once_with(mock_session)

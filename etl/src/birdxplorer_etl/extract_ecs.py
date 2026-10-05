@@ -1101,7 +1101,11 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
 
         # dedup は PK 構築が UniqueViolation で落ちたときだけ走る(_build_staging_pk_with_dedup_fallback)
         staging_count = _build_staging_pk_with_dedup_fallback(postgresql, total_loaded)
-        # dedup が走った日は行数が減るため、swap 直前の最終確認として意味を持つ
+
+        # フォールバックした日だけ、古いスナップショットでの上書きを防ぐ
+        if is_fallback:
+            _check_not_going_backwards(postgresql, staging_count)
+
         _swap_ratings_table(postgresql, min_rows=min_rows, staging_count=staging_count)
 
         logging.info(f"Rating table swap complete: {staging_count} rows loaded")
@@ -1271,6 +1275,30 @@ def _verify_staging_row_count(postgresql: Session, expected: int) -> int:
         )
     logging.info(f"RATINGS_STAGING_COUNT_VERIFIED rows={actual}")
     return actual
+
+
+def _check_not_going_backwards(postgresql: Session, staging_count: int) -> None:
+    """古いスナップショットで新しい live を上書きしないことを確認する。
+
+    row_note_ratings は全置換のため、フォールバックで過去日を取り込むと、より新しい
+    データを古いデータで上書きしうる。ratings は累積スナップショットで行数がほぼ単調増加
+    するため、行数の比較で後退を検出できる。評価の取り下げによる微減で通常日を止めないよう、
+    この判定はフォールバックした日にだけ呼ぶこと。
+    """
+    live_count = (
+        postgresql.execute(
+            text(
+                "SELECT reltuples::bigint FROM pg_class "
+                "WHERE relname='row_note_ratings' AND relnamespace = current_schema()::regnamespace"
+            )
+        ).scalar()
+        or 0
+    )
+    if live_count > 0 and staging_count < live_count:
+        raise RuntimeError(
+            f"RATINGS_SNAPSHOT_OLDER_THAN_LIVE staging={staging_count} live={live_count} "
+            "フォールバックで取り込んだスナップショットが現在のデータより古い。swap を中止する。"
+        )
 
 
 def _build_staging_pk(postgresql: Session) -> None:
