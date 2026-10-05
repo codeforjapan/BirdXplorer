@@ -122,6 +122,25 @@ ratings フェーズ自体が3〜4時間なので、全滅時の総実行時間�
 
 `probe` と `sleep` を注入可能にするのは、テストで HTTP も実時間の待機も使わないため。
 
+**プローブが例外を投げた場合（接続断など）はフォールバックしない。**例外をそのまま伝播させ、
+そのフェーズを失敗させる。404（未公開）とネットワーク障害は別物で、後者で前日に流れると
+ratings のフルスワップ込みで前日分を丸ごと再処理して1時間規模を浪費する。
+既存テスト `test_fetch_failure_does_not_fall_back_to_the_previous_day` が固定している契約であり、維持する。
+
+このため**日付解決はフェーズの内側で行う**。`_run_phase` の外で解決すると、解決中の例外が
+Backfill / NoteRequests まで巻き添えにする。各フェーズは次の形になる。
+
+```python
+def _run_notes_phase(postgresql: Session, existing_row_note_ids: set, now: datetime) -> None:
+    date_string = _resolve_snapshot_date("notes", now)
+    if date_string is None:
+        raise RuntimeError(f"SNAPSHOT_UNAVAILABLE kind=notes ...")
+    _extract_notes_files(postgresql, date_string, existing_row_note_ids)
+```
+
+日付解決が不要になるため、`_extract_notes_files` の第4引数 `state`（`date_has_notes`）は削除する。
+この引数を参照しているのは `extract_data` のループだけで、テストからの参照はない。
+
 ### `extract_data` の組み替え
 
 現在の `for days_ago in range(3)` ループと `notes_state["date_has_notes"]` による分岐を廃止し、
