@@ -1699,3 +1699,45 @@ class TestExtractRatingsBackwardsGuard:
 
         mock_swap.assert_not_called()
         mock_cleanup.assert_called_once_with(mock_session)
+
+    @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._swap_ratings_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk_with_dedup_fallback")
+    @patch("birdxplorer_etl.extract_ecs._verify_staging_row_count")
+    @patch("birdxplorer_etl.extract_ecs._process_rating_rows")
+    @patch("birdxplorer_etl.extract_ecs._create_staging_table")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_guard_skips_when_live_estimate_unavailable(
+        self,
+        mock_requests: MagicMock,
+        mock_create: MagicMock,
+        mock_process: MagicMock,
+        mock_verify: MagicMock,
+        mock_fallback: MagicMock,
+        mock_swap: MagicMock,
+        mock_cleanup: MagicMock,
+    ) -> None:
+        """live テーブルの stats が無い場合は後退判定をスキップして swap に進む。
+
+        reltuples が 0 や -1 の場合、他の防衛線（COPY の厳密一致、min_rows）が機能するため
+        安全。ただし本当に古いデータなら、いずれかで落ちる。
+        """
+        import settings
+
+        original = settings.USE_DUMMY_DATA
+        settings.USE_DUMMY_DATA = True
+        try:
+            mock_requests.get.return_value = MagicMock(status_code=200, content=b"noteId\traterParticipantId\n")
+            mock_process.return_value = 1000
+            mock_fallback.return_value = 1000
+
+            mock_session = MagicMock()
+            # live_count が 0 のシナリオ（ANALYZE されていない、または最初の swap）
+            mock_session.execute.return_value.scalar.return_value = 0
+
+            extract_ratings(mock_session, "2026/10/04", {"n1"}, is_fallback=True)
+        finally:
+            settings.USE_DUMMY_DATA = original
+
+        # swap が呼ばれること（ガードはスキップしても swap に進む）
+        mock_swap.assert_called_once()

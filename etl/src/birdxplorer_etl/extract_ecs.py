@@ -1294,7 +1294,14 @@ def _check_not_going_backwards(postgresql: Session, staging_count: int) -> None:
         ).scalar()
         or 0
     )
-    if live_count > 0 and staging_count < live_count:
+    if live_count <= 0:
+        # reltuples が取れない（table が未分析、または CREATE UNLOGGED → DROP 後の残骸）場合、
+        # 本当に空なのか単に stats が古いのかは区別できない。この場合、後退検出はできず、
+        # 他の防衛線（COPY の厳密一致 _verify_staging_row_count、min_rows の 50% ガード）が
+        # 動く。フォールバックで本当に古いデータなら、いずれかのガードで落ちる。
+        logging.warning(f"Snapshot backwards check skipped: live table estimate unavailable, loaded {staging_count}")
+        return
+    if staging_count < live_count:
         raise RuntimeError(
             f"RATINGS_SNAPSHOT_OLDER_THAN_LIVE staging={staging_count} live={live_count} "
             "フォールバックで取り込んだスナップショットが現在のデータより古い。swap を中止する。"
