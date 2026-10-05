@@ -1130,7 +1130,7 @@ class TestExtractDataPhaseIsolation:
         """ratings だけ当日、status は前日、という混在が起き得ること。"""
         today = datetime.now().strftime("%Y/%m/%d")
         yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y/%m/%d")
-        mock_resolve.side_effect = lambda kind, base, **_: {
+        mock_resolve.side_effect = lambda kind, base: {
             "notes": today,
             "noteRatings": today,
             "noteStatusHistory": yesterday,
@@ -1164,7 +1164,7 @@ class TestExtractDataPhaseIsolation:
     ) -> None:
         today = datetime.now().strftime("%Y/%m/%d")
         yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y/%m/%d")
-        mock_resolve.side_effect = lambda kind, base, **_: yesterday if kind == "noteRatings" else today
+        mock_resolve.side_effect = lambda kind, base: yesterday if kind == "noteRatings" else today
 
         mock_session = MagicMock()
         mock_session.query.return_value.all.return_value = []
@@ -1191,7 +1191,7 @@ class TestExtractDataPhaseIsolation:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """ratings が全滅しても Backfill / NoteRequests は走ること。"""
-        mock_resolve.side_effect = lambda kind, base, **_: None if kind == "noteRatings" else "2026/10/05"
+        mock_resolve.side_effect = lambda kind, base: None if kind == "noteRatings" else "2026/10/05"
 
         mock_session = MagicMock()
         mock_session.query.return_value.all.return_value = []

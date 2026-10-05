@@ -289,13 +289,19 @@ def _resolve_snapshot_date(
     kind: str,
     base: datetime,
     *,
-    probe: Callable[[str, str], bool] = _probe_snapshot,
-    sleep: Callable[[float], None] = time.sleep,
+    probe: Optional[Callable[[str, str], bool]] = None,
+    sleep: Optional[Callable[[float], None]] = None,
 ) -> Optional[str]:
     """当日→リトライ→過去日 の順にスナップショットの日付を解決する。全滅なら None。
 
     リトライは当日分にだけ掛ける。過去日は公開済みか否かが確定しており、待つ意味がない。
+
+    probe/sleep の既定値はここで（呼び出し時に）解決する。デフォルト引数として直接
+    `= _probe_snapshot` のように束縛すると、その参照は定義時に固定され、
+    `@patch("...._probe_snapshot")` で module 属性を差し替えてもここには反映されない。
     """
+    probe = probe or _probe_snapshot
+    sleep = sleep or time.sleep
     today = base.strftime("%Y/%m/%d")
     if probe(kind, today):
         return today
@@ -317,17 +323,14 @@ def _resolve_snapshot_date(
 
 
 def _run_notes_phase(postgresql: Session, existing_row_note_ids: set, now: datetime) -> None:
-    # probe を明示的に渡す: _resolve_snapshot_date のデフォルト引数は定義時に束縛されるため、
-    # ここで省略すると @patch("birdxplorer_etl.extract_ecs._probe_snapshot") が効かず、
-    # テストが実際の ton.twimg.com へ HTTP を発行してしまう。
-    date_string = _resolve_snapshot_date("notes", now, probe=_probe_snapshot)
+    date_string = _resolve_snapshot_date("notes", now)
     if date_string is None:
         raise RuntimeError("SNAPSHOT_UNAVAILABLE kind=notes")
     _extract_notes_files(postgresql, date_string, existing_row_note_ids)
 
 
 def _run_ratings_phase(postgresql: Session, existing_row_note_ids: set, now: datetime) -> None:
-    date_string = _resolve_snapshot_date("noteRatings", now, probe=_probe_snapshot)
+    date_string = _resolve_snapshot_date("noteRatings", now)
     if date_string is None:
         raise RuntimeError("SNAPSHOT_UNAVAILABLE kind=noteRatings")
     is_fallback = date_string != now.strftime("%Y/%m/%d")
@@ -335,7 +338,7 @@ def _run_ratings_phase(postgresql: Session, existing_row_note_ids: set, now: dat
 
 
 def _run_status_phase(postgresql: Session, existing_row_note_ids: set, now: datetime) -> None:
-    date_string = _resolve_snapshot_date("noteStatusHistory", now, probe=_probe_snapshot)
+    date_string = _resolve_snapshot_date("noteStatusHistory", now)
     if date_string is None:
         raise RuntimeError("SNAPSHOT_UNAVAILABLE kind=noteStatusHistory")
     _extract_note_status_files(postgresql, date_string, existing_row_note_ids)
