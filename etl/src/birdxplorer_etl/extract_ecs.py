@@ -281,9 +281,7 @@ def _probe_snapshot(kind: str, date_string: str) -> bool:
     例外は握りつぶさない。404(未公開)とネットワーク障害は別物で、後者で前日に流れると
     ratings のフルスワップ込みで前日分を丸ごと再処理して1時間規模を浪費する。
     """
-    url = (
-        f"https://ton.twimg.com/birdwatch-public-data/{date_string}/{kind}/{_SNAPSHOT_FIRST_FILE[kind]}"
-    )
+    url = f"https://ton.twimg.com/birdwatch-public-data/{date_string}/{kind}/{_SNAPSHOT_FIRST_FILE[kind]}"
     return requests.head(url).status_code == 200
 
 

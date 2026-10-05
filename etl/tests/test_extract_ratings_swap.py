@@ -1519,9 +1519,7 @@ class TestProbeSnapshot:
             mock_requests.head.return_value = MagicMock(status_code=200)
             assert _probe_snapshot("noteRatings", "2026/10/05") is True
         url = mock_requests.head.call_args[0][0]
-        assert url == (
-            "https://ton.twimg.com/birdwatch-public-data/2026/10/05/noteRatings/ratings-00000.zip"
-        )
+        assert url == "https://ton.twimg.com/birdwatch-public-data/2026/10/05/noteRatings/ratings-00000.zip"
 
     def test_returns_false_on_404(self) -> None:
         with patch("birdxplorer_etl.extract_ecs.requests") as mock_requests:
