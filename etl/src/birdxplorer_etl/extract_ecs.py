@@ -273,6 +273,19 @@ _SNAPSHOT_FIRST_FILE = {
 _SNAPSHOT_RETRY_INTERVAL_SECONDS = 600
 _SNAPSHOT_MAX_RETRIES = 6
 _SNAPSHOT_MAX_FALLBACK_DAYS = 3
+# HEAD/GET の接続待ち上限。半開ソケットに当たると requests はデフォルトで無期限に待つ。
+# この設計の中で唯一の無制限待機になる箇所なので、必ず上限を付ける。
+_SNAPSHOT_PROBE_TIMEOUT_SECONDS = 30
+
+
+def _snapshot_file_url(kind: str, date_string: str, file_index: int) -> str:
+    """kind ファミリーの file_index 番目のファイル URL を組み立てる。
+
+    _probe_snapshot(常に index 0 を見る)と ratings のシャード欠番チェック(任意の index を見る)が
+    URL の組み立てを別々に持たないよう、ここに一本化する。
+    """
+    prefix = _SNAPSHOT_FIRST_FILE[kind].removesuffix("-00000.zip")
+    return f"https://ton.twimg.com/birdwatch-public-data/{date_string}/{kind}/{prefix}-{file_index:05d}.zip"
 
 
 def _probe_snapshot(kind: str, date_string: str) -> bool:
@@ -281,8 +294,35 @@ def _probe_snapshot(kind: str, date_string: str) -> bool:
     例外は握りつぶさない。404(未公開)とネットワーク障害は別物で、後者で前日に流れると
     ratings のフルスワップ込みで前日分を丸ごと再処理して1時間規模を浪費する。
     """
-    url = f"https://ton.twimg.com/birdwatch-public-data/{date_string}/{kind}/{_SNAPSHOT_FIRST_FILE[kind]}"
-    return requests.head(url).status_code == 200
+    url = _snapshot_file_url(kind, date_string, 0)
+    return requests.head(url, timeout=_SNAPSHOT_PROBE_TIMEOUT_SECONDS).status_code == 200
+
+
+def _probe_ratings_shard(date_string: str, file_index: int) -> bool:
+    """ratings の file_index 番目のシャードが公開されているかを HEAD で確認する。
+
+    X のシャードは公開順がバラバラで ratings-00000 が最後に揃うとは限らない。
+    extract_ratings の 404 判定が「シャードの欠番」を「ファミリー全体の終端」と
+    取り違えないための先読み専用。_probe_snapshot と同じ URL の組み立てを使う。
+    """
+    url = _snapshot_file_url("noteRatings", date_string, file_index)
+    return requests.head(url, timeout=_SNAPSHOT_PROBE_TIMEOUT_SECONDS).status_code == 200
+
+
+def _check_ratings_shard_listing_complete(date_string: str, missing_index: int) -> list[int]:
+    """missing_index の直後2つのシャードのうち、実在するものの番号を返す。
+
+    空リストなら両方とも存在せず、missing_index が本当の終端だと確認できたことを意味する。
+    1つでも存在すれば、シャードの公開がまだ進行中で、この 404 は歯抜けに過ぎない。
+    """
+    return [idx for idx in (missing_index + 1, missing_index + 2) if _probe_ratings_shard(date_string, idx)]
+
+
+def _snapshot_tried_range(base: datetime) -> str:
+    """全滅時のログ/例外メッセージに使う `tried=<当日>..<最古の候補日>` の範囲文字列。"""
+    today = base.strftime("%Y/%m/%d")
+    oldest = (base - timedelta(days=_SNAPSHOT_MAX_FALLBACK_DAYS)).strftime("%Y/%m/%d")
+    return f"{today}..{oldest}"
 
 
 def _resolve_snapshot_date(
@@ -299,17 +339,33 @@ def _resolve_snapshot_date(
     probe/sleep の既定値はここで（呼び出し時に）解決する。デフォルト引数として直接
     `= _probe_snapshot` のように束縛すると、その参照は定義時に固定され、
     `@patch("...._probe_snapshot")` で module 属性を差し替えてもここには反映されない。
+
+    当日のリトライ中に起きた例外(接続断など)は 404 と同じ扱いでリトライする(同じ間隔・
+    同じ回数)。最初の1回だけは別で、ここで起きた例外はまだ待機に入っていないため即座に
+    伝播させる。リトライを使い切り、最後の試行が例外で終わった場合は、フォールバックせず
+    その例外をそのまま送出する。接続障害で前日に流れると ratings のフルスワップ込みで
+    前日分を丸ごと再処理して1時間規模を浪費するため。過去日の探索中に起きた例外は
+    リトライせず即座に伝播させる(既存契約の維持)。
     """
     probe = probe or _probe_snapshot
     sleep = sleep or time.sleep
     today = base.strftime("%Y/%m/%d")
     if probe(kind, today):
         return today
+
+    last_exception: Optional[Exception] = None
     for attempt in range(1, _SNAPSHOT_MAX_RETRIES + 1):
         logging.info(f"SNAPSHOT_WAITING kind={kind} attempt={attempt}/{_SNAPSHOT_MAX_RETRIES} date={today}")
         sleep(_SNAPSHOT_RETRY_INTERVAL_SECONDS)
-        if probe(kind, today):
-            return today
+        try:
+            if probe(kind, today):
+                return today
+            last_exception = None
+        except Exception as e:
+            last_exception = e
+
+    if last_exception is not None:
+        raise last_exception
 
     for days_ago in range(1, _SNAPSHOT_MAX_FALLBACK_DAYS + 1):
         candidate = (base - timedelta(days=days_ago)).strftime("%Y/%m/%d")
@@ -317,30 +373,34 @@ def _resolve_snapshot_date(
             logging.warning(f"SNAPSHOT_FALLBACK kind={kind} requested={today} resolved={candidate}")
             return candidate
 
-    oldest = (base - timedelta(days=_SNAPSHOT_MAX_FALLBACK_DAYS)).strftime("%Y/%m/%d")
-    logging.error(f"SNAPSHOT_UNAVAILABLE kind={kind} tried={today}..{oldest}")
+    logging.error(f"SNAPSHOT_UNAVAILABLE kind={kind} tried={_snapshot_tried_range(base)}")
     return None
 
 
 def _run_notes_phase(postgresql: Session, existing_row_note_ids: set, now: datetime) -> None:
+    # 解決待ちは最大1時間ブロックしうる。セッションが read transaction を握ったまま待つと
+    # xmin horizon が固定されて autovacuum を妨げるため、待機に入る前に手放す。
+    postgresql.rollback()
     date_string = _resolve_snapshot_date("notes", now)
     if date_string is None:
-        raise RuntimeError("SNAPSHOT_UNAVAILABLE kind=notes")
+        raise RuntimeError(f"SNAPSHOT_UNAVAILABLE kind=notes tried={_snapshot_tried_range(now)}")
     _extract_notes_files(postgresql, date_string, existing_row_note_ids)
 
 
 def _run_ratings_phase(postgresql: Session, existing_row_note_ids: set, now: datetime) -> None:
+    postgresql.rollback()
     date_string = _resolve_snapshot_date("noteRatings", now)
     if date_string is None:
-        raise RuntimeError("SNAPSHOT_UNAVAILABLE kind=noteRatings")
+        raise RuntimeError(f"SNAPSHOT_UNAVAILABLE kind=noteRatings tried={_snapshot_tried_range(now)}")
     is_fallback = date_string != now.strftime("%Y/%m/%d")
     extract_ratings(postgresql, date_string, existing_row_note_ids, is_fallback=is_fallback)
 
 
 def _run_status_phase(postgresql: Session, existing_row_note_ids: set, now: datetime) -> None:
+    postgresql.rollback()
     date_string = _resolve_snapshot_date("noteStatusHistory", now)
     if date_string is None:
-        raise RuntimeError("SNAPSHOT_UNAVAILABLE kind=noteStatusHistory")
+        raise RuntimeError(f"SNAPSHOT_UNAVAILABLE kind=noteStatusHistory tried={_snapshot_tried_range(now)}")
     _extract_note_status_files(postgresql, date_string, existing_row_note_ids)
 
 
@@ -355,15 +415,22 @@ def extract_data(postgresql: Session):
 
     # 日付解決はフェーズの内側で行う。_run_phase の外で解決すると、解決中の例外が
     # Backfill / NoteRequests まで巻き添えにする。
-    _run_phase("Notes", postgresql, lambda: _run_notes_phase(postgresql, existing_row_note_ids, now))
+    notes_ok = _run_phase("Notes", postgresql, lambda: _run_notes_phase(postgresql, existing_row_note_ids, now))
 
-    # 評価データを取得して保存（noteStatus処理より先に実行することで集計タイミングを保証）
-    _run_phase("Ratings", postgresql, lambda: _run_ratings_phase(postgresql, existing_row_note_ids, now))
+    if notes_ok:
+        # Notes が失敗した日に Ratings の全置換 swap を走らせると、existing_row_note_ids が
+        # その日の新規ノートを含まないまま unknown_note としてふるい落とし、
+        # recalculate_rating_counts がそのぶん低い集計値を全ノートに書き込んでしまう。
+        # 旧実装(839af64 より前)と同じく、Notes が失敗した日は Ratings/Rating recalculation/
+        # Status をまとめてスキップする(Backfill/NoteRequests は常に走らせる)。
 
-    # notesテーブルの評価集計カラムを再計算
-    _run_phase("Rating recalculation", postgresql, lambda: recalculate_rating_counts(postgresql))
+        # 評価データを取得して保存（noteStatus処理より先に実行することで集計タイミングを保証）
+        _run_phase("Ratings", postgresql, lambda: _run_ratings_phase(postgresql, existing_row_note_ids, now))
 
-    _run_phase("Status", postgresql, lambda: _run_status_phase(postgresql, existing_row_note_ids, now))
+        # notesテーブルの評価集計カラムを再計算
+        _run_phase("Rating recalculation", postgresql, lambda: recalculate_rating_counts(postgresql))
+
+        _run_phase("Status", postgresql, lambda: _run_status_phase(postgresql, existing_row_note_ids, now))
 
     postgresql.commit()
 
@@ -394,7 +461,10 @@ def _extract_notes_files(postgresql: Session, dateString: str, existing_row_note
 
         if res.status_code == 404:
             if file_index == 0:
-                logging.info(f"No notes data available for {dateString}, trying previous day")
+                # 前日フォールバックは _resolve_snapshot_date が事前に行う。ここに来る時点で
+                # dateString は公開確認済みのはずなので、この 404 は取得対象が無いことだけを
+                # 意味し、別の日付を試すことはしない。
+                logging.info(f"No notes data available for {dateString} (404 on the first file), nothing to fetch")
             else:
                 logging.info(f"Notes file {file_index:05d} not found (404), stopping notes download for {dateString}")
             break
@@ -1001,6 +1071,12 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
     try:
         # ratings-00000.zip から順に404が返るまでダウンロード
         file_index = 0
+        # シャードは公開順がバラバラで ratings-00000 が最後に揃うとは限らない。404 をそのまま
+        # 終端と見なすと、まだ公開中の後続シャードを欠いた部分スナップショットを取り込んでしまう。
+        # 404 に当たるたびに直後2つを HEAD で確認し、どちらか存在すれば「歯抜け」と判断して
+        # リトライする(これは notes/noteStatusHistory には適用しない。upsert なので部分取り込みが
+        # 何も破壊しないが、ratings は全置換なので歯抜けがそのまま swap されうる)。
+        shard_listing_retries = 0
         while True:
             if settings.USE_DUMMY_DATA:
                 ratings_url = (
@@ -1021,10 +1097,28 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
                 continue
 
             if res.status_code == 404:
-                logging.info(
-                    f"Ratings file {file_index:05d} not found (404), stopping ratings download for {dateString}"
+                found_beyond = _check_ratings_shard_listing_complete(dateString, file_index)
+                if not found_beyond:
+                    logging.info(
+                        f"Ratings file {file_index:05d} not found (404), stopping ratings download for {dateString}"
+                    )
+                    break
+
+                found_beyond_fmt = [f"{idx:05d}" for idx in found_beyond]
+                if shard_listing_retries >= _SNAPSHOT_MAX_RETRIES:
+                    raise RuntimeError(
+                        f"RATINGS_SHARD_LISTING_INCOMPLETE date={dateString} missing={file_index:05d} "
+                        f"found_beyond={found_beyond_fmt} after {_SNAPSHOT_MAX_RETRIES} retries; "
+                        "aborting rather than swapping a partial ratings snapshot"
+                    )
+                shard_listing_retries += 1
+                logging.warning(
+                    f"Ratings shard {file_index:05d} missing for {dateString} but {found_beyond_fmt} exist "
+                    "beyond it; the family is still being published. Waiting before retrying "
+                    f"(attempt {shard_listing_retries}/{_SNAPSHOT_MAX_RETRIES})"
                 )
-                break
+                time.sleep(_SNAPSHOT_RETRY_INTERVAL_SECONDS)
+                continue
 
             if res.status_code != 200:
                 logging.warning(
@@ -1059,6 +1153,9 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
             except Exception as e:
                 logging.error(f"Error processing ratings data for {dateString} file {file_index:05d}: {e}")
                 raise
+
+            # シャードが見つかったので、以降の欠番検知のためにリトライ回数をリセットする
+            shard_listing_retries = 0
 
             # ダミーデータの場合は1ファイルのみなのでループを抜ける
             if settings.USE_DUMMY_DATA:
@@ -1277,6 +1374,13 @@ def _verify_staging_row_count(postgresql: Session, expected: int) -> int:
     return actual
 
 
+# live_count は reltuples(プランナ推定値)で、_swap_ratings_table の `ALTER TABLE ... SET LOGGED`
+# がヒープを書き換えるため実カウントからわずかにずれる。許容誤差ゼロだと、真のカウントが
+# live と同じスナップショットでも誤差だけで数時間がかりのロードを中止してしまうため、
+# 2% の許容誤差を設ける。
+_RATINGS_BACKWARDS_SLACK = 0.98
+
+
 def _check_not_going_backwards(postgresql: Session, staging_count: int) -> None:
     """古いスナップショットで新しい live を上書きしないことを確認する。
 
@@ -1284,6 +1388,8 @@ def _check_not_going_backwards(postgresql: Session, staging_count: int) -> None:
     データを古いデータで上書きしうる。ratings は累積スナップショットで行数がほぼ単調増加
     するため、行数の比較で後退を検出できる。評価の取り下げによる微減で通常日を止めないよう、
     この判定はフォールバックした日にだけ呼ぶこと。
+
+    live_count は推定値なので _RATINGS_BACKWARDS_SLACK ぶんの許容誤差を見る。
     """
     live_count = (
         postgresql.execute(
@@ -1299,9 +1405,9 @@ def _check_not_going_backwards(postgresql: Session, staging_count: int) -> None:
         # 本当に空なのか単に stats が古いのかは区別できない。この場合、後退検出はできず、
         # 他の防衛線（COPY の厳密一致 _verify_staging_row_count、min_rows の 50% ガード）が
         # 動く。フォールバックで本当に古いデータなら、いずれかのガードで落ちる。
-        logging.warning(f"Snapshot backwards check skipped: live table estimate unavailable, loaded {staging_count}")
+        logging.warning(f"RATINGS_BACKWARDS_CHECK_SKIPPED live table estimate unavailable, loaded {staging_count}")
         return
-    if staging_count < live_count:
+    if staging_count < live_count * _RATINGS_BACKWARDS_SLACK:
         raise RuntimeError(
             f"RATINGS_SNAPSHOT_OLDER_THAN_LIVE staging={staging_count} live={live_count} "
             "フォールバックで取り込んだスナップショットが現在のデータより古い。swap を中止する。"
