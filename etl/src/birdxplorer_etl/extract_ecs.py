@@ -1163,11 +1163,25 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
 
             file_index += 1
 
-        if total_loaded == 0:
-            logging.warning("No ratings loaded, skipping table swap")
-            _cleanup_staging_table(postgresql)
-            return
+    except Exception as e:
+        logging.error(f"Rating extraction failed, cleaning up staging table: {e}")
+        _cleanup_staging_table(postgresql)
+        raise
 
+    if total_loaded == 0:
+        logging.warning("No ratings loaded, skipping table swap")
+        _cleanup_staging_table(postgresql)
+        # 歯抜け検知があっても、retry と3日分のフォールバックを使い切って1シャードも
+        # ロードできない日はありうる。ここで黙って return すると swap がスキップされた
+        # まま _run_phase が [PHASE_COMPLETE] を記録し、アラームも鳴らない
+        # ——このブランチが潰そうとしていた「サイレントスキップ」そのものになる。
+        # 呼び出し元(_run_phase)に例外として伝え、EXTRACT_PHASE_FAILED を鳴らす。
+        raise RuntimeError(
+            f"RATINGS_NO_SHARDS_LOADED date={dateString} "
+            "ratings シャードを1件もロードできなかった。swap を中止する。"
+        )
+
+    try:
         # 最低行数: 現在テーブルの推定行数の50%（COUNT(*)はタイムアウトするのでreltuples使用）
         # reltuples はANALYZE未実行時に-1を返すため、その場合はtotal_loadedをフォールバックとして使用
         # （この時点では dedup 前なので staging_count はまだ確定しておらず total_loaded しかない）
@@ -1377,8 +1391,18 @@ def _verify_staging_row_count(postgresql: Session, expected: int) -> int:
 # live_count は reltuples(プランナ推定値)で、_swap_ratings_table の `ALTER TABLE ... SET LOGGED`
 # がヒープを書き換えるため実カウントからわずかにずれる。許容誤差ゼロだと、真のカウントが
 # live と同じスナップショットでも誤差だけで数時間がかりのロードを中止してしまうため、
-# 2% の許容誤差を設ける。
-_RATINGS_BACKWARDS_SLACK = 0.98
+# わずかな許容誤差を設ける。
+#
+# 実測: live テーブルは 217,924,158 → 218,398,084 行(2日間)で、1日あたり約0.11%の増加。
+# このブランチが許す最深のフォールバック(3日前)でも live比で約0.33%下回るだけで、旧来の
+# 2% 許容ではこの範囲を常に吸収してしまい、ガードが対象とするどのフォールバックに対しても
+# 発火しなかった(後退を検知するには約18日分のレグレッションが必要だった)。
+# また reltuples は _build_staging_pk が CREATE INDEX を張った直後の値で、ANALYZE 由来の粗い
+# 推定ではなく実質的に正確なため、誤差を吸収する許容をここまで広げる必要はない。
+#
+# 許容を1日分の増加率(約0.11%)より広げると、このガードは対象の後退を検知できなくなり
+# 静かに無効化される。次に広げる前に、必ず live テーブルの実測増加率を取り直すこと。
+_RATINGS_BACKWARDS_SLACK = 0.9995
 
 
 def _check_not_going_backwards(postgresql: Session, staging_count: int) -> None:

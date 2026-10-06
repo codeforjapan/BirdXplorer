@@ -647,7 +647,8 @@ class TestExtractRatingsVerifiesStagingCount:
         mock_verify: MagicMock,
         mock_cleanup: MagicMock,
     ) -> None:
-        """total_loaded == 0 の日は検証もせず正常に抜ける（既存挙動を壊さない）。"""
+        """total_loaded == 0 の日は検証もせず、staging を片付けたうえで
+        RATINGS_NO_SHARDS_LOADED を送出する(サイレント成功にはしない)。"""
         import settings
 
         original = settings.USE_DUMMY_DATA
@@ -658,7 +659,8 @@ class TestExtractRatingsVerifiesStagingCount:
             mock_requests.get.return_value = response
 
             mock_session = MagicMock()
-            extract_ratings(mock_session, "2026/09/29", {"n1"})
+            with pytest.raises(RuntimeError, match="RATINGS_NO_SHARDS_LOADED"):
+                extract_ratings(mock_session, "2026/09/29", {"n1"})
         finally:
             settings.USE_DUMMY_DATA = original
 
@@ -703,7 +705,7 @@ class TestExtractRatingsErrorRecovery:
         mock_create: MagicMock,
         mock_cleanup: MagicMock,
     ) -> None:
-        """データがロードされなかった場合にcleanupしてreturnする"""
+        """データがロードされなかった場合にcleanupしたうえで例外を送出する(サイレント成功にしない)"""
         import settings
 
         settings.USE_DUMMY_DATA = False
@@ -713,7 +715,8 @@ class TestExtractRatingsErrorRecovery:
 
         mock_session = MagicMock()
 
-        extract_ratings(mock_session, "2026/03/01", {"n1"})
+        with pytest.raises(RuntimeError, match="RATINGS_NO_SHARDS_LOADED"):
+            extract_ratings(mock_session, "2026/03/01", {"n1"})
 
         mock_cleanup.assert_called_once_with(mock_session)
 
@@ -1821,16 +1824,17 @@ class TestCheckRatingsShardListingComplete:
 class TestNotGoingBackwards:
     """フォールバック時に、古いスナップショットで新しい live を上書きしないこと。
 
-    live_count は reltuples(推定値)なので、2% までの下振れは許容する。
+    live_count は reltuples(推定値)だが、_build_staging_pk の CREATE INDEX 直後に
+    取得されるため実質正確。許容する下振れは 0.05%(_RATINGS_BACKWARDS_SLACK)のみ。
     """
 
     LIVE = 1_000_000
 
-    def test_raises_when_staging_is_more_than_two_percent_below_live(self) -> None:
+    def test_raises_when_staging_is_far_below_live(self) -> None:
         session = MagicMock()
         session.execute.return_value.scalar.return_value = self.LIVE
         with pytest.raises(RuntimeError, match="RATINGS_SNAPSHOT_OLDER_THAN_LIVE"):
-            _check_not_going_backwards(session, 970_000)  # 3% 下回る
+            _check_not_going_backwards(session, 970_000)  # 3% 下回る(0.05%スラックを大きく超える)
 
     def test_passes_when_staging_is_equal_or_larger(self) -> None:
         session = MagicMock()
@@ -1838,13 +1842,26 @@ class TestNotGoingBackwards:
         _check_not_going_backwards(session, self.LIVE)
         _check_not_going_backwards(session, self.LIVE + 2000)
 
-    def test_passes_within_two_percent_slack(self) -> None:
+    def test_passes_within_slack(self) -> None:
         """live は reltuples という推定値で、_swap_ratings_table の SET LOGGED が
-        ヒープを書き換えるぶん実カウントからずれうる。1% の下振れでは中止しない。
+        ヒープを書き換えるぶん実カウントからずれうる。0.05% 未満の下振れでは中止しない。
         """
         session = MagicMock()
         session.execute.return_value.scalar.return_value = self.LIVE
-        _check_not_going_backwards(session, 990_000)  # 1% 下回るが許容範囲内
+        _check_not_going_backwards(session, 999_600)  # 0.04% 下回るが許容範囲内
+
+    def test_raises_on_one_days_growth_shortfall(self) -> None:
+        """実測: live テーブルは2日で 217,924,158 → 218,398,084 行(1日あたり約0.11%増)。
+
+        フォールバックで1日分巻き戻ったスナップショットは、0.05%スラックでは吸収できず
+        中止しなければならない(旧来の2%スラックではこの範囲が常に通ってしまい、
+        このガードが対象とするどのフォールバックに対しても発火しなかった)。
+        """
+        session = MagicMock()
+        live = 218_398_084
+        session.execute.return_value.scalar.return_value = live
+        with pytest.raises(RuntimeError, match="RATINGS_SNAPSHOT_OLDER_THAN_LIVE"):
+            _check_not_going_backwards(session, 218_158_000)  # 約0.11%下回る(1日分の増加相当)
 
     def test_error_message_contains_both_numbers(self) -> None:
         session = MagicMock()
