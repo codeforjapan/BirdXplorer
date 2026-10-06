@@ -75,9 +75,11 @@ ratings に到達する時刻が約40分前倒しになった。
 | 日付の決め方 | notes / noteRatings / noteStatusHistory が**それぞれ独立に**決める |
 | リトライ | 当日分のみ。10分間隔 × 最大6回（1種あたり最大1時間） |
 | フォールバック | 最大3日前まで。過去日はリトライせず1回ずつ試す |
-| 後退防止 | ratings で**フォールバックしたときだけ**、staging < live なら swap 中止 |
+| 後退防止 | ratings で**フォールバックしたときだけ**、staging < live × 0.9995 なら swap 中止 |
 | 全滅時 | 例外を投げ、既存の `EXTRACT_PHASE_FAILED` アラームに乗せる |
 | cdk 変更 | 不要 |
+
+実装中に加わった決定は「実装時に加わった決定」の節にまとめてある。
 
 ## 設計
 
@@ -170,7 +172,7 @@ ratings と status がそれを使う順序も維持する。
 
 ```
 解決した日付が当日    → 既存の min_rows ガードのみ
-解決した日付が過去日  → 加えて staging_count >= live_count を要求。下回れば swap 中止
+解決した日付が過去日  → 加えて staging_count >= live_count * 0.9995 を要求。下回れば swap 中止
 ```
 
 `live_count` は `pg_class.reltuples`（既存の `min_rows` 算出で使っているもの）を流用する。
@@ -178,12 +180,56 @@ ratings と status がそれを使う順序も維持する。
 **判定に使う `staging_count` は dedup 後の値**（`_build_staging_pk_with_dedup_fallback` の戻り値）とし、
 チェックは `_swap_ratings_table` を呼ぶ直前に置く。dedup が走った日に行数が減ることを織り込むため。
 
+**許容誤差は 0.05%（`_RATINGS_BACKWARDS_SLACK = 0.9995`）。**`reltuples` は推定値なので厳密一致にはしない。
+ただし広げすぎるとガードが静かに無効化される: 実測の増加率は 217,924,158 → 218,398,084（2日間）で
+約 0.11%/日、最深のフォールバック（3日前）でも live 比 -0.33% にすぎない。当初 2% を置いたところ
+この範囲を丸ごと吸収してしまい、**対象とするどのフォールバックに対しても発火しない状態だった**
+（後退検知に約18日分のレグレッションが必要）。**1日分の増加率より広げてはいけない。**
+
+推定値の実際の精度は実測済み: 2026-10-06 時点で swap ログの 218,556,095 行に対し `reltuples` は
+218,556,096（誤差1行 = 0.0000%）。staging 側で `CREATE INDEX` と autoanalyze が走った統計が
+rename でそのまま live へ引き継がれるため、`SET LOGGED` のヒープ書き換えを経ても実運用ではずれない。
+
+### シャード終端の判定（実装時に追加）
+
+**この節は当初の設計には無く、実装中の計測で必要になった。**
+
+`extract_ratings` は `ratings-00000` から順に取得し、最初の 404 を終端とみなす。本設計は ETL を
+X の公開窓の中心へ移動させるため、この前提が初めて到達可能になる。シャードは順不同に、
+広い窓をかけて到着するためである（実測）。
+
+```
+2026/10/04  00003 06:03:11 / 00002 06:07:51 / 00000 06:18:42 / 00001 06:32:18   （29分、00000 は3番目）
+2026/10/05  00008 05:54:50 / 00003 06:11:54 / 00001 06:21:55 / 00000 06:27:13 / 00002 06:42:29   （48分、00000 は4番目）
+```
+
+**`ratings-00000` の存在は、そのファミリーが揃っている証拠にならない。**欠損が50%未満なら
+`min_rows` も `_verify_staging_row_count`（COPY の忠実性しか見ない）も通過し、
+**部分スナップショットが無言で live に入る。**直後に `recalculate_rating_counts` がそれで全ノートを書き換える。
+
+対策: 404 を見た時点では終端と断定せず、`k+1` と `k+2` をプローブする。
+
+```
+どちらも 404      → 真の終端。従来どおり break
+いずれかが 200    → リストが未完成。待って同じ index をやり直す（最大 _SNAPSHOT_MAX_RETRIES 回）
+リトライ使い切り  → RATINGS_SHARD_LISTING_INCOMPLETE で中止（部分スナップショットを swap しない）
+```
+
+ratings にのみ適用する。`notes` と `noteStatusHistory` は upsert で、部分取り込みでもデータは
+破壊されず翌日の実行で追いつく。全置換するのは ratings だけである。
+
+**既知の限界**: 先読みは2つ分なので、3つ以上連続した穴は依然として終端と誤認する
+（実測で `00008` と `00003` の間に4つ分の開きがあった）。follow-up。
+
 ### ログトークン
 
 ```
-SNAPSHOT_WAITING     kind=noteRatings attempt=3/6 date=2026/10/05
-SNAPSHOT_FALLBACK    kind=noteRatings requested=2026/10/05 resolved=2026/10/04
-SNAPSHOT_UNAVAILABLE kind=noteRatings tried=2026/10/05..2026/10/02
+SNAPSHOT_WAITING                 kind=noteRatings attempt=3/6 date=2026/10/05
+SNAPSHOT_FALLBACK                kind=noteRatings requested=2026/10/05 resolved=2026/10/04
+SNAPSHOT_UNAVAILABLE             kind=noteRatings tried=2026/10/05..2026/10/02
+RATINGS_SHARD_LISTING_INCOMPLETE 未完成なリストを終端と誤認せず中止した（実装時に追加）
+RATINGS_BACKWARDS_CHECK_SKIPPED  live の推定値が取れず後退ガードを飛ばした（実装時に追加）
+RATINGS_NO_SHARDS_LOADED         1シャードも取り込めなかった（実装時に追加）
 ```
 
 - `SNAPSHOT_WAITING` は、最大1時間の待機中に run が無言にならないために出す。
@@ -222,10 +268,36 @@ SNAPSHOT_UNAVAILABLE kind=noteRatings tried=2026/10/05..2026/10/02
 （PR #298 で `_verify_staging_row_count` を足したときに `test_cleanup_on_swap_failure` が
 巻き込まれたのと同じ構造）。
 
+## 実装時に加わった決定
+
+当初の設計に無く、実装・レビュー中に判明して採用したもの。いずれも理由は本文の各節に記載。
+
+| 決定 | きっかけ |
+|---|---|
+| シャード終端の判定を直す（上記の節） | 計測でシャードが順不同・最大48分かけて到着すると判明 |
+| `probe` / `sleep` の既定値を呼び出し時に解決する | 既定値が定義時に束縛され `@patch` が効かず、テストが実ネットワークを叩き最大1時間 real sleep する状態だった |
+| 当日分リトライ中の例外は再試行する | 1時間の待機中の一時的な接続断で、その日のフェーズが落ちていた。**フォールバック中の例外は従来どおり即伝播**（接続断でフォールバックしない契約は維持） |
+| `requests.head` にタイムアウト | 半開きソケットで無制限に待つ、この設計で唯一縛りの無い待ち時間だった |
+| 日付解決の直前に `postgresql.rollback()` | 最大1時間のスリープを開いたトランザクションの中で行うと xmin horizon が固定され autovacuum が止まる |
+| Notes フェーズが失敗したら Ratings と Status を飛ばす | 書き換えで旧挙動が落ちていた。`existing_row_note_ids` に当日の新規ノートが無いまま ratings を全置換すると、その評価が `unknown_note` で捨てられ、`recalculate_rating_counts` が低い集計値を公開する |
+| `total_loaded == 0` を return から raise へ | warning を出して `[PHASE_COMPLETE]` を記録しており、**本設計が消そうとしている症状そのもの**が残っていた |
+
+### 最悪実行時間（当初の見積もりは誤り）
+
+当初「3種 × 最大1時間 = +3時間」としたが、シャード終端の待ちが**シャードごとにリトライ枠を持つ**ため
+これを超える。9シャードなら最大9時間が積みうる。ratings 自体の3〜4時間と合わせて最悪で約16時間。
+
+実行時間に上限は無く、重複実行を防ぐ advisory lock も無い。24時間を超えた場合、次の run の
+`_create_staging_table` が `DROP TABLE IF EXISTS row_note_ratings_new` を実行し、走行中のロードを壊す。
+実測の待ち時間は5〜24分でありこの最悪値に到達するのは X の公開が大幅に遅れた日に限られるが、
+**上限が無いこと自体が未解決**。follow-up。
+
 ## 範囲外
 
-- 404 以外でシャードを丸ごとスキップする経路（`extract_ecs.py:354/417/940/952/967`）。
-  直近14日で発火実績ゼロ。
-- `extract_ecs.py:968` で `requests.get` が毎回例外だと `file_index` が増え続けて無限ループしうる件。
-- `recalculate_rating_counts` のゼロ落ちと差分ゲート化。
+- 先読みが2シャードのみで、3つ以上連続した穴を終端と誤認する件（上記の既知の限界）。
+- 最悪実行時間に上限が無く、重複実行に対する advisory lock が無い件（上記）。
+- `extract_ecs.py` の `requests.get` の例外ハンドラが同じ index を再試行せず `file_index += 1` する件。
+  新しい終端判定との相互作用が新しい: 落としたシャードは「読み込み済み」に見えるため、
+  終端判定がその穴を検出できない。
+- `recalculate_rating_counts` のゼロ落ちと差分ゲート化。Ratings が失敗した日も走る点を含む。
 - `SNAPSHOT_FALLBACK` のアラーム化（頻度を観測してから判断する）。
