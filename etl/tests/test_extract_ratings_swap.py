@@ -2,7 +2,9 @@ import csv
 import io
 import logging
 import sys
+import zipfile
 from collections import Counter
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,21 +20,41 @@ sys.modules.setdefault("settings", MagicMock())
 
 from birdxplorer_etl.extract_ecs import (  # noqa: E402
     _RATING_COLUMNS,
+    _SNAPSHOT_FIRST_FILE,
+    _SNAPSHOT_MAX_RETRIES,
+    _SNAPSHOT_RETRY_INTERVAL_SECONDS,
     _STAGING_TABLE,
     _build_staging_pk,
     _build_staging_pk_with_dedup_fallback,
+    _check_not_going_backwards,
+    _check_ratings_shard_listing_complete,
     _cleanup_staging_table,
     _create_staging_table,
     _deduplicate_staging_table,
     _iter_lines_without_nul,
+    _probe_ratings_shard,
+    _probe_snapshot,
     _process_rating_rows,
+    _resolve_snapshot_date,
+    _run_notes_phase,
     _run_phase,
+    _run_ratings_phase,
+    _run_status_phase,
+    _snapshot_file_url,
     _swap_ratings_table,
     _validate_rating_row,
     _verify_staging_row_count,
     extract_data,
     extract_ratings,
 )
+
+
+def _ratings_zip(file_index: int, tsv_content: str = "noteId\traterParticipantId\n") -> bytes:
+    """ratings-{file_index}.zip の実体(本文はテストに必要なぶんだけ)を作る。"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(f"ratings-{file_index:05d}.tsv", tsv_content)
+    return buf.getvalue()
 
 
 class TestValidateRatingRow:
@@ -625,7 +647,8 @@ class TestExtractRatingsVerifiesStagingCount:
         mock_verify: MagicMock,
         mock_cleanup: MagicMock,
     ) -> None:
-        """total_loaded == 0 の日は検証もせず正常に抜ける（既存挙動を壊さない）。"""
+        """total_loaded == 0 の日は検証もせず、staging を片付けたうえで
+        RATINGS_NO_SHARDS_LOADED を送出する(サイレント成功にはしない)。"""
         import settings
 
         original = settings.USE_DUMMY_DATA
@@ -636,7 +659,8 @@ class TestExtractRatingsVerifiesStagingCount:
             mock_requests.get.return_value = response
 
             mock_session = MagicMock()
-            extract_ratings(mock_session, "2026/09/29", {"n1"})
+            with pytest.raises(RuntimeError, match="RATINGS_NO_SHARDS_LOADED"):
+                extract_ratings(mock_session, "2026/09/29", {"n1"})
         finally:
             settings.USE_DUMMY_DATA = original
 
@@ -681,7 +705,7 @@ class TestExtractRatingsErrorRecovery:
         mock_create: MagicMock,
         mock_cleanup: MagicMock,
     ) -> None:
-        """データがロードされなかった場合にcleanupしてreturnする"""
+        """データがロードされなかった場合にcleanupしたうえで例外を送出する(サイレント成功にしない)"""
         import settings
 
         settings.USE_DUMMY_DATA = False
@@ -691,7 +715,8 @@ class TestExtractRatingsErrorRecovery:
 
         mock_session = MagicMock()
 
-        extract_ratings(mock_session, "2026/03/01", {"n1"})
+        with pytest.raises(RuntimeError, match="RATINGS_NO_SHARDS_LOADED"):
+            extract_ratings(mock_session, "2026/03/01", {"n1"})
 
         mock_cleanup.assert_called_once_with(mock_session)
 
@@ -993,6 +1018,7 @@ class TestExtractDataPhaseIsolation:
             mock_response.status_code = 200
             mock_response.content = b"noteId\tsummary\n"
             mock_requests.get.return_value = mock_response
+            mock_requests.head.return_value.status_code = 200
 
             mock_extract_ratings.side_effect = RuntimeError("end-of-copy marker corrupt")
 
@@ -1014,7 +1040,7 @@ class TestExtractDataPhaseIsolation:
     @patch("birdxplorer_etl.extract_ecs._process_note_status_rows")
     @patch("birdxplorer_etl.extract_ecs._process_note_rows")
     @patch("birdxplorer_etl.extract_ecs.requests")
-    def test_notes_failure_does_not_starve_later_phases(
+    def test_notes_failure_skips_ratings_and_status_but_runs_backfill_and_note_requests(
         self,
         mock_requests: MagicMock,
         mock_process_note_rows: MagicMock,
@@ -1025,11 +1051,12 @@ class TestExtractDataPhaseIsolation:
         mock_note_requests: MagicMock,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """notes の取り込みが途中で落ちても後段フェーズは走り、アラームトークンが出ること。
+        """notes の取り込みが途中で落ちたら Ratings/Status を丸ごと止める(旧実装への復元)。
 
-        ストリーミング化で zip の CRC 検証と UTF-8 デコードが逐次になったため、
-        「ファイル途中で落ちる」が新たに到達可能になった。裸で呼んでいると
-        その日の Ratings / Status / Backfill / NoteRequests が全滅する。
+        Notes が失敗すると existing_row_note_ids にその日の新規ノートが入らないまま Ratings が
+        全置換 swap を走らせ、unknown_note として評価を落とし、recalculate_rating_counts が
+        全ノートの集計を低い値で上書きしてしまう。旧実装(839af64 より前)と同じく、Notes 失敗時は
+        Ratings/Rating recalculation/Status をまとめてスキップし、Backfill/NoteRequests だけは走らせる。
         """
         import settings
 
@@ -1040,6 +1067,7 @@ class TestExtractDataPhaseIsolation:
             mock_response.status_code = 200
             mock_response.content = b"noteId\tsummary\n"
             mock_requests.get.return_value = mock_response
+            mock_requests.head.return_value.status_code = 200
 
             mock_process_note_rows.side_effect = RuntimeError("Bad CRC-32 for file 'notes-00002.tsv'")
 
@@ -1053,9 +1081,9 @@ class TestExtractDataPhaseIsolation:
 
         assert "EXTRACT_PHASE_FAILED" in caplog.text
         assert "phase=Notes" in caplog.text
-        mock_extract_ratings.assert_called_once()
-        mock_recalculate.assert_called_once()
-        mock_process_note_status_rows.assert_called_once()
+        mock_extract_ratings.assert_not_called()
+        mock_recalculate.assert_not_called()
+        mock_process_note_status_rows.assert_not_called()
         mock_backfill.assert_called_once()
         mock_note_requests.assert_called_once()
 
@@ -1087,6 +1115,7 @@ class TestExtractDataPhaseIsolation:
             mock_response.status_code = 200
             mock_response.content = b"noteId\tcurrentStatus\n"
             mock_requests.get.return_value = mock_response
+            mock_requests.head.return_value.status_code = 200
 
             mock_process_note_status_rows.side_effect = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
 
@@ -1105,72 +1134,206 @@ class TestExtractDataPhaseIsolation:
 
     @patch("birdxplorer_etl.extract_ecs.run_note_requests_phase")
     @patch("birdxplorer_etl.extract_ecs.backfill_missing_notes")
+    @patch("birdxplorer_etl.extract_ecs.recalculate_rating_counts")
+    @patch("birdxplorer_etl.extract_ecs._extract_note_status_files")
     @patch("birdxplorer_etl.extract_ecs.extract_ratings")
-    @patch("birdxplorer_etl.extract_ecs.requests")
-    def test_fetch_failure_does_not_fall_back_to_the_previous_day(
+    @patch("birdxplorer_etl.extract_ecs._extract_notes_files")
+    @patch("birdxplorer_etl.extract_ecs._resolve_snapshot_date")
+    def test_each_family_resolves_its_own_date(
         self,
-        mock_requests: MagicMock,
-        mock_extract_ratings: MagicMock,
+        mock_resolve: MagicMock,
+        mock_notes: MagicMock,
+        mock_ratings: MagicMock,
+        mock_status: MagicMock,
+        mock_recalc: MagicMock,
         mock_backfill: MagicMock,
         mock_note_requests: MagicMock,
     ) -> None:
-        """取得そのものが失敗した日は、前日へフォールバックせず打ち切ること。
+        """ratings だけ当日、status は前日、という混在が起き得ること。"""
+        today = datetime.now().strftime("%Y/%m/%d")
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y/%m/%d")
+        mock_resolve.side_effect = lambda kind, base: {
+            "notes": today,
+            "noteRatings": today,
+            "noteStatusHistory": yesterday,
+        }[kind]
 
-        前日フォールバックは「404 = まだ公開されていない」ための仕組み。接続断で
-        前日に流れると ratings のフルスワップ込みで前日分を丸ごと再処理して
-        1時間規模を浪費し、しかも当日分はこの実行では取り込まれない。
-        後段フェーズ(Backfill / NoteRequests)は走らせる必要がある。
-        """
-        import settings
+        mock_session = MagicMock()
+        mock_session.query.return_value.all.return_value = []
+        extract_data(mock_session)
 
-        original = settings.USE_DUMMY_DATA
-        settings.USE_DUMMY_DATA = True
-        try:
-            mock_requests.get.side_effect = OSError("Connection reset by peer")
+        assert mock_notes.call_args[0][1] == today
+        assert mock_ratings.call_args[0][1] == today
+        assert mock_status.call_args[0][1] == yesterday
+        assert mock_ratings.call_args.kwargs["is_fallback"] is False
 
-            mock_session = MagicMock()
-            mock_session.query.return_value.all.return_value = []
+    @patch("birdxplorer_etl.extract_ecs.run_note_requests_phase")
+    @patch("birdxplorer_etl.extract_ecs.backfill_missing_notes")
+    @patch("birdxplorer_etl.extract_ecs.recalculate_rating_counts")
+    @patch("birdxplorer_etl.extract_ecs._extract_note_status_files")
+    @patch("birdxplorer_etl.extract_ecs.extract_ratings")
+    @patch("birdxplorer_etl.extract_ecs._extract_notes_files")
+    @patch("birdxplorer_etl.extract_ecs._resolve_snapshot_date")
+    def test_marks_is_fallback_when_ratings_date_is_not_today(
+        self,
+        mock_resolve: MagicMock,
+        mock_notes: MagicMock,
+        mock_ratings: MagicMock,
+        mock_status: MagicMock,
+        mock_recalc: MagicMock,
+        mock_backfill: MagicMock,
+        mock_note_requests: MagicMock,
+    ) -> None:
+        today = datetime.now().strftime("%Y/%m/%d")
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y/%m/%d")
+        mock_resolve.side_effect = lambda kind, base: yesterday if kind == "noteRatings" else today
 
+        mock_session = MagicMock()
+        mock_session.query.return_value.all.return_value = []
+        extract_data(mock_session)
+
+        assert mock_ratings.call_args.kwargs["is_fallback"] is True
+
+    @patch("birdxplorer_etl.extract_ecs.run_note_requests_phase")
+    @patch("birdxplorer_etl.extract_ecs.backfill_missing_notes")
+    @patch("birdxplorer_etl.extract_ecs.recalculate_rating_counts")
+    @patch("birdxplorer_etl.extract_ecs._extract_note_status_files")
+    @patch("birdxplorer_etl.extract_ecs.extract_ratings")
+    @patch("birdxplorer_etl.extract_ecs._extract_notes_files")
+    @patch("birdxplorer_etl.extract_ecs._resolve_snapshot_date")
+    def test_unavailable_family_fails_only_its_own_phase(
+        self,
+        mock_resolve: MagicMock,
+        mock_notes: MagicMock,
+        mock_ratings: MagicMock,
+        mock_status: MagicMock,
+        mock_recalc: MagicMock,
+        mock_backfill: MagicMock,
+        mock_note_requests: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """ratings が全滅しても Backfill / NoteRequests は走ること。"""
+        mock_resolve.side_effect = lambda kind, base: None if kind == "noteRatings" else "2026/10/05"
+
+        mock_session = MagicMock()
+        mock_session.query.return_value.all.return_value = []
+        with caplog.at_level(logging.INFO):
             extract_data(mock_session)
-        finally:
-            settings.USE_DUMMY_DATA = original
 
-        assert mock_requests.get.call_count == 1, "前日にフォールバックして再取得している"
-        mock_extract_ratings.assert_not_called()
+        mock_ratings.assert_not_called()
+        assert "EXTRACT_PHASE_FAILED" in caplog.text
+        assert "phase=Ratings" in caplog.text
+        mock_notes.assert_called_once()
+        mock_status.assert_called_once()
         mock_backfill.assert_called_once()
         mock_note_requests.assert_called_once()
 
     @patch("birdxplorer_etl.extract_ecs.run_note_requests_phase")
     @patch("birdxplorer_etl.extract_ecs.backfill_missing_notes")
+    @patch("birdxplorer_etl.extract_ecs.recalculate_rating_counts")
+    @patch("birdxplorer_etl.extract_ecs._extract_note_status_files")
     @patch("birdxplorer_etl.extract_ecs.extract_ratings")
-    @patch("birdxplorer_etl.extract_ecs.requests")
-    def test_404_still_falls_back_to_the_previous_day(
+    @patch("birdxplorer_etl.extract_ecs._extract_notes_files")
+    @patch("birdxplorer_etl.extract_ecs._probe_snapshot")
+    def test_probe_connection_error_fails_the_phase_without_falling_back(
         self,
-        mock_requests: MagicMock,
-        mock_extract_ratings: MagicMock,
+        mock_probe: MagicMock,
+        mock_notes: MagicMock,
+        mock_ratings: MagicMock,
+        mock_status: MagicMock,
+        mock_recalc: MagicMock,
         mock_backfill: MagicMock,
         mock_note_requests: MagicMock,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """404 のときは従来どおり3日分まで遡ること（打ち切り条件を広げていない）。"""
-        import settings
+        """接続断は前日へ流さず、そのフェーズを失敗させる（既存契約の維持）。
 
-        original = settings.USE_DUMMY_DATA
-        settings.USE_DUMMY_DATA = False
-        try:
-            mock_response = MagicMock()
-            mock_response.status_code = 404
-            mock_requests.get.return_value = mock_response
+        Notes は普通に成功させ、Ratings / Status だけが接続断に遭うようにする。Notes が
+        失敗すると Ratings/Status はそもそも走らなくなった(restore old behaviour)ため、
+        Notes 自体を失敗させては Ratings/Status それぞれの契約を検証できない。
+        """
 
-            mock_session = MagicMock()
-            mock_session.query.return_value.all.return_value = []
+        def fake_probe(kind: str, date_string: str) -> bool:
+            if kind == "notes":
+                return True
+            raise OSError("Connection reset by peer")
 
+        mock_probe.side_effect = fake_probe
+
+        mock_session = MagicMock()
+        mock_session.query.return_value.all.return_value = []
+        with caplog.at_level(logging.INFO):
             extract_data(mock_session)
-        finally:
-            settings.USE_DUMMY_DATA = original
 
-        assert mock_requests.get.call_count == 3, "今日・昨日・一昨日の3日分を試していない"
-        mock_extract_ratings.assert_not_called()
+        assert mock_probe.call_count == 3, "1フェーズあたり1回を超えて試している"
+        mock_notes.assert_called_once()
+        mock_ratings.assert_not_called()
+        mock_status.assert_not_called()
+        assert "EXTRACT_PHASE_FAILED" in caplog.text
+        mock_backfill.assert_called_once()
         mock_note_requests.assert_called_once()
+
+
+class TestPhaseWrapperRollsBackBeforeResolving:
+    """解決待ちは最大1時間ブロックしうる。read transaction を握ったまま待たないこと。"""
+
+    BASE = datetime(2026, 10, 5, 16, 30, 0)
+
+    @patch("birdxplorer_etl.extract_ecs._extract_notes_files")
+    @patch("birdxplorer_etl.extract_ecs._resolve_snapshot_date")
+    def test_notes_phase_rolls_back_before_resolving(self, mock_resolve: MagicMock, mock_extract: MagicMock) -> None:
+        order: list[str] = []
+        session = MagicMock()
+        session.rollback.side_effect = lambda: order.append("rollback")
+        mock_resolve.side_effect = lambda *a, **k: order.append("resolve") or "2026/10/05"
+
+        _run_notes_phase(session, set(), self.BASE)
+
+        assert order == ["rollback", "resolve"]
+
+    @patch("birdxplorer_etl.extract_ecs.extract_ratings")
+    @patch("birdxplorer_etl.extract_ecs._resolve_snapshot_date")
+    def test_ratings_phase_rolls_back_before_resolving(self, mock_resolve: MagicMock, mock_extract: MagicMock) -> None:
+        order: list[str] = []
+        session = MagicMock()
+        session.rollback.side_effect = lambda: order.append("rollback")
+        mock_resolve.side_effect = lambda *a, **k: order.append("resolve") or "2026/10/05"
+
+        _run_ratings_phase(session, set(), self.BASE)
+
+        assert order == ["rollback", "resolve"]
+
+    @patch("birdxplorer_etl.extract_ecs._extract_note_status_files")
+    @patch("birdxplorer_etl.extract_ecs._resolve_snapshot_date")
+    def test_status_phase_rolls_back_before_resolving(self, mock_resolve: MagicMock, mock_extract: MagicMock) -> None:
+        order: list[str] = []
+        session = MagicMock()
+        session.rollback.side_effect = lambda: order.append("rollback")
+        mock_resolve.side_effect = lambda *a, **k: order.append("resolve") or "2026/10/05"
+
+        _run_status_phase(session, set(), self.BASE)
+
+        assert order == ["rollback", "resolve"]
+
+    @patch("birdxplorer_etl.extract_ecs._resolve_snapshot_date", return_value=None)
+    def test_notes_phase_error_includes_tried_range(self, mock_resolve: MagicMock) -> None:
+        session = MagicMock()
+        with pytest.raises(RuntimeError, match=r"SNAPSHOT_UNAVAILABLE kind=notes tried=2026/10/05\.\.2026/10/02"):
+            _run_notes_phase(session, set(), self.BASE)
+
+    @patch("birdxplorer_etl.extract_ecs._resolve_snapshot_date", return_value=None)
+    def test_ratings_phase_error_includes_tried_range(self, mock_resolve: MagicMock) -> None:
+        session = MagicMock()
+        with pytest.raises(RuntimeError, match=r"SNAPSHOT_UNAVAILABLE kind=noteRatings tried=2026/10/05\.\.2026/10/02"):
+            _run_ratings_phase(session, set(), self.BASE)
+
+    @patch("birdxplorer_etl.extract_ecs._resolve_snapshot_date", return_value=None)
+    def test_status_phase_error_includes_tried_range(self, mock_resolve: MagicMock) -> None:
+        session = MagicMock()
+        with pytest.raises(
+            RuntimeError, match=r"SNAPSHOT_UNAVAILABLE kind=noteStatusHistory tried=2026/10/05\.\.2026/10/02"
+        ):
+            _run_status_phase(session, set(), self.BASE)
 
 
 class TestOptimisticDedup:
@@ -1430,3 +1593,522 @@ class TestProcessRatingRowsSkipLogging:
             "RATINGS_FILE_ROWS file=00000 read=1 kept=1 skipped=0 "
             "missing_ids=0 unknown_note=0 missing_required=0" in caplog.text
         )
+
+
+class TestResolveSnapshotDate:
+    """日付解決のユニットテスト。HTTP も実時間の待機も使わない。"""
+
+    BASE = datetime(2026, 10, 5, 16, 30, 0)
+
+    def _recorder(self, results):
+        """results の順に返すプローブと、呼ばれた回数を数える sleep を返す。"""
+        calls = []
+        slept = []
+
+        def probe(kind, date_string):
+            calls.append((kind, date_string))
+            return results[len(calls) - 1]
+
+        def sleep(seconds):
+            slept.append(seconds)
+
+        return probe, sleep, calls, slept
+
+    def test_today_available_on_first_probe(self) -> None:
+        probe, sleep, calls, slept = self._recorder([True])
+        got = _resolve_snapshot_date("noteRatings", self.BASE, probe=probe, sleep=sleep)
+        assert got == "2026/10/05"
+        assert len(calls) == 1
+        assert slept == [], "公開済みなのに待機している"
+
+    def test_today_available_on_third_probe(self) -> None:
+        probe, sleep, calls, slept = self._recorder([False, False, True])
+        got = _resolve_snapshot_date("noteRatings", self.BASE, probe=probe, sleep=sleep)
+        assert got == "2026/10/05"
+        assert len(calls) == 3
+        assert slept == [600, 600]
+
+    def test_falls_back_to_yesterday_after_all_retries(self) -> None:
+        # 当日は初回＋6回のリトライで計7回すべて False、翌の候補(前日)で True
+        probe, sleep, calls, slept = self._recorder([False] * 7 + [True])
+        got = _resolve_snapshot_date("noteRatings", self.BASE, probe=probe, sleep=sleep)
+        assert got == "2026/10/04"
+        assert len(slept) == 6, "リトライ回数が 6 ではない"
+        assert calls[-1] == ("noteRatings", "2026/10/04")
+
+    def test_falls_back_up_to_three_days(self) -> None:
+        probe, sleep, calls, slept = self._recorder([False] * 7 + [False, False, True])
+        got = _resolve_snapshot_date("noteRatings", self.BASE, probe=probe, sleep=sleep)
+        assert got == "2026/10/02"
+
+    def test_returns_none_when_nothing_is_available(self) -> None:
+        probe, sleep, calls, slept = self._recorder([False] * 10)
+        got = _resolve_snapshot_date("noteRatings", self.BASE, probe=probe, sleep=sleep)
+        assert got is None
+        assert len(calls) == 10, "4日前まで試している、または3日前を試していない"
+
+    def test_probe_exception_propagates_without_falling_back(self) -> None:
+        """最初の1回で起きた接続断は、まだ待機に入っていないので即座に伝播する。
+
+        フォールバックすると前日分を丸ごと再処理して1時間規模を浪費する。
+        """
+        calls = []
+
+        def probe(kind, date_string):
+            calls.append(date_string)
+            raise OSError("Connection reset by peer")
+
+        with pytest.raises(OSError):
+            _resolve_snapshot_date("noteRatings", self.BASE, probe=probe, sleep=lambda s: None)
+        assert len(calls) == 1, "例外のあとも別の日付を試している"
+
+    def test_exception_during_retry_is_treated_like_a_404_and_keeps_retrying(self) -> None:
+        """今日分の待機中に起きた一時的な例外は 404 と同様に扱い、同じ間隔・同じ回数でリトライする。"""
+        calls = []
+        slept = []
+
+        def probe(kind, date_string):
+            calls.append(date_string)
+            if len(calls) == 1:
+                return False  # 初回は単純な未公開
+            if len(calls) == 2:
+                raise OSError("Connection reset by peer")  # リトライ中の一時的な障害
+            return True  # 障害が収まり3回目で取得できる
+
+        def sleep(seconds):
+            slept.append(seconds)
+
+        got = _resolve_snapshot_date("noteRatings", self.BASE, probe=probe, sleep=sleep)
+
+        assert got == "2026/10/05"
+        assert len(calls) == 3
+        assert slept == [600, 600]
+
+    def test_reraises_last_exception_when_retries_exhaust_on_an_exception(self) -> None:
+        """当日リトライを使い切り、最後の試行が例外で終わった場合はフォールバックせず再送出する。
+
+        接続障害で前日に流れると ratings のフルスワップ込みで前日分を丸ごと再処理して
+        1時間規模を浪費するため。
+        """
+        calls = []
+
+        def probe(kind, date_string):
+            calls.append(date_string)
+            if len(calls) == 1:
+                return False
+            raise OSError("Connection reset by peer")
+
+        with pytest.raises(OSError):
+            _resolve_snapshot_date("noteRatings", self.BASE, probe=probe, sleep=lambda s: None)
+
+        # 初回 + リトライ6回 = 7回。過去日を一度も試していない。
+        assert len(calls) == 1 + _SNAPSHOT_MAX_RETRIES
+        assert all(c == "2026/10/05" for c in calls), "過去日にフォールバックしている"
+
+    def test_exception_while_probing_a_fallback_date_propagates_immediately(self) -> None:
+        """過去日の探索中の例外はリトライせず即座に伝播させる(既存契約の維持)。"""
+        calls = []
+
+        def probe(kind, date_string):
+            calls.append(date_string)
+            if date_string == "2026/10/05":
+                return False  # 当日は初回+6回のリトライとも普通に未公開
+            raise OSError("Connection reset by peer")  # 前日の探索で初めて障害が起きる
+
+        with pytest.raises(OSError):
+            _resolve_snapshot_date("noteRatings", self.BASE, probe=probe, sleep=lambda s: None)
+
+        assert calls[-1] == "2026/10/04", "前日を試す前に失敗している"
+        assert len(calls) == 1 + _SNAPSHOT_MAX_RETRIES + 1
+
+    def test_logs_waiting_fallback_and_unavailable(self, caplog: pytest.LogCaptureFixture) -> None:
+        probe, sleep, _, _ = self._recorder([False] * 7 + [True])
+        with caplog.at_level(logging.INFO):
+            _resolve_snapshot_date("noteRatings", self.BASE, probe=probe, sleep=sleep)
+        assert "SNAPSHOT_WAITING kind=noteRatings attempt=1/6 date=2026/10/05" in caplog.text
+        assert "SNAPSHOT_FALLBACK kind=noteRatings requested=2026/10/05 resolved=2026/10/04" in caplog.text
+
+        probe2, sleep2, _, _ = self._recorder([False] * 10)
+        with caplog.at_level(logging.INFO):
+            _resolve_snapshot_date("notes", self.BASE, probe=probe2, sleep=sleep2)
+        assert "SNAPSHOT_UNAVAILABLE kind=notes tried=2026/10/05..2026/10/02" in caplog.text
+
+
+class TestProbeSnapshot:
+    def test_builds_the_expected_url_and_returns_true_on_200(self) -> None:
+        with patch("birdxplorer_etl.extract_ecs.requests") as mock_requests:
+            mock_requests.head.return_value = MagicMock(status_code=200)
+            assert _probe_snapshot("noteRatings", "2026/10/05") is True
+        url = mock_requests.head.call_args[0][0]
+        assert url == "https://ton.twimg.com/birdwatch-public-data/2026/10/05/noteRatings/ratings-00000.zip"
+
+    def test_returns_false_on_404(self) -> None:
+        with patch("birdxplorer_etl.extract_ecs.requests") as mock_requests:
+            mock_requests.head.return_value = MagicMock(status_code=404)
+            assert _probe_snapshot("notes", "2026/10/05") is False
+
+    def test_knows_all_three_families(self) -> None:
+        assert _SNAPSHOT_FIRST_FILE == {
+            "notes": "notes-00000.zip",
+            "noteRatings": "ratings-00000.zip",
+            "noteStatusHistory": "noteStatusHistory-00000.zip",
+        }
+
+    def test_passes_a_timeout_so_a_half_open_socket_cannot_hang_forever(self) -> None:
+        """requests.head にtimeout無しで投げると、この設計で唯一の無制限待機になる。"""
+        with patch("birdxplorer_etl.extract_ecs.requests") as mock_requests:
+            mock_requests.head.return_value = MagicMock(status_code=200)
+            _probe_snapshot("notes", "2026/10/05")
+        assert mock_requests.head.call_args.kwargs.get("timeout") == 30
+
+
+class TestSnapshotFileUrl:
+    """_probe_snapshot と ratings のシャード欠番チェックで URL の組み立てを共有する。"""
+
+    def test_builds_url_for_notes(self) -> None:
+        assert _snapshot_file_url("notes", "2026/10/05", 3) == (
+            "https://ton.twimg.com/birdwatch-public-data/2026/10/05/notes/notes-00003.zip"
+        )
+
+    def test_builds_url_for_note_ratings(self) -> None:
+        assert _snapshot_file_url("noteRatings", "2026/10/05", 12) == (
+            "https://ton.twimg.com/birdwatch-public-data/2026/10/05/noteRatings/ratings-00012.zip"
+        )
+
+    def test_builds_url_for_note_status_history(self) -> None:
+        assert _snapshot_file_url("noteStatusHistory", "2026/10/05", 0) == (
+            "https://ton.twimg.com/birdwatch-public-data/2026/10/05/noteStatusHistory/noteStatusHistory-00000.zip"
+        )
+
+
+class TestProbeRatingsShard:
+    def test_builds_the_expected_url_and_passes_a_timeout(self) -> None:
+        with patch("birdxplorer_etl.extract_ecs.requests") as mock_requests:
+            mock_requests.head.return_value = MagicMock(status_code=200)
+            assert _probe_ratings_shard("2026/10/05", 7) is True
+        (url,) = mock_requests.head.call_args.args
+        assert url == "https://ton.twimg.com/birdwatch-public-data/2026/10/05/noteRatings/ratings-00007.zip"
+        assert mock_requests.head.call_args.kwargs["timeout"] == 30
+
+    def test_returns_false_on_404(self) -> None:
+        with patch("birdxplorer_etl.extract_ecs.requests") as mock_requests:
+            mock_requests.head.return_value = MagicMock(status_code=404)
+            assert _probe_ratings_shard("2026/10/05", 7) is False
+
+
+class TestCheckRatingsShardListingComplete:
+    def test_empty_when_neither_follow_up_shard_exists(self) -> None:
+        with patch("birdxplorer_etl.extract_ecs._probe_ratings_shard", return_value=False):
+            assert _check_ratings_shard_listing_complete("2026/10/05", 5) == []
+
+    def test_reports_indices_that_exist_beyond_the_gap(self) -> None:
+        def fake(date_string: str, idx: int) -> bool:
+            return idx == 7
+
+        with patch("birdxplorer_etl.extract_ecs._probe_ratings_shard", side_effect=fake):
+            assert _check_ratings_shard_listing_complete("2026/10/05", 5) == [7]
+
+    def test_only_checks_the_next_two_indices(self) -> None:
+        calls: list[int] = []
+
+        def fake(date_string: str, idx: int) -> bool:
+            calls.append(idx)
+            return False
+
+        with patch("birdxplorer_etl.extract_ecs._probe_ratings_shard", side_effect=fake):
+            _check_ratings_shard_listing_complete("2026/10/05", 5)
+
+        assert calls == [6, 7]
+
+
+class TestNotGoingBackwards:
+    """フォールバック時に、古いスナップショットで新しい live を上書きしないこと。
+
+    live_count は reltuples(推定値)だが、_build_staging_pk の CREATE INDEX 直後に
+    取得されるため実質正確。許容する下振れは 0.05%(_RATINGS_BACKWARDS_SLACK)のみ。
+    """
+
+    LIVE = 1_000_000
+
+    def test_raises_when_staging_is_far_below_live(self) -> None:
+        session = MagicMock()
+        session.execute.return_value.scalar.return_value = self.LIVE
+        with pytest.raises(RuntimeError, match="RATINGS_SNAPSHOT_OLDER_THAN_LIVE"):
+            _check_not_going_backwards(session, 970_000)  # 3% 下回る(0.05%スラックを大きく超える)
+
+    def test_passes_when_staging_is_equal_or_larger(self) -> None:
+        session = MagicMock()
+        session.execute.return_value.scalar.return_value = self.LIVE
+        _check_not_going_backwards(session, self.LIVE)
+        _check_not_going_backwards(session, self.LIVE + 2000)
+
+    def test_passes_within_slack(self) -> None:
+        """live は reltuples という推定値で、_swap_ratings_table の SET LOGGED が
+        ヒープを書き換えるぶん実カウントからずれうる。0.05% 未満の下振れでは中止しない。
+        """
+        session = MagicMock()
+        session.execute.return_value.scalar.return_value = self.LIVE
+        _check_not_going_backwards(session, 999_600)  # 0.04% 下回るが許容範囲内
+
+    def test_raises_on_one_days_growth_shortfall(self) -> None:
+        """実測: live テーブルは2日で 217,924,158 → 218,398,084 行(1日あたり約0.11%増)。
+
+        フォールバックで1日分巻き戻ったスナップショットは、0.05%スラックでは吸収できず
+        中止しなければならない(旧来の2%スラックではこの範囲が常に通ってしまい、
+        このガードが対象とするどのフォールバックに対しても発火しなかった)。
+        """
+        session = MagicMock()
+        live = 218_398_084
+        session.execute.return_value.scalar.return_value = live
+        with pytest.raises(RuntimeError, match="RATINGS_SNAPSHOT_OLDER_THAN_LIVE"):
+            _check_not_going_backwards(session, 218_158_000)  # 約0.11%下回る(1日分の増加相当)
+
+    def test_error_message_contains_both_numbers(self) -> None:
+        session = MagicMock()
+        session.execute.return_value.scalar.return_value = self.LIVE
+        with pytest.raises(RuntimeError) as exc:
+            _check_not_going_backwards(session, 970_000)
+        assert "staging=970000" in str(exc.value)
+        assert f"live={self.LIVE}" in str(exc.value)
+
+    def test_skip_warning_carries_the_grep_token(self, caplog: pytest.LogCaptureFixture) -> None:
+        """live_count が 0/falsy の場合、後退検出をスキップしたことがログから分かること。
+
+        これが起きる局面(reltuples 未取得)はまさにロールバックされたスナップショットが
+        live に届きうるケースなので、grep 可能なトークンが要る。
+        """
+        session = MagicMock()
+        session.execute.return_value.scalar.return_value = 0
+        with caplog.at_level(logging.WARNING):
+            _check_not_going_backwards(session, 1000)
+        assert "RATINGS_BACKWARDS_CHECK_SKIPPED" in caplog.text
+        assert "loaded 1000" in caplog.text
+
+
+class TestExtractRatingsBackwardsGuard:
+    @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._swap_ratings_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk_with_dedup_fallback")
+    @patch("birdxplorer_etl.extract_ecs._verify_staging_row_count")
+    @patch("birdxplorer_etl.extract_ecs._process_rating_rows")
+    @patch("birdxplorer_etl.extract_ecs._create_staging_table")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_guard_does_not_fire_on_a_same_day_load(
+        self,
+        mock_requests: MagicMock,
+        mock_create: MagicMock,
+        mock_process: MagicMock,
+        mock_verify: MagicMock,
+        mock_fallback: MagicMock,
+        mock_swap: MagicMock,
+        mock_cleanup: MagicMock,
+    ) -> None:
+        """当日分の取り込みでは、staging が live を下回っても止めない。
+
+        評価の取り下げ(実測で約1,500件)で行数がわずかに減る日があるため。
+        """
+        import settings
+
+        original = settings.USE_DUMMY_DATA
+        settings.USE_DUMMY_DATA = True
+        try:
+            mock_requests.get.return_value = MagicMock(status_code=200, content=b"noteId\traterParticipantId\n")
+            mock_process.return_value = 1000
+            mock_fallback.return_value = 1000
+
+            mock_session = MagicMock()
+            # reltuples=2000 → min_rows=1000 を通過し、後退判定に使えば 1000 < 2000 で落ちる値
+            mock_session.execute.return_value.scalar.return_value = 2000
+
+            extract_ratings(mock_session, "2026/10/05", {"n1"}, is_fallback=False)
+        finally:
+            settings.USE_DUMMY_DATA = original
+
+        mock_swap.assert_called_once()
+
+    @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._swap_ratings_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk_with_dedup_fallback")
+    @patch("birdxplorer_etl.extract_ecs._verify_staging_row_count")
+    @patch("birdxplorer_etl.extract_ecs._process_rating_rows")
+    @patch("birdxplorer_etl.extract_ecs._create_staging_table")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_guard_fires_on_a_fallback_load(
+        self,
+        mock_requests: MagicMock,
+        mock_create: MagicMock,
+        mock_process: MagicMock,
+        mock_verify: MagicMock,
+        mock_fallback: MagicMock,
+        mock_swap: MagicMock,
+        mock_cleanup: MagicMock,
+    ) -> None:
+        import settings
+
+        original = settings.USE_DUMMY_DATA
+        settings.USE_DUMMY_DATA = True
+        try:
+            mock_requests.get.return_value = MagicMock(status_code=200, content=b"noteId\traterParticipantId\n")
+            mock_process.return_value = 1000
+            mock_fallback.return_value = 1000
+
+            mock_session = MagicMock()
+            mock_session.execute.return_value.scalar.return_value = 2000
+
+            with pytest.raises(RuntimeError, match="RATINGS_SNAPSHOT_OLDER_THAN_LIVE"):
+                extract_ratings(mock_session, "2026/10/04", {"n1"}, is_fallback=True)
+        finally:
+            settings.USE_DUMMY_DATA = original
+
+        mock_swap.assert_not_called()
+        mock_cleanup.assert_called_once_with(mock_session)
+
+    @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._swap_ratings_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk_with_dedup_fallback")
+    @patch("birdxplorer_etl.extract_ecs._verify_staging_row_count")
+    @patch("birdxplorer_etl.extract_ecs._process_rating_rows")
+    @patch("birdxplorer_etl.extract_ecs._create_staging_table")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_guard_skips_when_live_estimate_unavailable(
+        self,
+        mock_requests: MagicMock,
+        mock_create: MagicMock,
+        mock_process: MagicMock,
+        mock_verify: MagicMock,
+        mock_fallback: MagicMock,
+        mock_swap: MagicMock,
+        mock_cleanup: MagicMock,
+    ) -> None:
+        """live テーブルの stats が無い場合は後退判定をスキップして swap に進む。
+
+        reltuples が 0 や -1 の場合、他の防衛線（COPY の厳密一致、min_rows）が機能するため
+        安全。ただし本当に古いデータなら、いずれかで落ちる。
+        """
+        import settings
+
+        original = settings.USE_DUMMY_DATA
+        settings.USE_DUMMY_DATA = True
+        try:
+            mock_requests.get.return_value = MagicMock(status_code=200, content=b"noteId\traterParticipantId\n")
+            mock_process.return_value = 1000
+            mock_fallback.return_value = 1000
+
+            mock_session = MagicMock()
+            # live_count が 0 のシナリオ（ANALYZE されていない、または最初の swap）
+            mock_session.execute.return_value.scalar.return_value = 0
+
+            extract_ratings(mock_session, "2026/10/04", {"n1"}, is_fallback=True)
+        finally:
+            settings.USE_DUMMY_DATA = original
+
+        # swap が呼ばれること（ガードはスキップしても swap に進む）
+        mock_swap.assert_called_once()
+
+
+class TestRatingsShardListingIncomplete:
+    """ratings-XXXXX の 404 を、後続シャードがまだ公開中なだけの歯抜けと取り違えないこと。
+
+    X のシャードは公開順がバラバラで ratings-00000 が最後に揃うとは限らない。
+    """
+
+    @patch("birdxplorer_etl.extract_ecs.time.sleep")
+    @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._swap_ratings_table")
+    @patch("birdxplorer_etl.extract_ecs._build_staging_pk_with_dedup_fallback")
+    @patch("birdxplorer_etl.extract_ecs._verify_staging_row_count")
+    @patch("birdxplorer_etl.extract_ecs._process_rating_rows")
+    @patch("birdxplorer_etl.extract_ecs._create_staging_table")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_retries_a_missing_shard_when_a_later_one_already_exists(
+        self,
+        mock_requests: MagicMock,
+        mock_create: MagicMock,
+        mock_process: MagicMock,
+        mock_verify: MagicMock,
+        mock_fallback: MagicMock,
+        mock_swap: MagicMock,
+        mock_cleanup: MagicMock,
+        mock_sleep: MagicMock,
+    ) -> None:
+        """00000 があっても 00001 が404、かつ 00002 が存在するなら終端ではなくリトライする。"""
+        import settings
+
+        original = settings.USE_DUMMY_DATA
+        settings.USE_DUMMY_DATA = False
+        try:
+            attempt_counts: Counter = Counter()
+
+            def fake_get(url: str, *_a: object, **_kw: object) -> MagicMock:
+                if "ratings-00000.zip" in url:
+                    return MagicMock(status_code=200, content=_ratings_zip(0))
+                if "ratings-00001.zip" in url:
+                    attempt_counts["00001"] += 1
+                    if attempt_counts["00001"] <= 2:
+                        return MagicMock(status_code=404)
+                    return MagicMock(status_code=200, content=_ratings_zip(1))
+                if "ratings-00002.zip" in url:
+                    return MagicMock(status_code=200, content=_ratings_zip(2))
+                return MagicMock(status_code=404)
+
+            def fake_head(url: str, *_a: object, **_kw: object) -> MagicMock:
+                # 00001 がまだ無い間、2つ先の 00002 はすでに存在する(シャード公開順の乱れ)
+                return MagicMock(status_code=200 if "ratings-00002.zip" in url else 404)
+
+            mock_requests.get.side_effect = fake_get
+            mock_requests.head.side_effect = fake_head
+            mock_process.return_value = 1
+            mock_fallback.return_value = 3
+
+            mock_session = MagicMock()
+            mock_session.execute.return_value.scalar.return_value = 3
+
+            extract_ratings(mock_session, "2026/10/05", {"n1"})
+        finally:
+            settings.USE_DUMMY_DATA = original
+
+        assert attempt_counts["00001"] == 3, "歯抜け解消後にシャードを再取得していない"
+        assert mock_sleep.call_count == 2
+        mock_sleep.assert_called_with(_SNAPSHOT_RETRY_INTERVAL_SECONDS)
+        mock_swap.assert_called_once()
+
+    @patch("birdxplorer_etl.extract_ecs.time.sleep")
+    @patch("birdxplorer_etl.extract_ecs._cleanup_staging_table")
+    @patch("birdxplorer_etl.extract_ecs._create_staging_table")
+    @patch("birdxplorer_etl.extract_ecs.requests")
+    def test_raises_when_the_gap_never_closes(
+        self,
+        mock_requests: MagicMock,
+        mock_create: MagicMock,
+        mock_cleanup: MagicMock,
+        mock_sleep: MagicMock,
+    ) -> None:
+        """リトライを使い切ってもシャードが埋まらないなら、部分スナップショットを swap せず例外を送出する。"""
+        import settings
+
+        original = settings.USE_DUMMY_DATA
+        settings.USE_DUMMY_DATA = False
+        try:
+
+            def fake_get(url: str, *_a: object, **_kw: object) -> MagicMock:
+                if "ratings-00000.zip" in url:
+                    return MagicMock(status_code=200, content=_ratings_zip(0))
+                return MagicMock(status_code=404)  # 00001 は永遠に 404
+
+            def fake_head(url: str, *_a: object, **_kw: object) -> MagicMock:
+                return MagicMock(status_code=200 if "ratings-00002.zip" in url else 404)
+
+            mock_requests.get.side_effect = fake_get
+            mock_requests.head.side_effect = fake_head
+
+            mock_session = MagicMock()
+
+            with pytest.raises(RuntimeError, match="RATINGS_SHARD_LISTING_INCOMPLETE") as exc:
+                extract_ratings(mock_session, "2026/10/05", {"n1"})
+        finally:
+            settings.USE_DUMMY_DATA = original
+
+        assert "missing=00001" in str(exc.value)
+        assert "00002" in str(exc.value)
+        assert mock_sleep.call_count == _SNAPSHOT_MAX_RETRIES
+        mock_cleanup.assert_called_once_with(mock_session)
