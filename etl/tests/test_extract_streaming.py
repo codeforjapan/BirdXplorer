@@ -200,6 +200,7 @@ class TestProductionReaderWiring:
         captured: list = []
         mock_process_note_rows.side_effect = lambda reader, _session, _ids: captured.extend(reader)
         mock_requests.get.side_effect = fake_get
+        mock_requests.head.return_value.status_code = 200
 
         original = settings.USE_DUMMY_DATA
         settings.USE_DUMMY_DATA = False
