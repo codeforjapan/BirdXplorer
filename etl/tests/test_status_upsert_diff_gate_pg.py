@@ -20,6 +20,9 @@ import pytest
 sys.modules.setdefault("settings", MagicMock())
 
 DB_URL = os.environ.get("BX_TEST_DB_URL")
+if not DB_URL and os.environ.get("CI"):
+    # skip を許すとサービス定義や env が消えたときに「全部緑」で元の穴に戻る。
+    raise RuntimeError("CI では BX_TEST_DB_URL が必須。実 PostgreSQL テストが skip されている")
 pytestmark = pytest.mark.skipif(not DB_URL, reason="BX_TEST_DB_URL 未設定（CI に PostgreSQL が無い）")
 
 
