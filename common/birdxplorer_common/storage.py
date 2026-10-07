@@ -438,6 +438,11 @@ class Storage:
         - evaluating: current_status = NEEDS_MORE_RATINGS AND has_been_helpfuled = False
         - unpublished: all other cases
 
+        has_been_helpfuled は「HELPFUL ステータスに到達したことがあるか」であり、
+        helpful_count > 0（HELPFUL 評価が付いたか）とは別物。ETL の日次バッチが
+        row_note_status から再計算する。★スティッキーではない: X は中間のステータスを
+        保持しないため、HELPFUL を通過したあと NOT_HELPFUL に戻ったノートは False に戻りうる。
+
         Returns:
             SQLAlchemy CASE expression that can be used in queries for aggregation or filtering
         """
