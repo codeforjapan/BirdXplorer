@@ -609,6 +609,11 @@ class PublicationStatus(str, Enum):
       (NEEDS_MORE_RATINGS, CURRENTLY_RATED_NOT_HELPFUL)
     - evaluating: current_status = NEEDS_MORE_RATINGS AND has_been_helpfuled = False
     - unpublished: all other cases
+
+    has_been_helpfuled は「HELPFUL ステータスに到達したことがあるか」であり、
+    helpful_count > 0（HELPFUL 評価が付いたか）とは別物。ETL の日次バッチが
+    row_note_status から再計算する。★スティッキーではない: X は中間のステータスを
+    保持しないため、HELPFUL を通過したあと NOT_HELPFUL に戻ったノートは False に戻りうる。
     """
 
     PUBLISHED = "published"
@@ -786,7 +791,11 @@ class Note(BaseModel):
         TwitterTimestamp, PydanticField(description="コミュニティノートの作成日時 (ミリ秒単位の UNIX EPOCH TIMESTAMP)")
     ]
     has_been_helpfuled: Annotated[
-        bool, PydanticField(description="ノートが役立つと評価されたことがあるかどうか", default=False)
+        bool,
+        PydanticField(
+            description="ノートが HELPFUL ステータスに到達したことがあるか（評価が付いたかどうかではない）",
+            default=False,
+        ),
     ]
     rate_count: Annotated[NonNegativeInt, PydanticField(description="ノートの総評価数", default=0)]
     helpful_count: Annotated[NonNegativeInt, PydanticField(description="役立つ評価の数", default=0)]

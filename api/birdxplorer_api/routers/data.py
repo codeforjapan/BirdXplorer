@@ -294,7 +294,10 @@ class SearchedNote(BaseModel):
         TwitterTimestamp, PydanticField(description="コミュニティノートの作成日時 (ミリ秒単位の UNIX EPOCH TIMESTAMP)")
     ]
     # New helpful rating fields
-    has_been_helpfuled: Annotated[bool, PydanticField(description="ノートが役立つと評価されたことがあるかどうか")]
+    has_been_helpfuled: Annotated[
+        bool,
+        PydanticField(description="ノートが HELPFUL ステータスに到達したことがあるか（評価が付いたかどうかではない）"),
+    ]
     rate_count: Annotated[int, PydanticField(description="ノートの総評価数")]
     helpful_count: Annotated[int, PydanticField(description="役立つ評価の数")]
     not_helpful_count: Annotated[int, PydanticField(description="役立たない評価の数")]

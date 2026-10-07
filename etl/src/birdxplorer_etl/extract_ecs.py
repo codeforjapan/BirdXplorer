@@ -21,6 +21,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from birdxplorer_common.models import NoteStatus
 from birdxplorer_common.storage import (
     NoteRecord,
     RowNoteRatingRecord,
@@ -431,6 +432,9 @@ def extract_data(postgresql: Session):
         _run_phase("Rating recalculation", postgresql, lambda: recalculate_rating_counts(postgresql))
 
         _run_phase("Status", postgresql, lambda: _run_status_phase(postgresql, existing_row_note_ids, now))
+
+        # has_been_helpfuled は row_note_status を見るので Status フェーズより後に回す
+        _run_phase("Helpfuled flag recalculation", postgresql, lambda: recalculate_has_been_helpfuled(postgresql))
 
     postgresql.commit()
 
@@ -1266,6 +1270,152 @@ def recalculate_rating_counts(postgresql: Session) -> int:
     postgresql.commit()
     row_count = result.rowcount
     logging.info(f"Recalculated rating counts for {row_count} notes")
+    return row_count
+
+
+# 検知を有効にする母数の下限。row_note_status の行数で測る(検証したい JOIN とは独立な参照)。
+# dev 実測で row_note_status は約300万行、うち CRH 到達は 348,354 件(約11.6%)。
+# 10万行あれば期待値は約1.2万件なので「1件も無い」は構造的に起こり得ない。
+# 新規ステージや小規模な検証環境を誤って落とさないための足切り。
+HELPFULED_CHECK_MIN_ROWS = 100_000
+
+
+def recalculate_has_been_helpfuled(postgresql: Session) -> int:
+    """row_note_status から notes.has_been_helpfuled を再計算する。
+
+    このフラグは「HELPFUL 評価が1件でも付いたか」ではなく
+    「HELPFUL ステータスに到達したことがあるか」を表す。前者は helpful_count で足りるうえ、
+    row_note_ratings 上では大半のノートが該当してしまい、一時公開の判別に使えない。
+
+    note_transform も INSERT 時に同じ条件で値を入れるが、ノートのステータスはその後も動くので
+    追随する経路が要る。recalculate_rating_counts は集計カラム4つしか更新しないため、
+    このフラグだけが取り残されていた(helpful_count が大きいのに False という行が大量にできる)。
+
+    row_note_status を読むため、必ず Status フェーズより後に呼ぶこと。先に呼ぶと前日の
+    ステータスで判定することになる。なお Status が途中で失敗した日に走っても問題ない。
+    _process_note_status_rows は 1000 行ごとに commit するので row_note_status は行単位では
+    整合しており、行ごとの再計算は正しい値になる(全体としては一部が前日のまま＝翌日収束する)。
+
+    ★単調ではない。first_non_n_m_r_status は不変だが most_recent_non_n_m_r_status は可変で、
+    NMR→CRNH→CRH→CRNH と動いたノートは CRH を通過した事実がどちらの列にも残らず False に戻る。
+    X 側が中間のステータスを保持しないので、どう実装しても拾えない情報ではある。
+    そのうえでスティッキーにせず絶対上書きを選んでいるのは、row_note_status の現在値をそのまま
+    写して冪等に保つため。スティッキーにすると一度でも誤って True を書いた行を二度と戻せない。
+    巻き戻りの実数は構造上測れないので、代わりに regressed(True→False の件数)をログに出す。
+
+    対象は notes 全件ではなく row_note_status に行があるノートだけ(UPDATE ... FROM は内部結合)。
+
+    has_been_helpfuled は nullable で、NULL 行は _get_publication_status_case のどの分岐にも
+    当たらず unpublished に落ちていた。この再計算で False に正規化されるため、それらは
+    evaluating に移る。/api/v1/graphs/* の内訳が初回実行で動く点に注意。
+
+    値が変わる行だけに UPDATE を絞る。notes は数百万行あり、毎日全行を書き換えると
+    WAL が無駄に膨らむ（row_notes で同じ問題を踏んでいる）。初回だけ大量に更新され、
+    以降は差分のみになる。
+
+    Returns:
+        更新された行数
+    """
+    reached_helpful = func.coalesce(
+        or_(
+            RowNoteStatusRecord.first_non_n_m_r_status == NoteStatus.CURRENTLY_RATED_HELPFUL.value,
+            RowNoteStatusRecord.most_recent_non_n_m_r_status == NoteStatus.CURRENTLY_RATED_HELPFUL.value,
+        ),
+        # 両方 NULL(NMR から一度も抜けていない)だと or_ は NULL を返す。false に倒さないと
+        # NULL が書き込まれ、差分ゲートが永久に効かず毎日書き換え続けることになる。
+        False,
+    )
+
+    # True だった行が False に戻る件数。巻き戻りは異常の兆候なので更新件数とは別に数える
+    # (rowcount は両方向の合算なので、ここが跳ねても updated だけ見ていると気付けない)。
+    # 初回だけは旧実装(helpful_count > 0)で誤って立っていた行の掃除で跳ねる(dev 実測 6,728 件)。
+    # 大規模な巻き戻りにアラームを張るなら、この初回ぶんを除外してから閾値を決めること。
+    regressed = postgresql.execute(
+        select(func.count())
+        .select_from(NoteRecord)
+        .join(RowNoteStatusRecord, NoteRecord.note_id == RowNoteStatusRecord.note_id)
+        .where(NoteRecord.has_been_helpfuled.is_(True), reached_helpful.is_(False))
+    ).scalar_one()
+
+    stmt = (
+        update(NoteRecord)
+        .where(
+            NoteRecord.note_id == RowNoteStatusRecord.note_id,
+            NoteRecord.has_been_helpfuled.is_distinct_from(reached_helpful),
+        )
+        .values(has_been_helpfuled=reached_helpful)
+        # 既定の synchronize_session="auto" は、別エンティティの列を含む WHERE や
+        # is_distinct_from を Python 側で評価できず "fetch" に落ちて、更新した全行の
+        # note_id を RETURNING で返させる。このセッションに NoteRecord の ORM
+        # インスタンスは載せていないので同期は不要。
+        .execution_options(synchronize_session=False)
+    )
+
+    result = postgresql.execute(stmt)
+    postgresql.commit()
+    row_count = result.rowcount
+
+    # 差分件数だけでは「毎日0件(＝式が1行も当たらず壊れている)」と「差分が無いだけの正常日」を
+    # 区別できない。元のバグの症状が temporarilyPublished の恒久的な0件だったので、絶対値も出す。
+    total_true, total_scanned = postgresql.execute(
+        select(
+            func.count().filter(NoteRecord.has_been_helpfuled.is_(True)),
+            func.count(),
+        )
+        .select_from(NoteRecord)
+        .join(RowNoteStatusRecord, NoteRecord.note_id == RowNoteStatusRecord.note_id)
+    ).one()
+    # 検知の母数は row_note_status 単体から取る。JOIN そのものが壊れた場合に
+    # 「対象0件だから正常」と誤って安全側に倒れるのを防ぐため(total_scanned は JOIN 由来)。
+    first_helpful, recent_helpful, total_status = postgresql.execute(
+        select(
+            func.count().filter(RowNoteStatusRecord.first_non_n_m_r_status == NoteStatus.CURRENTLY_RATED_HELPFUL.value),
+            func.count().filter(
+                RowNoteStatusRecord.most_recent_non_n_m_r_status == NoteStatus.CURRENTLY_RATED_HELPFUL.value
+            ),
+            func.count(),
+        ).select_from(RowNoteStatusRecord)
+    ).one()
+
+    # 足切り未満だと検知は黙って無効になる。「武装している」と「眠っている」をログで区別できないと
+    # 欠陥クラス1(ログは出ているが誰も読まない)の裏返しになるので、状態を明示する。
+    armed = total_status >= HELPFULED_CHECK_MIN_ROWS
+    logging.info(
+        f"HELPFULED_RECALC updated={row_count} regressed={regressed} "
+        f"total_true={total_true} total_scanned={total_scanned} "
+        f"first_helpful={first_helpful} recent_helpful={recent_helpful} "
+        f"empty_check={'armed' if armed else 'skipped'}"
+    )
+
+    problem = None
+    if armed:
+        if total_scanned == 0:
+            # notes と row_note_status が1行も結合しない。note_id の型や照合順序が変わるとこうなる。
+            # UPDATE も INSERT 側も同じ結合に依存するので、放置すると静かに劣化し続ける。
+            problem = f"notes x row_note_status matched 0 rows while row_note_status has {total_status}"
+        elif first_helpful == 0 or recent_helpful == 0:
+            # 片方の列だけ語彙が変わると total_true は0にならず部分的にしか落ちない。
+            # 列ごとに見ればその部分劣化を初日に捕まえられる。
+            problem = (
+                f"status vocabulary looks changed " f"(first_helpful={first_helpful} recent_helpful={recent_helpful})"
+            )
+        elif total_true == 0:
+            # ★判定に regressed(この実行で消した件数)を使ってはいけない。語彙が変わると INSERT 側も
+            # 同じ定数を使うので新たに True になる行が現れず、初日に全部消えたあとは regressed=0 に
+            # なって二度と鳴らない。元のバグ(毎日静かに0件)の再現になる。
+            problem = "no note is flagged as having reached CURRENTLY_RATED_HELPFUL"
+
+    if problem:
+        # ログだけ出しても誰も読まない(それがこのバグが放置された理由そのもの)ので、
+        # _run_phase に投げて既存の EXTRACT_PHASE_FAILED アラームに乗せる。
+        # UPDATE は commit 済みなので巻き戻らない。検知が目的で、巻き戻しは目的ではない。
+        # ここを commit の前に移すと、その日の正当な UPDATE が rollback で毎日捨てられる。
+        raise RuntimeError(
+            f"HELPFULED_RECALC_EMPTY {problem}. temporarilyPublished becomes zero across all "
+            "/api/v1/graphs/* endpoints. The UPDATE itself committed; retrying the task will NOT clear this. "
+            "Check the upstream vocabulary: "
+            "SELECT first_non_n_m_r_status, count(*) FROM row_note_status GROUP BY 1 ORDER BY 2 DESC;"
+        )
     return row_count
 
 

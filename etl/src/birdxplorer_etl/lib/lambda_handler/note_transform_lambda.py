@@ -7,6 +7,7 @@ from typing import Any, Union
 
 from sqlalchemy import case, func, select
 
+from birdxplorer_common.models import NoteStatus
 from birdxplorer_common.storage import (
     NoteRecord,
     NoteTopicAssociation,
@@ -187,6 +188,10 @@ def load_topics_from_db(postgresql):
     return topics
 
 
+# notes.has_been_helpfuled の判定に使う。extract_ecs.recalculate_has_been_helpfuled と同じ条件。
+HELPFUL_STATUS = NoteStatus.CURRENTLY_RATED_HELPFUL.value
+
+
 def process_single_message(message: dict, postgresql, sqs_handler, topics_cache: dict) -> dict:
     """
     単一メッセージを処理する
@@ -228,6 +233,8 @@ def process_single_message(message: dict, postgresql, sqs_handler, topics_cache:
             RowNoteRecord.created_at_millis,
             RowNoteStatusRecord.current_status,
             RowNoteStatusRecord.locked_status,
+            RowNoteStatusRecord.first_non_n_m_r_status,
+            RowNoteStatusRecord.most_recent_non_n_m_r_status,
         )
         .outerjoin(RowNoteStatusRecord, RowNoteRecord.note_id == RowNoteStatusRecord.note_id)
         .filter(RowNoteRecord.note_id == note_id)
@@ -332,7 +339,13 @@ def process_single_message(message: dict, postgresql, sqs_handler, topics_cache:
             int(rating_agg.somewhat_helpful_count) if rating_agg and rating_agg.somewhat_helpful_count else 0
         ),
         locked_status=note_row.locked_status,
-        has_been_helpfuled=bool(rating_agg and rating_agg.helpful_count and int(rating_agg.helpful_count) > 0),
+        # 「HELPFUL ステータスに到達したことがあるか」。かつて helpful_count > 0 で立てていたが
+        # それは「HELPFUL 評価が付いたか」であって別物で、一時公開の判別には使えなかった。
+        # row_note_status は上の SELECT に outerjoin 済みなのでここで正しく出せる。
+        # Backfill 経路(extract_ecs.backfill_missing_notes)は日次の再計算フェーズより後に走り、
+        # ステータス行が既にある古いノートを最大5万件流すので、ここで埋めないと丸一日間違う。
+        # ステータス行が無い新規ノートは両方 None になり False。日次再計算が翌日以降追いつく。
+        has_been_helpfuled=HELPFUL_STATUS in (note_row.first_non_n_m_r_status, note_row.most_recent_non_n_m_r_status),
     )
 
     postgresql.add(new_note)
