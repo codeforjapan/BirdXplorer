@@ -941,7 +941,13 @@ def _validate_rating_row(row: dict, existing_row_note_ids: set, skipped: Counter
     # helpfulness_levelフィールドのバリデーション
     if "helpfulness_level" in row:
         value = row["helpfulness_level"]
-        if value not in ["HELPFUL", "SOMEWHAT_HELPFUL", "NOT_HELPFUL"]:
+        if value not in HELPFULNESS_LEVELS:
+            # ここだけ無言で NULL に落としていた。上流が語彙を変えると全件が静かに NULL になり、
+            # helpful 系3列が全ノートで 0 になる。ただし ratings は2.19億行あるので per-row の
+            # warning は出せない(語彙変更時に数千万行ぶん出てアラームのトークンを埋める)。
+            # 既存の skipped Counter に積んでファイル単位で1行にまとめる。
+            if value and skipped is not None:
+                skipped[f"unknown_level:{value}"] += 1
             row["helpfulness_level"] = None
 
     # rating_source_bucketedフィールドのバリデーション
@@ -1043,10 +1049,14 @@ def _process_rating_rows(reader, postgresql: Session, existing_row_note_ids: set
         logging.info(f"COPY final {row_count} rows (total: {total_rows}, file {file_index:05d})")
 
     skipped_total = sum(skipped.values())
+    unknown_levels = ",".join(
+        f"{k.split(':', 1)[1]}={v}" for k, v in sorted(skipped.items()) if k.startswith("unknown_level:")
+    )
     breakdown = (
         f"missing_ids={skipped['missing_ids']} "
         f"unknown_note={skipped['unknown_note']} "
-        f"missing_required={skipped['missing_required']}"
+        f"missing_required={skipped['missing_required']} "
+        f"unknown_levels={unknown_levels or 'none'}"
     )
     logging.info(
         f"RATINGS_FILE_ROWS file={file_index:05d} read={read_rows} "
@@ -1231,10 +1241,23 @@ def extract_ratings(postgresql: Session, dateString: str, existing_row_note_ids:
         raise
 
 
+# X が配布する helpfulness_level の値。ここが変わると helpful 系3列が全ノートで 0 になる。
+# いまは _validate_rating_row の正規化にのみ使う(集計側の case() はリテラルのまま)。
+HELPFULNESS_LEVELS = ("HELPFUL", "SOMEWHAT_HELPFUL", "NOT_HELPFUL")
+
+
 def recalculate_rating_counts(postgresql: Session) -> int:
     """
     row_note_ratingsテーブルからnotesテーブルの評価集計カラムを再計算する。
     毎日のECS extractタスク内でratings抽出後に呼ばれ、全ノートの集計値を最新化する。
+
+    値が変わる行だけに UPDATE を絞る。以前は無条件に上書きしており、2026-10-07 の実行では
+    2,936,582 行を書いて 38.9 分かかっていた。日次で実際に値が変わるのは新しい評価が付いた
+    ノートだけなので、大半の書き込みは無駄になる(実数は初回稼働後のログで確認すること。
+    無条件 UPDATE の直後に残差を測っても 0 にしかならず、日次の変化量の根拠にはならない)。
+    notes は本体 4.4GB で
+    rate_count 等はどのインデックスにも入っていないため HOT 更新にはなるが、行の実体は
+    毎回書き直されるので WAL が無駄に出る。row_notes で踏んだのと同じ問題。
 
     Returns:
         更新された行数
@@ -1257,19 +1280,41 @@ def recalculate_rating_counts(postgresql: Session) -> int:
 
     stmt = (
         update(NoteRecord)
-        .where(NoteRecord.note_id == subq.c.note_id)
+        .where(
+            NoteRecord.note_id == subq.c.note_id,
+            # 4列のどれかが実際に変わる行だけ書く。= ではなく IS DISTINCT FROM なのは、
+            # 既存行の NULL(初期値未設定)を取りこぼさないため。
+            # 型は subquery 側が count()/sum() の bigint、notes 側は rate_count だけ
+            # numeric(DECIMAL) で残り3列は integer。numeric と bigint の比較は値が等しければ
+            # false を返すのでゲートは正しく効く(scale の差も無視される)。
+            or_(
+                NoteRecord.rate_count.is_distinct_from(subq.c.rate_count),
+                NoteRecord.helpful_count.is_distinct_from(subq.c.helpful_count),
+                NoteRecord.somewhat_helpful_count.is_distinct_from(subq.c.somewhat_helpful_count),
+                NoteRecord.not_helpful_count.is_distinct_from(subq.c.not_helpful_count),
+            ),
+        )
         .values(
             rate_count=subq.c.rate_count,
             helpful_count=subq.c.helpful_count,
             somewhat_helpful_count=subq.c.somewhat_helpful_count,
             not_helpful_count=subq.c.not_helpful_count,
         )
+        # 既定の synchronize_session="auto" は subquery 相関の WHERE を Python 側で評価できず
+        # "fetch" に落ちて、更新した全行の note_id を RETURNING で返す(従来は毎日293万件)。
+        # この関数は ORM オブジェクトを一切触らないので同期は不要。
+        .execution_options(synchronize_session=False)
     )
 
     result = postgresql.execute(stmt)
     postgresql.commit()
     row_count = result.rowcount
-    logging.info(f"Recalculated rating counts for {row_count} notes")
+
+    # 差分ゲートで updated=0 が平常運転になるので、母数を併記して「差分が無い正常日」と
+    # 「join が壊れた日」を区別できるようにしたいが、母数の算出は本番実測で7分15秒かかり、
+    # しかも主要な故障モード(ゲートが常に偽)では鳴らないことが分かったため見送った。
+    # 観測性の作り直しは別途対応する。トークンだけ先に用意しておく。
+    logging.info(f"RATING_RECALC updated={row_count}")
     return row_count
 
 

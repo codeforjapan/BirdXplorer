@@ -58,7 +58,19 @@ jobs:
 
   etl-test-check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 実 PostgreSQL を使うテスト(*_pg.py)は BX_TEST_DB_URL が無いと skip される。
+    # 差分ゲートの「同値なら書かない」や NULL の扱いは MagicMock では一切検証できず、
+    # サービスを立てないと最も価値の高いテストが常に緑のまま素通りする。
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: birdxplorer
+          POSTGRES_DB: postgres
+        ports:
+          - 5433:5432
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -79,4 +91,5 @@ jobs:
           X_PASSWORD: ${{ secrets.X_PASSWORD }}
           X_EMAIL: ${{ secrets.X_EMAIL }}
           X_EMAIL_PASSWORD: ${{ secrets.X_EMAIL_PASSWORD }}
+          BX_TEST_DB_URL: postgresql://postgres:birdxplorer@localhost:5433/postgres
         run: pytest
