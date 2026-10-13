@@ -1,10 +1,9 @@
 # ETLの柔軟性向上
 
-> **注記 (2026-10-14)**: この文書は 2025-06 時点の設計検討の記録です。以下で参照している
-> `transform.py` / `load.py` / `extract.py` / `main.py` は Lambda + SQS 構成への移行で
-> 役目を終え、削除されました。現在の実装は `extract_ecs.py`(日次バッチ)と
-> `lib/lambda_handler/` 配下(SQS 駆動の各 Lambda)です。リンクは当時の位置を示すもので、
-> 現在のコードには対応しません。
+> **注記 (2026-10-13)**: 2025-06 時点の設計検討の記録。参照している `main.py` /
+> `extract.py` / `transform.py` / `load.py` と `settings.py` 内の該当設定は
+> Lambda + SQS 構成への移行で削除済みで、リンクは現在のコードに対応しない。
+> 現在の実装は `extract_ecs.py` と `lib/lambda_handler/` 配下。
 
 ## 現状の整理
 
