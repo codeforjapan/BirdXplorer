@@ -7,6 +7,7 @@ from typing import List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
+from birdxplorer_common.jst import ms_to_jst_date, ms_to_jst_month
 from birdxplorer_common.models import (
     DailyNotesCreationDataItem,
     DailyPostCountDataItem,
@@ -24,22 +25,21 @@ StatusType = Literal["all", "published", "evaluating", "unpublished", "temporari
 
 
 def twitter_timestamp_to_iso_date(ts: int) -> str:
-    """Convert TwitterTimestamp (milliseconds) to ISO date string.
+    """Convert TwitterTimestamp (milliseconds) to ISO date string in JST (Asia/Tokyo).
 
     Args:
-        ts: Twitter timestamp in milliseconds (Unix epoch, UTC)
+        ts: Twitter timestamp in milliseconds (Unix epoch)
 
     Returns:
-        ISO formatted date string (YYYY-MM-DD) in UTC
+        ISO formatted date string (YYYY-MM-DD) in JST
 
     Examples:
-        >>> twitter_timestamp_to_iso_date(1704067200000)
+        >>> twitter_timestamp_to_iso_date(1704034800000)
         '2024-01-01'
+        >>> twitter_timestamp_to_iso_date(1704034799999)
+        '2023-12-31'
     """
-    from datetime import datetime, timezone
-
-    dt = datetime.fromtimestamp(int(ts) / 1000, tz=timezone.utc)
-    return dt.strftime("%Y-%m-%d")
+    return ms_to_jst_date(int(ts))
 
 
 def validate_timestamp_range(
@@ -305,15 +305,9 @@ def gen_router(storage: Storage) -> APIRouter:
             language_list = [lang.strip() for lang in language.split(",")] if language else None
             keywords_list = [kw.strip() for kw in keywords.split(",")] if keywords else None
 
-            # Convert timestamps to datetime objects for month extraction
-            from datetime import datetime, timezone
-
-            start_dt = datetime.fromtimestamp(int(start_date) / 1000, tz=timezone.utc)
-            end_dt = datetime.fromtimestamp(int(end_date) / 1000, tz=timezone.utc)
-
-            # Format as YYYY-MM for storage method
-            start_month = start_dt.strftime("%Y-%m")
-            end_month = end_dt.strftime("%Y-%m")
+            # Format as YYYY-MM (JST) for storage method
+            start_month = ms_to_jst_month(int(start_date))
+            end_month = ms_to_jst_month(int(end_date))
 
             # Fetch data from storage
             raw_data = storage.get_monthly_note_counts(

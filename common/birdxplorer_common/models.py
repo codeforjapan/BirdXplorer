@@ -1075,7 +1075,7 @@ class DailyNotesCreationDataItem(BaseModel):
 
     date: str = PydanticField(
         ...,
-        description="Date in YYYY-MM-DD format (UTC timezone)",
+        description="Date in YYYY-MM-DD format (JST, Asia/Tokyo)",
         examples=["2025-01-15"],
     )
 
@@ -1118,7 +1118,7 @@ class DailyPostCountDataItem(BaseModel):
 
     date: str = PydanticField(
         ...,
-        description="Date in YYYY-MM-DD format (UTC timezone)",
+        description="Date in YYYY-MM-DD format (JST, Asia/Tokyo)",
         examples=["2025-01-15"],
     )
 

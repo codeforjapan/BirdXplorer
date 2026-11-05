@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 from typing import List
+from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
@@ -645,3 +646,36 @@ def test_top_note_accounts_language_and_keywords(client: TestClient) -> None:
     )
     assert response.status_code == 200
     assert "data" in response.json()
+
+
+def test_notes_annual_months_are_jst(client: TestClient, mock_storage: MagicMock) -> None:
+    """2025-12-01T00:00+09:00 .. 2026-11-30T23:59:59.999+09:00 span JST months 2025-12 .. 2026-11."""
+    response = client.get("/api/v1/graphs/notes-annual?start_date=1764514800000&end_date=1796050799999")
+
+    assert response.status_code == 200
+    kwargs = mock_storage.get_monthly_note_counts.call_args.kwargs
+    assert kwargs["start_month"] == "2025-12"
+    assert kwargs["end_month"] == "2026-11"
+    assert len(response.json()["data"]) == 12
+
+
+def test_daily_notes_dates_are_jst(client: TestClient, mock_storage: MagicMock) -> None:
+    """A single JST day is not shifted to the previous UTC day."""
+    response = client.get("/api/v1/graphs/daily-notes?start_date=1764514800000&end_date=1764601199999")
+
+    assert response.status_code == 200
+    kwargs = mock_storage.get_daily_note_counts.call_args.kwargs
+    assert kwargs["start_date"] == "2025-12-01"
+    assert kwargs["end_date"] == "2025-12-01"
+
+
+def test_top_note_accounts_prev_period_is_adjacent_jst_days(client: TestClient, mock_storage: MagicMock) -> None:
+    """The previous period is the 7 JST days immediately before the current one."""
+    response = client.get("/api/v1/graphs/top-note-accounts?start_date=1765119600000&end_date=1765724399999")
+
+    assert response.status_code == 200
+    kwargs = mock_storage.get_top_note_accounts.call_args.kwargs
+    assert kwargs["start_date"] == "2025-12-08"
+    assert kwargs["end_date"] == "2025-12-14"
+    assert kwargs["prev_start_date"] == "2025-12-01"
+    assert kwargs["prev_end_date"] == "2025-12-07"
