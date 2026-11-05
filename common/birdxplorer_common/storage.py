@@ -23,6 +23,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, rela
 from sqlalchemy.orm.query import RowReturningQuery
 from sqlalchemy.types import CHAR, DECIMAL, JSON, Integer, String, Text, Uuid
 
+from .jst import jst_day_range_ms, jst_month_range_ms, jst_today, ms_to_jst_date
 from .logger import get_logger
 from .models import (
     BinaryBool,
@@ -616,7 +617,7 @@ class Storage:
             table: Table name ("notes" or "posts")
 
         Returns:
-            Last update timestamp in YYYY-MM-DD format (UTC), derived from MAX(created_at)
+            Last update timestamp in YYYY-MM-DD format (JST), derived from MAX(created_at)
 
         Raises:
             ValueError: If table name is invalid
@@ -632,16 +633,10 @@ class Storage:
 
             if result is None:
                 # No data in table, return current date
-                from datetime import datetime, timezone
+                return jst_today()
 
-                return datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-            # Convert TwitterTimestamp (milliseconds) to date
-            from datetime import datetime, timezone
-
-            timestamp_seconds = float(result) / 1000
-            dt = datetime.fromtimestamp(timestamp_seconds, tz=timezone.utc)
-            return dt.strftime("%Y-%m-%d")
+            # Convert TwitterTimestamp (milliseconds) to JST date
+            return ms_to_jst_date(int(result))
 
     def get_daily_note_counts(
         self,
@@ -669,20 +664,17 @@ class Storage:
                 ...
             ]
         """
-        from datetime import datetime, timezone
-
         # Convert date strings to TwitterTimestamp (milliseconds)
-        start_dt = datetime.fromisoformat(start_date).replace(tzinfo=timezone.utc)
-        end_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
-        start_ts = int(start_dt.timestamp() * 1000)
-        end_ts = int(end_dt.timestamp() * 1000)
+        start_ts, end_ts = jst_day_range_ms(start_date, end_date)
 
         # Get publication status CASE expression
         status_expr = self._get_publication_status_case()
 
         # Build aggregation query
         query = select(
-            func.date_trunc("day", func.to_timestamp(NoteRecord.created_at / 1000)).label("day"),
+            func.date_trunc("day", func.timezone("Asia/Tokyo", func.to_timestamp(NoteRecord.created_at / 1000))).label(
+                "day"
+            ),
             func.count().filter(status_expr == "published").label("published"),
             func.count().filter(status_expr == "evaluating").label("evaluating"),
             func.count().filter(status_expr == "unpublished").label("unpublished"),
@@ -755,13 +747,8 @@ class Storage:
                 ...
             ]
         """
-        from datetime import datetime, timezone
-
         # Convert date strings to TwitterTimestamp (milliseconds)
-        start_dt = datetime.fromisoformat(start_date).replace(tzinfo=timezone.utc)
-        end_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
-        start_ts = int(start_dt.timestamp() * 1000)
-        end_ts = int(end_dt.timestamp() * 1000)
+        start_ts, end_ts = jst_day_range_ms(start_date, end_date)
 
         # Get publication status CASE expression
         status_expr = self._get_publication_status_case()
@@ -773,7 +760,9 @@ class Storage:
             # When no filter, just count all posts
             query = (
                 select(
-                    func.date_trunc("day", func.to_timestamp(PostRecord.created_at / 1000)).label("day"),
+                    func.date_trunc(
+                        "day", func.timezone("Asia/Tokyo", func.to_timestamp(PostRecord.created_at / 1000))
+                    ).label("day"),
                     func.count(PostRecord.post_id).label("post_count"),
                 )
                 .where(
@@ -787,7 +776,9 @@ class Storage:
             # Join with notes for status/language/keywords filtering
             query = (
                 select(
-                    func.date_trunc("day", func.to_timestamp(PostRecord.created_at / 1000)).label("day"),
+                    func.date_trunc(
+                        "day", func.timezone("Asia/Tokyo", func.to_timestamp(PostRecord.created_at / 1000))
+                    ).label("day"),
                     func.count(distinct(PostRecord.post_id)).label("post_count"),
                 )
                 .select_from(PostRecord)
@@ -873,29 +864,17 @@ class Storage:
                 ...
             ]
         """
-        from datetime import datetime, timezone
-
-        # Convert month strings to dates (first day of each month)
-        start_date = datetime.strptime(start_month, "%Y-%m").replace(day=1, tzinfo=timezone.utc)
-        # Get last day of end month
-        from calendar import monthrange
-
-        end_year, end_month_num = map(int, end_month.split("-"))
-        last_day = monthrange(end_year, end_month_num)[1]
-        end_date = datetime.strptime(end_month, "%Y-%m").replace(
-            day=last_day, hour=23, minute=59, second=59, tzinfo=timezone.utc
-        )
-
-        # Convert to TwitterTimestamp (milliseconds)
-        start_ts = int(start_date.timestamp() * 1000)
-        end_ts = int(end_date.timestamp() * 1000)
+        # Convert month strings to TwitterTimestamp (milliseconds)
+        start_ts, end_ts = jst_month_range_ms(start_month, end_month)
 
         # Get publication status CASE expression
         status_expr = self._get_publication_status_case()
 
         # Build aggregation query
         query = select(
-            func.date_trunc("month", func.to_timestamp(NoteRecord.created_at / 1000)).label("month"),
+            func.date_trunc(
+                "month", func.timezone("Asia/Tokyo", func.to_timestamp(NoteRecord.created_at / 1000))
+            ).label("month"),
             func.count().filter(status_expr == "published").label("published"),
             func.count().filter(status_expr == "evaluating").label("evaluating"),
             func.count().filter(status_expr == "unpublished").label("unpublished"),
@@ -990,8 +969,6 @@ class Storage:
                 ...
             ]
         """
-        from datetime import datetime, timezone
-
         # Validate and cap limit
         if limit > 200:
             limit = 200
@@ -1016,10 +993,7 @@ class Storage:
         # Add date range filter if specified
         if start_date and end_date:
             # Convert ISO date strings to TwitterTimestamp (milliseconds)
-            start_dt = datetime.fromisoformat(start_date).replace(tzinfo=timezone.utc)
-            end_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
-            start_ts = int(start_dt.timestamp() * 1000)
-            end_ts = int(end_dt.timestamp() * 1000)
+            start_ts, end_ts = jst_day_range_ms(start_date, end_date)
 
             query = query.where(
                 NoteRecord.created_at >= start_ts,
@@ -1101,8 +1075,6 @@ class Storage:
                 ...
             ]
         """
-        from datetime import datetime, timezone
-
         # Validate and cap limit
         if limit > 200:
             limit = 200
@@ -1140,10 +1112,7 @@ class Storage:
         # Add date range filter if specified
         if start_date and end_date:
             # Convert ISO date strings to TwitterTimestamp (milliseconds)
-            start_dt = datetime.fromisoformat(start_date).replace(tzinfo=timezone.utc)
-            end_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
-            start_ts = int(start_dt.timestamp() * 1000)
-            end_ts = int(end_dt.timestamp() * 1000)
+            start_ts, end_ts = jst_day_range_ms(start_date, end_date)
 
             query = query.where(
                 PostRecord.created_at >= start_ts,
@@ -1227,15 +1196,8 @@ class Storage:
                 ...
             ]
         """
-        from datetime import datetime, timezone
-
-        def _to_ts_range(s: str, e: str) -> Tuple[int, int]:
-            s_dt = datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
-            e_dt = datetime.fromisoformat(e).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
-            return int(s_dt.timestamp() * 1000), int(e_dt.timestamp() * 1000)
-
-        cur_start_ts, cur_end_ts = _to_ts_range(start_date, end_date)
-        prev_start_ts, prev_end_ts = _to_ts_range(prev_start_date, prev_end_date)
+        cur_start_ts, cur_end_ts = jst_day_range_ms(start_date, end_date)
+        prev_start_ts, prev_end_ts = jst_day_range_ms(prev_start_date, prev_end_date)
 
         status_expr = self._get_publication_status_case()
 

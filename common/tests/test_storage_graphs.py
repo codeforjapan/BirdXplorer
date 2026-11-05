@@ -1,12 +1,26 @@
 """Tests for graph API storage methods."""
 
-from datetime import date
+from datetime import date, datetime
 from typing import List
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session
 
-from birdxplorer_common.storage import NoteRecord, PostRecord, Storage
+from birdxplorer_common.storage import NoteRecord, PostRecord, Storage, XUserRecord
+
+
+def _jst_ms(year: int, month: int, day: int, hour: int, minute: int = 0, second: int = 0, milli: int = 0) -> int:
+    dt = datetime(year, month, day, hour, minute, second, milli * 1000, tzinfo=ZoneInfo("Asia/Tokyo"))
+    return round(dt.timestamp() * 1000)
+
+
+def _add_notes(engine: Engine, created_ats: List[int]) -> None:
+    with Session(engine) as sess:
+        for i, created_at in enumerate(created_ats):
+            sess.add(NoteRecord(note_id=f"jst-note-{i}", summary="jst", created_at=created_at))
+        sess.commit()
 
 
 def test_get_daily_note_counts(
@@ -484,3 +498,84 @@ def test_get_top_note_accounts_limit(
     )
 
     assert len(result) <= 1
+
+
+def test_daily_counts_bucket_by_jst(engine_for_test: Engine) -> None:
+    _add_notes(
+        engine_for_test,
+        [
+            _jst_ms(2025, 12, 1, 3),
+            _jst_ms(2025, 12, 1, 23, 59, 59, 999),
+            _jst_ms(2025, 12, 2, 0),
+            _jst_ms(2025, 12, 2, 5),
+        ],
+    )
+    storage = Storage(engine=engine_for_test)
+
+    result = storage.get_daily_note_counts("2025-12-01", "2025-12-01")
+
+    assert [r["date"] for r in result] == ["2025-12-01"]
+    total = sum(r["published"] + r["evaluating"] + r["unpublished"] + r["temporarilyPublished"] for r in result)
+    assert total == 2
+
+
+def test_daily_post_counts_bucket_by_jst(engine_for_test: Engine) -> None:
+    with Session(engine_for_test) as sess:
+        sess.add(
+            XUserRecord(
+                user_id="jst-user",
+                name="u",
+                profile_image="https://example.com/a.png",
+                followers_count=0,
+                following_count=0,
+            )
+        )
+        for i, created_at in enumerate(
+            [
+                _jst_ms(2025, 12, 1, 3),
+                _jst_ms(2025, 12, 1, 23, 59, 59, 999),
+                _jst_ms(2025, 12, 2, 0),
+                _jst_ms(2025, 12, 2, 5),
+            ]
+        ):
+            sess.add(
+                PostRecord(
+                    post_id=f"jst-post-{i}",
+                    user_id="jst-user",
+                    text="jst",
+                    created_at=created_at,
+                    like_count=0,
+                    repost_count=0,
+                    impression_count=0,
+                )
+            )
+        sess.commit()
+    storage = Storage(engine=engine_for_test)
+
+    result = storage.get_daily_post_counts("2025-12-01", "2025-12-01")
+
+    assert [(r["date"], r["post_count"]) for r in result] == [("2025-12-01", 2)]
+
+
+def test_monthly_counts_bucket_by_jst(engine_for_test: Engine) -> None:
+    _add_notes(engine_for_test, [_jst_ms(2025, 12, 1, 3)])
+    storage = Storage(engine=engine_for_test)
+
+    result = storage.get_monthly_note_counts("2025-11", "2025-12")
+
+    def _total(month: str) -> int:
+        return sum(
+            r["published"] + r["evaluating"] + r["unpublished"] + r["temporarilyPublished"]
+            for r in result
+            if r["month"] == month
+        )
+
+    assert _total("2025-12") == 1
+    assert _total("2025-11") == 0
+
+
+def test_get_graph_updated_at_is_jst_date(engine_for_test: Engine) -> None:
+    _add_notes(engine_for_test, [_jst_ms(2099, 1, 1, 8)])
+    storage = Storage(engine=engine_for_test)
+
+    assert storage.get_graph_updated_at("notes") == "2099-01-01"
