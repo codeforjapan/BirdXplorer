@@ -1057,7 +1057,7 @@ class GraphListResponse(BaseModel, Generic[T]):
 
     updated_at: str = PydanticField(
         ...,
-        description="Last update timestamp in YYYY-MM-DD format (UTC). Derived from MAX(created_at) of source table.",
+        description="Last update date in YYYY-MM-DD (JST, Asia/Tokyo). Derived from MAX(created_at) of source table.",
         examples=["2025-01-15"],
     )
 

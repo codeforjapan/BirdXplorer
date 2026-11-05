@@ -3,7 +3,8 @@ from datetime import datetime
 from typing import Tuple
 from zoneinfo import ZoneInfo
 
-JST = ZoneInfo("Asia/Tokyo")
+JST_TZ_NAME = "Asia/Tokyo"
+JST = ZoneInfo(JST_TZ_NAME)
 
 
 def _to_ms(dt: datetime) -> int:

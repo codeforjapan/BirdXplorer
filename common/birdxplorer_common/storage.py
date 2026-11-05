@@ -23,7 +23,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, rela
 from sqlalchemy.orm.query import RowReturningQuery
 from sqlalchemy.types import CHAR, DECIMAL, JSON, Integer, String, Text, Uuid
 
-from .jst import jst_day_range_ms, jst_month_range_ms, jst_today, ms_to_jst_date
+from .jst import JST_TZ_NAME, jst_day_range_ms, jst_month_range_ms, jst_today, ms_to_jst_date
 from .logger import get_logger
 from .models import (
     BinaryBool,
@@ -672,7 +672,7 @@ class Storage:
 
         # Build aggregation query
         query = select(
-            func.date_trunc("day", func.timezone("Asia/Tokyo", func.to_timestamp(NoteRecord.created_at / 1000))).label(
+            func.date_trunc("day", func.timezone(JST_TZ_NAME, func.to_timestamp(NoteRecord.created_at / 1000))).label(
                 "day"
             ),
             func.count().filter(status_expr == "published").label("published"),
@@ -761,7 +761,7 @@ class Storage:
             query = (
                 select(
                     func.date_trunc(
-                        "day", func.timezone("Asia/Tokyo", func.to_timestamp(PostRecord.created_at / 1000))
+                        "day", func.timezone(JST_TZ_NAME, func.to_timestamp(PostRecord.created_at / 1000))
                     ).label("day"),
                     func.count(PostRecord.post_id).label("post_count"),
                 )
@@ -777,7 +777,7 @@ class Storage:
             query = (
                 select(
                     func.date_trunc(
-                        "day", func.timezone("Asia/Tokyo", func.to_timestamp(PostRecord.created_at / 1000))
+                        "day", func.timezone(JST_TZ_NAME, func.to_timestamp(PostRecord.created_at / 1000))
                     ).label("day"),
                     func.count(distinct(PostRecord.post_id)).label("post_count"),
                 )
@@ -872,9 +872,9 @@ class Storage:
 
         # Build aggregation query
         query = select(
-            func.date_trunc(
-                "month", func.timezone("Asia/Tokyo", func.to_timestamp(NoteRecord.created_at / 1000))
-            ).label("month"),
+            func.date_trunc("month", func.timezone(JST_TZ_NAME, func.to_timestamp(NoteRecord.created_at / 1000))).label(
+                "month"
+            ),
             func.count().filter(status_expr == "published").label("published"),
             func.count().filter(status_expr == "evaluating").label("evaluating"),
             func.count().filter(status_expr == "unpublished").label("unpublished"),
