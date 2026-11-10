@@ -350,7 +350,7 @@ components:
         date:
           type: string
           format: date
-          description: Date in YYYY-MM-DD format (UTC)
+          description: Date in YYYY-MM-DD format (JST, Asia/Tokyo)
           example: "2025-01-15"
         published:
           type: integer
@@ -378,7 +378,7 @@ components:
         date:
           type: string
           format: date
-          description: Date in YYYY-MM-DD format (UTC)
+          description: Date in YYYY-MM-DD format (JST, Asia/Tokyo)
         postCount:
           type: integer
           minimum: 0
@@ -495,7 +495,7 @@ components:
         updatedAt:
           type: string
           format: date
-          description: Last data update timestamp (UTC)
+          description: Last data update date in YYYY-MM-DD (JST, Asia/Tokyo)
 
     DailyPostsResponse:
       type: object

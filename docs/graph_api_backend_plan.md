@@ -56,7 +56,7 @@
   - `period`: `"1week"`, `"1month"`, `"3months"`, `"6months"`, `"1year"` を enum として `typing.Literal` で定義。
   - `range`: `"YYYY-MM_YYYY-MM"` 形式はバリデータで `datetime.date` に変換。
   - `status`: `"all"` がデフォルト。個別ステータス指定時は配列に展開。
-- `updatedAt`: 各レスポンスで `notes` or `posts` の最新 `created_at` (UTC) を `YYYY-MM-DD` 形式にフォーマット。
+- `updatedAt`: 各レスポンスで `notes` or `posts` の最新 `created_at` (JST, Asia/Tokyo) を `YYYY-MM-DD` 形式にフォーマット。
 - OpenAPI ドキュメント (`openapi_doc.py`) に各エンドポイントの説明・パラメータ説明を追加。
 
 ### 3.1 `/api/v1/graphs/daily-notes`
