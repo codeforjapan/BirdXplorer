@@ -678,4 +678,5 @@ def test_get_top_note_accounts_range_is_jst(engine_for_test: Engine) -> None:
         status_filter="all",
     )
 
-    assert [(r["username"], r["note_count"]) for r in result] == [("jst-user-name", 1)]
+    # UTC で区切ると inside が前期間に、outside が今期に入れ替わり、件数だけでは区別できない
+    assert [(r["username"], r["note_count"], r["note_count_change"]) for r in result] == [("jst-user-name", 1, 1)]
