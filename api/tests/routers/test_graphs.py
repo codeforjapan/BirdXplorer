@@ -679,3 +679,37 @@ def test_top_note_accounts_prev_period_is_adjacent_jst_days(client: TestClient, 
     assert kwargs["end_date"] == "2025-12-14"
     assert kwargs["prev_start_date"] == "2025-12-01"
     assert kwargs["prev_end_date"] == "2025-12-07"
+
+
+def _jst_ms(year: int, month: int, day: int, hour: int, minute: int = 0) -> int:
+    return int(datetime(year, month, day, hour, minute, tzinfo=timezone(timedelta(hours=9))).timestamp() * 1000)
+
+
+def test_top_note_accounts_prev_period_non_midnight_inputs(client: TestClient, mock_storage: MagicMock) -> None:
+    """Non-midnight inputs round to JST days; previous period is adjacent and the same length."""
+    start_ts = _jst_ms(2025, 12, 8, 12)
+    end_ts = _jst_ms(2025, 12, 14, 18, 30)
+    response = client.get(f"/api/v1/graphs/top-note-accounts?start_date={start_ts}&end_date={end_ts}")
+
+    assert response.status_code == 200
+    kwargs = mock_storage.get_top_note_accounts.call_args.kwargs
+    assert kwargs["start_date"] == "2025-12-08"
+    assert kwargs["end_date"] == "2025-12-14"
+    assert kwargs["prev_end_date"] == "2025-12-07"
+    assert kwargs["prev_start_date"] == "2025-12-01"
+
+    def _days(a: str, b: str) -> int:
+        return (datetime.strptime(b, "%Y-%m-%d") - datetime.strptime(a, "%Y-%m-%d")).days + 1
+
+    assert _days(kwargs["prev_start_date"], kwargs["prev_end_date"]) == _days(kwargs["start_date"], kwargs["end_date"])
+
+
+def test_top_note_accounts_prev_period_single_day(client: TestClient, mock_storage: MagicMock) -> None:
+    start_ts = _jst_ms(2025, 12, 8, 3)
+    end_ts = _jst_ms(2025, 12, 8, 20)
+    response = client.get(f"/api/v1/graphs/top-note-accounts?start_date={start_ts}&end_date={end_ts}")
+
+    assert response.status_code == 200
+    kwargs = mock_storage.get_top_note_accounts.call_args.kwargs
+    assert kwargs["prev_start_date"] == "2025-12-07"
+    assert kwargs["prev_end_date"] == "2025-12-07"

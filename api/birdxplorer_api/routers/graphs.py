@@ -3,6 +3,7 @@
 Provides time-series aggregations and evaluation metrics for community notes and posts.
 """
 
+from datetime import datetime, timedelta
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -697,12 +698,14 @@ def gen_router(storage: Storage) -> APIRouter:
             start_date_str = twitter_timestamp_to_iso_date(start_date)
             end_date_str = twitter_timestamp_to_iso_date(end_date)
 
-            # Previous period: same duration, ending just before start_date
-            duration_ms = int(end_date) - int(start_date)
-            prev_start_ms = int(start_date) - duration_ms
-            prev_end_ms = int(start_date) - 1
-            prev_start_date_str = twitter_timestamp_to_iso_date(prev_start_ms)
-            prev_end_date_str = twitter_timestamp_to_iso_date(prev_end_ms)
+            # Previous period: same number of JST days, ending the day before start_date
+            start_day = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            end_day = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+            days = (end_day - start_day).days + 1
+            prev_end_day = start_day - timedelta(days=1)
+            prev_start_day = prev_end_day - timedelta(days=days - 1)
+            prev_start_date_str = prev_start_day.strftime("%Y-%m-%d")
+            prev_end_date_str = prev_end_day.strftime("%Y-%m-%d")
 
             raw_data = storage.get_top_note_accounts(
                 start_date=start_date_str,
