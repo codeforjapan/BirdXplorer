@@ -1759,7 +1759,7 @@ class TestProbeSnapshot:
         with patch("birdxplorer_etl.extract_ecs.requests") as mock_requests:
             mock_requests.head.return_value = MagicMock(status_code=200)
             _probe_snapshot("notes", "2026/10/05")
-        assert mock_requests.head.call_args.kwargs.get("timeout") == 30
+        assert mock_requests.head.call_args.kwargs.get("timeout") == (30, 300)
 
 
 class TestSnapshotFileUrl:
@@ -1788,7 +1788,7 @@ class TestProbeRatingsShard:
             assert _probe_ratings_shard("2026/10/05", 7) is True
         (url,) = mock_requests.head.call_args.args
         assert url == "https://ton.twimg.com/birdwatch-public-data/2026/10/05/noteRatings/ratings-00007.zip"
-        assert mock_requests.head.call_args.kwargs["timeout"] == 30
+        assert mock_requests.head.call_args.kwargs["timeout"] == (30, 300)
 
     def test_returns_false_on_404(self) -> None:
         with patch("birdxplorer_etl.extract_ecs.requests") as mock_requests:
