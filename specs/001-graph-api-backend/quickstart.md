@@ -471,7 +471,7 @@ publication_rate = published / total if total > 0 else 0.0
 **Solution**:
 - Use `_fill_daily_gaps()` helper for continuous series
 - Parse range format carefully: `YYYY-MM_YYYY-MM`
-- Handle timezone correctly (all dates in UTC)
+- Handle timezone correctly (all dates in JST, Asia/Tokyo)
 
 ### Issue: mypy Type Errors
 

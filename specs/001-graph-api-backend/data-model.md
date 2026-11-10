@@ -68,7 +68,7 @@ class DailyNotesCreationDataItem(BaseModel):
 
     date: str = Field(
         ...,
-        description="Date in YYYY-MM-DD format (UTC timezone)",
+        description="Date in YYYY-MM-DD format (JST, Asia/Tokyo)",
         examples=["2025-01-15"]
     )
 
@@ -133,7 +133,7 @@ class DailyPostCountDataItem(BaseModel):
 
     date: str = Field(
         ...,
-        description="Date in YYYY-MM-DD format (UTC timezone)",
+        description="Date in YYYY-MM-DD format (JST, Asia/Tokyo)",
         examples=["2025-01-15"]
     )
 
@@ -418,7 +418,7 @@ class GraphListResponse(BaseModel, Generic[T]):
 
     updated_at: str = Field(
         ...,
-        description="Last update timestamp in YYYY-MM-DD format (UTC). Derived from MAX(created_at) of source table.",
+        description="Last update timestamp in YYYY-MM-DD (JST, Asia/Tokyo). Derived from MAX(created_at) of source table.",
         serialization_alias="updatedAt",
         examples=["2025-01-15"]
     )
@@ -443,7 +443,7 @@ class GraphListResponse(BaseModel, Generic[T]):
 
 **Validation Rules** (from FR-021, FR-022, FR-026, FR-027):
 - data must be a list (can be empty per FR-027)
-- updated_at format is YYYY-MM-DD in UTC (FR-021)
+- updated_at format is YYYY-MM-DD in JST, Asia/Tokyo (FR-021)
 - updated_at derived from MAX(created_at) of notes or posts table (FR-022)
 - Response format consistent across all endpoints (FR-026)
 

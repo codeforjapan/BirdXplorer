@@ -3,10 +3,12 @@
 Provides time-series aggregations and evaluation metrics for community notes and posts.
 """
 
+from datetime import datetime, timedelta
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
+from birdxplorer_common.jst import ms_to_jst_date, ms_to_jst_month
 from birdxplorer_common.models import (
     DailyNotesCreationDataItem,
     DailyPostCountDataItem,
@@ -24,22 +26,21 @@ StatusType = Literal["all", "published", "evaluating", "unpublished", "temporari
 
 
 def twitter_timestamp_to_iso_date(ts: int) -> str:
-    """Convert TwitterTimestamp (milliseconds) to ISO date string.
+    """Convert TwitterTimestamp (milliseconds) to ISO date string in JST (Asia/Tokyo).
 
     Args:
-        ts: Twitter timestamp in milliseconds (Unix epoch, UTC)
+        ts: Twitter timestamp in milliseconds (Unix epoch)
 
     Returns:
-        ISO formatted date string (YYYY-MM-DD) in UTC
+        ISO formatted date string (YYYY-MM-DD) in JST
 
     Examples:
-        >>> twitter_timestamp_to_iso_date(1704067200000)
+        >>> twitter_timestamp_to_iso_date(1704034800000)
         '2024-01-01'
+        >>> twitter_timestamp_to_iso_date(1704034799999)
+        '2023-12-31'
     """
-    from datetime import datetime, timezone
-
-    dt = datetime.fromtimestamp(int(ts) / 1000, tz=timezone.utc)
-    return dt.strftime("%Y-%m-%d")
+    return ms_to_jst_date(int(ts))
 
 
 def validate_timestamp_range(
@@ -87,8 +88,12 @@ def gen_router(storage: Storage) -> APIRouter:
 
     @router.get("/daily-notes", response_model=GraphListResponse[DailyNotesCreationDataItem])
     def get_daily_notes(
-        start_date: TwitterTimestamp = Query(..., description="Start timestamp in milliseconds (Unix epoch, UTC)"),
-        end_date: TwitterTimestamp = Query(..., description="End timestamp in milliseconds (Unix epoch, UTC)"),
+        start_date: TwitterTimestamp = Query(
+            ..., description="Start of range: epoch ms, taken as the JST (Asia/Tokyo) day containing it"
+        ),
+        end_date: TwitterTimestamp = Query(
+            ..., description="End of range: epoch ms, taken as the JST (Asia/Tokyo) day containing it"
+        ),
         status: StatusType = Query("all", description="Filter by note publication status"),
         language: Optional[str] = Query(None, description="Comma-separated language codes to filter by (e.g., ja,en)"),
         keywords: Optional[str] = Query(None, description="Comma-separated keywords for AND search in note summaries"),
@@ -105,7 +110,7 @@ def gen_router(storage: Storage) -> APIRouter:
         - `unpublished`: All other notes
 
         **Date Range:**
-        - Timestamps must be in milliseconds (Unix epoch, UTC)
+        - Timestamps are epoch ms, taken as the JST (Asia/Tokyo) day containing them; returned dates are JST
         - Maximum range: 90 days
         - start_date must be <= end_date
         - Timestamps must be >= 2006-07-15 (Twitter founding) and <= current time
@@ -168,8 +173,12 @@ def gen_router(storage: Storage) -> APIRouter:
 
     @router.get("/daily-posts", response_model=GraphListResponse[DailyPostCountDataItem])
     def get_daily_posts(
-        start_date: TwitterTimestamp = Query(..., description="Start timestamp in milliseconds (Unix epoch, UTC)"),
-        end_date: TwitterTimestamp = Query(..., description="End timestamp in milliseconds (Unix epoch, UTC)"),
+        start_date: TwitterTimestamp = Query(
+            ..., description="Start of range: epoch ms, taken as the JST (Asia/Tokyo) day containing it"
+        ),
+        end_date: TwitterTimestamp = Query(
+            ..., description="End of range: epoch ms, taken as the JST (Asia/Tokyo) day containing it"
+        ),
         status: StatusType = Query("all", description="Filter by note publication status"),
         language: Optional[str] = Query(None, description="Comma-separated language codes to filter by (e.g., ja,en)"),
         keywords: Optional[str] = Query(None, description="Comma-separated keywords for AND search in note summaries"),
@@ -187,7 +196,7 @@ def gen_router(storage: Storage) -> APIRouter:
         - `unpublished`: Posts with no notes or unpublished notes
 
         **Date Range:**
-        - Timestamps must be in milliseconds (Unix epoch, UTC)
+        - Timestamps are epoch ms, taken as the JST (Asia/Tokyo) day containing them; returned dates are JST
         - Maximum range: 90 days
         - start_date must be <= end_date
         - Timestamps must be >= 2006-07-15 (Twitter founding) and <= current time
@@ -257,8 +266,12 @@ def gen_router(storage: Storage) -> APIRouter:
 
     @router.get("/notes-annual", response_model=GraphListResponse[MonthlyNoteDataItem])
     def get_notes_annual(
-        start_date: TwitterTimestamp = Query(..., description="Start timestamp in milliseconds (Unix epoch, UTC)"),
-        end_date: TwitterTimestamp = Query(..., description="End timestamp in milliseconds (Unix epoch, UTC)"),
+        start_date: TwitterTimestamp = Query(
+            ..., description="Start of range: epoch ms, taken as the JST (Asia/Tokyo) day containing it"
+        ),
+        end_date: TwitterTimestamp = Query(
+            ..., description="End of range: epoch ms, taken as the JST (Asia/Tokyo) day containing it"
+        ),
         status: StatusType = Query("all", description="Filter by note publication status"),
         language: Optional[str] = Query(None, description="Comma-separated language codes to filter by (e.g., ja,en)"),
         keywords: Optional[str] = Query(None, description="Comma-separated keywords for AND search in note summaries"),
@@ -278,7 +291,7 @@ def gen_router(storage: Storage) -> APIRouter:
         - `unpublished`: Only unpublished notes
 
         **Date Range:**
-        - Timestamps must be in milliseconds (Unix epoch, UTC)
+        - Timestamps are epoch ms, taken as the JST (Asia/Tokyo) day containing them; returned dates are JST
         - Maximum range: 365 days (approximately 12 months)
         - start_date must be <= end_date
         - Timestamps must be >= 2006-07-15 (Twitter founding) and <= current time
@@ -305,15 +318,9 @@ def gen_router(storage: Storage) -> APIRouter:
             language_list = [lang.strip() for lang in language.split(",")] if language else None
             keywords_list = [kw.strip() for kw in keywords.split(",")] if keywords else None
 
-            # Convert timestamps to datetime objects for month extraction
-            from datetime import datetime, timezone
-
-            start_dt = datetime.fromtimestamp(int(start_date) / 1000, tz=timezone.utc)
-            end_dt = datetime.fromtimestamp(int(end_date) / 1000, tz=timezone.utc)
-
-            # Format as YYYY-MM for storage method
-            start_month = start_dt.strftime("%Y-%m")
-            end_month = end_dt.strftime("%Y-%m")
+            # Format as YYYY-MM (JST) for storage method
+            start_month = ms_to_jst_month(int(start_date))
+            end_month = ms_to_jst_month(int(end_date))
 
             # Fetch data from storage
             raw_data = storage.get_monthly_note_counts(
@@ -360,8 +367,12 @@ def gen_router(storage: Storage) -> APIRouter:
 
     @router.get("/notes-evaluation", response_model=GraphListResponse[NoteEvaluationDataItem])
     def get_notes_evaluation(
-        start_date: TwitterTimestamp = Query(..., description="Start timestamp in milliseconds (Unix epoch, UTC)"),
-        end_date: TwitterTimestamp = Query(..., description="End timestamp in milliseconds (Unix epoch, UTC)"),
+        start_date: TwitterTimestamp = Query(
+            ..., description="Start of range: epoch ms, taken as the JST (Asia/Tokyo) day containing it"
+        ),
+        end_date: TwitterTimestamp = Query(
+            ..., description="End of range: epoch ms, taken as the JST (Asia/Tokyo) day containing it"
+        ),
         status: StatusType = Query("all", description="Filter by note publication status"),
         limit: int = Query(200, ge=1, le=5000, description="Maximum number of results (max 5000)"),
         language: Optional[str] = Query(None, description="Comma-separated language codes to filter by (e.g., ja,en)"),
@@ -387,7 +398,7 @@ def gen_router(storage: Storage) -> APIRouter:
         - `unpublished`: Only unpublished notes
 
         **Date Range:**
-        - Timestamps must be in milliseconds (Unix epoch, UTC)
+        - Timestamps are epoch ms, taken as the JST (Asia/Tokyo) day containing them; returned dates are JST
         - Maximum range: 90 days
         - start_date must be <= end_date
         - Timestamps must be >= 2006-07-15 (Twitter founding) and <= current time
@@ -449,8 +460,12 @@ def gen_router(storage: Storage) -> APIRouter:
 
     @router.get("/notes-evaluation-status", response_model=GraphListResponse[NoteEvaluationDataItem])
     def get_notes_evaluation_status(
-        start_date: TwitterTimestamp = Query(..., description="Start timestamp in milliseconds (Unix epoch, UTC)"),
-        end_date: TwitterTimestamp = Query(..., description="End timestamp in milliseconds (Unix epoch, UTC)"),
+        start_date: TwitterTimestamp = Query(
+            ..., description="Start of range: epoch ms, taken as the JST (Asia/Tokyo) day containing it"
+        ),
+        end_date: TwitterTimestamp = Query(
+            ..., description="End of range: epoch ms, taken as the JST (Asia/Tokyo) day containing it"
+        ),
         status: StatusType = Query("all", description="Filter by note publication status"),
         limit: int = Query(200, ge=1, le=5000, description="Maximum number of results (max 5000)"),
         language: Optional[str] = Query(None, description="Comma-separated language codes to filter by (e.g., ja,en)"),
@@ -476,7 +491,7 @@ def gen_router(storage: Storage) -> APIRouter:
         - `unpublished`: Only unpublished notes
 
         **Date Range:**
-        - Timestamps must be in milliseconds (Unix epoch, UTC)
+        - Timestamps are epoch ms, taken as the JST (Asia/Tokyo) day containing them; returned dates are JST
         - Maximum range: 90 days
         - start_date must be <= end_date
         - Timestamps must be >= 2006-07-15 (Twitter founding) and <= current time
@@ -539,8 +554,12 @@ def gen_router(storage: Storage) -> APIRouter:
 
     @router.get("/post-influence", response_model=GraphListResponse[PostInfluenceDataItem])
     def get_post_influence(
-        start_date: TwitterTimestamp = Query(..., description="Start timestamp in milliseconds (Unix epoch, UTC)"),
-        end_date: TwitterTimestamp = Query(..., description="End timestamp in milliseconds (Unix epoch, UTC)"),
+        start_date: TwitterTimestamp = Query(
+            ..., description="Start of range: epoch ms, taken as the JST (Asia/Tokyo) day containing it"
+        ),
+        end_date: TwitterTimestamp = Query(
+            ..., description="End of range: epoch ms, taken as the JST (Asia/Tokyo) day containing it"
+        ),
         status: StatusType = Query("all", description="Filter by note publication status"),
         limit: int = Query(200, ge=1, le=5000, description="Maximum number of results (max 5000)"),
         language: Optional[str] = Query(None, description="Comma-separated language codes to filter by (e.g., ja,en)"),
@@ -566,7 +585,7 @@ def gen_router(storage: Storage) -> APIRouter:
         - `unpublished`: Posts with no notes or unpublished notes
 
         **Date Range:**
-        - Timestamps must be in milliseconds (Unix epoch, UTC)
+        - Timestamps are epoch ms, taken as the JST (Asia/Tokyo) day containing them; returned dates are JST
         - Maximum range: 90 days
         - start_date must be <= end_date
         - Timestamps must be >= 2006-07-15 (Twitter founding) and <= current time
@@ -628,8 +647,12 @@ def gen_router(storage: Storage) -> APIRouter:
 
     @router.get("/top-note-accounts", response_model=GraphListResponse[TopNoteAccountDataItem])
     def get_top_note_accounts(
-        start_date: TwitterTimestamp = Query(..., description="Start timestamp in milliseconds (Unix epoch, UTC)"),
-        end_date: TwitterTimestamp = Query(..., description="End timestamp in milliseconds (Unix epoch, UTC)"),
+        start_date: TwitterTimestamp = Query(
+            ..., description="Start of range: epoch ms, taken as the JST (Asia/Tokyo) day containing it"
+        ),
+        end_date: TwitterTimestamp = Query(
+            ..., description="End of range: epoch ms, taken as the JST (Asia/Tokyo) day containing it"
+        ),
         status: StatusType = Query("all", description="Filter by note publication status"),
         language: Optional[str] = Query(None, description="Comma-separated language codes to filter by (e.g., ja,en)"),
         keywords: Optional[str] = Query(None, description="Comma-separated keywords for AND search in note summaries"),
@@ -647,7 +670,7 @@ def gen_router(storage: Storage) -> APIRouter:
         - note_count_change = current_count - previous_count (0 if no previous data)
 
         **Date Range:**
-        - Timestamps must be in milliseconds (Unix epoch, UTC)
+        - Timestamps are epoch ms, taken as the JST (Asia/Tokyo) day containing them; returned dates are JST
         - Maximum range: 90 days
         - start_date must be <= end_date
 
@@ -675,12 +698,14 @@ def gen_router(storage: Storage) -> APIRouter:
             start_date_str = twitter_timestamp_to_iso_date(start_date)
             end_date_str = twitter_timestamp_to_iso_date(end_date)
 
-            # Previous period: same duration, ending just before start_date
-            duration_ms = int(end_date) - int(start_date)
-            prev_start_ms = int(start_date) - duration_ms
-            prev_end_ms = int(start_date) - 1
-            prev_start_date_str = twitter_timestamp_to_iso_date(prev_start_ms)
-            prev_end_date_str = twitter_timestamp_to_iso_date(prev_end_ms)
+            # Previous period: same number of JST days, ending the day before start_date
+            start_day = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            end_day = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+            days = (end_day - start_day).days + 1
+            prev_end_day = start_day - timedelta(days=1)
+            prev_start_day = prev_end_day - timedelta(days=days - 1)
+            prev_start_date_str = prev_start_day.strftime("%Y-%m-%d")
+            prev_end_date_str = prev_end_day.strftime("%Y-%m-%d")
 
             raw_data = storage.get_top_note_accounts(
                 start_date=start_date_str,

@@ -103,7 +103,7 @@
 - Dependencies on existing schema (tables, columns) documented in FR-028, FR-029
 - Data quality dependencies on ETL process noted
 - Performance assumptions about indexing specified
-- Timezone standardization (UTC) documented
+- Timezone standardization (JST, Asia/Tokyo) documented
 
 ### Feature Readiness Assessment
 
