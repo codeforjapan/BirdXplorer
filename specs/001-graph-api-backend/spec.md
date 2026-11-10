@@ -122,7 +122,7 @@ Marketing and community teams need to understand which posts have the most influ
 - **NULL or negative impression counts**: NULL treated as 0; negative values treated as 0 to prevent invalid analytics
 - **Invalid status filter**: System returns 400 error with message indicating valid status values
 - **Limit exceeds maximum**: System returns 400 error when limit parameter exceeds 1000
-- **Timezone handling**: All timestamps stored and returned in UTC; clients responsible for timezone conversion
+- **Timezone handling**: Timestamps are stored as UTC epoch milliseconds; date ranges, day/month buckets and returned dates are in JST (Asia/Tokyo)
 - **Status transitions during aggregation**: Uses snapshot consistency - status at query execution time determines categorization
 - **Concurrent expensive queries**: System handles via read-only query optimization and infrastructure scaling; no rate limiting implemented (per FR-033)
 
@@ -154,7 +154,7 @@ Marketing and community teams need to understand which posts have the most influ
 - **FR-018**: System MUST validate range parameter format (YYYY-MM_YYYY-MM) and ensure start month is before or equal to end month
 - **FR-019**: System MUST enforce maximum range constraints (1 year for daily-notes, 24 months for notes-annual)
 - **FR-020**: System MUST enforce limit parameter constraints (max 1000)
-- **FR-021**: System MUST include updatedAt timestamp in all responses formatted as "YYYY-MM-DD" in UTC
+- **FR-021**: System MUST include updatedAt timestamp in all responses formatted as "YYYY-MM-DD" in JST (Asia/Tokyo)
 - **FR-022**: System MUST derive updatedAt from MAX(created_at) of the relevant table (notes or posts)
 - **FR-023**: System MUST handle NULL impression counts by treating them as 0
 - **FR-024**: System MUST handle division by zero in publication rate calculation by returning 0
