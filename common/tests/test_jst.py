@@ -1,8 +1,10 @@
-import re
-from datetime import datetime
+from datetime import datetime, timezone, tzinfo
+from typing import Optional
 
+import pytest
+
+from birdxplorer_common import jst as jst_module
 from birdxplorer_common.jst import (
-    JST,
     jst_day_range_ms,
     jst_month_range_ms,
     jst_today,
@@ -31,9 +33,12 @@ def test_jst_month_range_ms() -> None:
     assert jst_month_range_ms("2025-12", "2026-01") == (1764514800000, 1769871599999)
 
 
-def test_jst_today_matches_now_in_jst() -> None:
-    before = datetime.now(JST).strftime("%Y-%m-%d")
-    today = jst_today()
-    after = datetime.now(JST).strftime("%Y-%m-%d")
-    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", today)
-    assert before <= today <= after
+def test_jst_today_uses_jst_not_utc(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz: Optional[tzinfo] = None) -> "_FrozenDatetime":
+            return cls.fromtimestamp(datetime(2025, 12, 1, 23, 30, tzinfo=timezone.utc).timestamp(), tz)
+
+    monkeypatch.setattr(jst_module, "datetime", _FrozenDatetime)
+
+    assert jst_today() == "2025-12-02"

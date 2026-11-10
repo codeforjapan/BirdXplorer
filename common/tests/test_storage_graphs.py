@@ -579,3 +579,103 @@ def test_get_graph_updated_at_is_jst_date(engine_for_test: Engine) -> None:
     storage = Storage(engine=engine_for_test)
 
     assert storage.get_graph_updated_at("notes") == "2099-01-01"
+
+
+def test_monthly_counts_month_end_boundary_jst(engine_for_test: Engine) -> None:
+    # 11/30 23:59 JST は 11/30 14:59 UTC、12/01 00:00 JST は 11/30 15:00 UTC
+    _add_notes(engine_for_test, [_jst_ms(2025, 11, 30, 23, 59), _jst_ms(2025, 12, 1, 0)])
+    storage = Storage(engine=engine_for_test)
+
+    result = storage.get_monthly_note_counts("2025-11", "2025-12")
+
+    def _total(month: str) -> int:
+        return sum(
+            r["published"] + r["evaluating"] + r["unpublished"] + r["temporarilyPublished"]
+            for r in result
+            if r["month"] == month
+        )
+
+    assert _total("2025-11") == 1
+    assert _total("2025-12") == 1
+
+
+def _add_user(sess: Session) -> None:
+    sess.add(
+        XUserRecord(
+            user_id="jst-user",
+            name="jst-user-name",
+            profile_image="https://example.com/a.png",
+            followers_count=0,
+            following_count=0,
+        )
+    )
+
+
+def _add_post(sess: Session, post_id: str, created_at: int) -> None:
+    sess.add(
+        PostRecord(
+            post_id=post_id,
+            user_id="jst-user",
+            text="jst",
+            created_at=created_at,
+            like_count=0,
+            repost_count=0,
+            impression_count=10,
+        )
+    )
+
+
+def test_get_post_influence_points_range_is_jst(engine_for_test: Engine) -> None:
+    # 範囲先頭日の JST 00:30(UTC では前日)は含み、終了日の翌日 JST 00:30(UTC では終了日)は除外
+    with Session(engine_for_test) as sess:
+        _add_user(sess)
+        _add_post(sess, "inside", _jst_ms(2025, 12, 1, 0, 30))
+        _add_post(sess, "outside", _jst_ms(2025, 12, 2, 0, 30))
+        sess.commit()
+    storage = Storage(engine=engine_for_test)
+
+    result = storage.get_post_influence_points(start_date="2025-12-01", end_date="2025-12-01", status_filter="all")
+
+    assert [r["post_id"] for r in result] == ["inside"]
+
+
+def test_get_note_evaluation_points_range_is_jst(engine_for_test: Engine) -> None:
+    with Session(engine_for_test) as sess:
+        _add_user(sess)
+        _add_post(sess, "jst-post", _jst_ms(2025, 12, 1, 12))
+        sess.add(
+            NoteRecord(note_id="inside", post_id="jst-post", summary="jst", created_at=_jst_ms(2025, 12, 1, 0, 30))
+        )
+        sess.add(
+            NoteRecord(note_id="outside", post_id="jst-post", summary="jst", created_at=_jst_ms(2025, 12, 2, 0, 30))
+        )
+        sess.commit()
+    storage = Storage(engine=engine_for_test)
+
+    result = storage.get_note_evaluation_points(start_date="2025-12-01", end_date="2025-12-01", status_filter="all")
+
+    assert [r["note_id"] for r in result] == ["inside"]
+
+
+def test_get_top_note_accounts_range_is_jst(engine_for_test: Engine) -> None:
+    with Session(engine_for_test) as sess:
+        _add_user(sess)
+        _add_post(sess, "jst-post", _jst_ms(2025, 12, 1, 12))
+        sess.add(
+            NoteRecord(note_id="inside", post_id="jst-post", summary="jst", created_at=_jst_ms(2025, 12, 1, 0, 30))
+        )
+        sess.add(
+            NoteRecord(note_id="outside", post_id="jst-post", summary="jst", created_at=_jst_ms(2025, 12, 2, 0, 30))
+        )
+        sess.commit()
+    storage = Storage(engine=engine_for_test)
+
+    result = storage.get_top_note_accounts(
+        start_date="2025-12-01",
+        end_date="2025-12-01",
+        prev_start_date="2025-11-30",
+        prev_end_date="2025-11-30",
+        status_filter="all",
+    )
+
+    assert [(r["username"], r["note_count"]) for r in result] == [("jst-user-name", 1)]
