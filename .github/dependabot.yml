@@ -1,0 +1,27 @@
+version: 2
+
+# 注意: api/**・common/**・etl/**・migrate/** を変える PR は、PR の CI で本番 (dev) にデプロイされる
+# (deploy-api.yml / deploy-etl-lambda.yml)。Dependabot が作った PR には Secret が渡らないので
+# デプロイのジョブは失敗して止まるが、PR のブランチに人が push すると本番に入る。
+updates:
+  - package-ecosystem: 'github-actions'
+    open-pull-requests-limit: 10
+    directory: '/'
+    schedule:
+      day: 'monday'
+      interval: 'weekly'
+      time: '10:00'
+      timezone: 'Asia/Tokyo'
+
+  - package-ecosystem: 'pip'
+    open-pull-requests-limit: 10
+    directories:
+      - '/api'
+      - '/common'
+      - '/etl'
+      - '/migrate'
+    schedule:
+      day: 'monday'
+      interval: 'weekly'
+      time: '10:00'
+      timezone: 'Asia/Tokyo'
