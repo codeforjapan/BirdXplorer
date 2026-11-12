@@ -57,7 +57,7 @@ from birdxplorer_common.models import (
     UserEnrollment,
     UserId,
 )
-from birdxplorer_common.storage import CsvExportRow, Storage
+from birdxplorer_common.storage import CsvExportRow, SearchCount, Storage
 
 _CSV_EXPORT_JST = ZoneInfo("Asia/Tokyo")
 _CSV_EXPORT_THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
@@ -157,8 +157,18 @@ NotesPaginationMetaWithExamples: TypeAlias = Annotated[
     ),
 ]
 
+
+class SearchPaginationMeta(PaginationMeta):
+    total_is_estimate: Annotated[
+        Optional[bool],
+        PydanticField(
+            description="total が DB の統計値による概算かどうか。絞り込み条件を1つも指定しないときに true になることがある"
+        ),
+    ] = None
+
+
 SearchPaginationMetaWithExamples: TypeAlias = Annotated[
-    PaginationMeta,
+    SearchPaginationMeta,
     PydanticField(
         description="ページネーション用情報。 リクエスト時に指定した offset / limit の値に応じて、次のページや前のページのリクエスト用 URL が設定される。",
         json_schema_extra={
@@ -397,6 +407,15 @@ class SearchCountResponse(BaseModel):
     total: Annotated[int, PydanticField(description="検索結果の総件数")]
 
 
+class SearchCountWithEstimateResponse(SearchCountResponse):
+    is_estimate: Annotated[
+        bool,
+        PydanticField(
+            description="total が DB の統計値による概算かどうか。絞り込み条件を1つも指定しないときに true になることがある"
+        ),
+    ]
+
+
 class SemanticSearchResult(BaseModel):
     note: Note
     score: float
@@ -440,6 +459,7 @@ def _build_search_response(
     request: Request,
     offset: int,
     limit: int,
+    total_is_estimate: Optional[bool] = None,
 ) -> SearchResponse:
     results = []
     for note, post in items:
@@ -480,7 +500,10 @@ def _build_search_response(
         query_params["limit"] = [str(limit)]
         prev_url = f"{base_url}?{urlencode(query_params, doseq=True)}"
 
-    return SearchResponse(data=results, meta=PaginationMeta(next=next_url, prev=prev_url, total=total))
+    return SearchResponse(
+        data=results,
+        meta=SearchPaginationMeta(next=next_url, prev=prev_url, total=total, total_is_estimate=total_is_estimate),
+    )
 
 
 def gen_router(
@@ -748,7 +771,9 @@ def gen_router(
         )
         return SearchCountResponse(total=total_count)
 
-    @router.get("/search/count", description=V1DataSearchCountDocs.description, response_model=SearchCountResponse)
+    @router.get(
+        "/search/count", description=V1DataSearchCountDocs.description, response_model=SearchCountWithEstimateResponse
+    )
     def search_count(
         note_includes_text: Union[None, List[str]] = Query(
             default=None, **V1DataSearchCountDocs.params["note_includes_text"]
@@ -796,7 +821,7 @@ def gen_router(
         post_search_mode: TextSearchMode = Query(
             default=TextSearchMode.OR, **V1DataSearchCountDocs.params["post_search_mode"]
         ),
-    ) -> SearchCountResponse:
+    ) -> SearchCountWithEstimateResponse:
         try:
             if note_created_at_from is not None and isinstance(note_created_at_from, str):
                 note_created_at_from = ensure_twitter_timestamp(note_created_at_from)
@@ -805,7 +830,7 @@ def gen_router(
         except OverflowError as e:
             raise HTTPException(status_code=422, detail=str(e))
 
-        total = storage.count_search_results(
+        count = storage.count_search_results_with_estimate(
             note_includes_texts=note_includes_text,
             note_excludes_text=note_excludes_text,
             post_includes_texts=post_includes_text,
@@ -826,7 +851,7 @@ def gen_router(
             post_search_mode=post_search_mode,
         )
 
-        return SearchCountResponse(total=total)
+        return SearchCountWithEstimateResponse(total=count.total, is_estimate=count.is_estimate)
 
     @router.get("/search", description=V1DataSearchDocs.description, response_model=SearchResponse)
     def search(
@@ -911,9 +936,9 @@ def gen_router(
         )
 
         # include_total=True のときはCOUNTクエリで総件数を取得（後方互換性のため）
-        total_count = None
+        count: Optional[SearchCount] = None
         if include_total:
-            total_count = storage.count_search_results(
+            count = storage.count_search_results_with_estimate(
                 note_includes_texts=note_includes_text,
                 note_excludes_text=note_excludes_text,
                 post_includes_texts=post_includes_text,
@@ -935,7 +960,15 @@ def gen_router(
             )
 
         # total は条件なしのとき概算になるので、次ページの有無は limit+1 件の取得結果で判定する
-        return _build_search_response(page.items, page.has_next, total_count, request, offset, limit)
+        return _build_search_response(
+            page.items,
+            page.has_next,
+            count.total if count is not None else None,
+            request,
+            offset,
+            limit,
+            total_is_estimate=count.is_estimate if count is not None else None,
+        )
 
     @router.get("/search/keyword", description="広域 note テキスト検索（OpenSearch）", response_model=SearchResponse)
     def search_keyword(
@@ -993,7 +1026,15 @@ def gen_router(
                 )
                 has_next = (offset + limit < total) if total is not None else (len(note_ids) > limit)
                 items = storage.hydrate_notes_with_posts(note_ids[:limit], sort_order=sort_order)
-                return _build_search_response(items, has_next, total, request, offset, limit)
+                return _build_search_response(
+                    items,
+                    has_next,
+                    total,
+                    request,
+                    offset,
+                    limit,
+                    total_is_estimate=False if total is not None else None,
+                )
             except SemanticSearchUnavailableError:
                 get_logger().warning("keyword search fell back to postgres")
 
@@ -1012,9 +1053,9 @@ def gen_router(
             sort_order=sort_order,
             note_search_mode=note_search_mode,
         )
-        total = None
+        count: Optional[SearchCount] = None
         if include_total:
-            total = storage.count_search_results(
+            count = storage.count_search_results_with_estimate(
                 note_includes_texts=note_includes_text,
                 note_excludes_text=note_excludes_text,
                 language=language,
@@ -1022,7 +1063,15 @@ def gen_router(
                 note_created_at_to=note_created_at_to,
                 note_search_mode=note_search_mode,
             )
-        return _build_search_response(page.items, page.has_next, total, request, offset, limit)
+        return _build_search_response(
+            page.items,
+            page.has_next,
+            count.total if count is not None else None,
+            request,
+            offset,
+            limit,
+            total_is_estimate=count.is_estimate if count is not None else None,
+        )
 
     @router.get(
         "/export/csv",

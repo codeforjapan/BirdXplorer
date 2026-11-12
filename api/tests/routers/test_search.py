@@ -14,7 +14,7 @@ from birdxplorer_common.models import (
     TwitterTimestamp,
     XUser,
 )
-from birdxplorer_common.storage import SearchResultPage
+from birdxplorer_common.storage import SearchCount, SearchResultPage
 
 
 def test_search_basic(client: TestClient, mock_storage: MagicMock) -> None:
@@ -61,7 +61,7 @@ def test_search_basic(client: TestClient, mock_storage: MagicMock) -> None:
 
     # Mock storage response
     mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[(note, post)], has_next=False)
-    mock_storage.count_search_results.return_value = 1
+    mock_storage.count_search_results_with_estimate.return_value = SearchCount(total=1, is_estimate=False)
 
     # Test basic search
     response = client.get("/api/v1/data/search?note_includes_text=test")
@@ -160,8 +160,8 @@ def test_search_pagination(client: TestClient, mock_storage: MagicMock) -> None:
     assert data["meta"]["next"] is None
     assert data["meta"]["prev"] is not None
 
-    # include_total=false なので count_search_results は呼ばれない
-    mock_storage.count_search_results.assert_not_called()
+    # include_total=false なので count_search_results_with_estimate は呼ばれない
+    mock_storage.count_search_results_with_estimate.assert_not_called()
 
 
 def test_search_empty_parameters(client: TestClient, mock_storage: MagicMock) -> None:
@@ -208,7 +208,7 @@ def test_search_empty_parameters(client: TestClient, mock_storage: MagicMock) ->
 
     # Mock storage response for empty parameters
     mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[(note, post)], has_next=False)
-    mock_storage.count_search_results.return_value = 1
+    mock_storage.count_search_results_with_estimate.return_value = SearchCount(total=1, is_estimate=False)
 
     # Test search with no parameters
     response = client.get("/api/v1/data/search")
@@ -237,7 +237,7 @@ def test_search_empty_parameters(client: TestClient, mock_storage: MagicMock) ->
 
 def test_search_parameters(client: TestClient, mock_storage: MagicMock) -> None:
     mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[], has_next=False)
-    mock_storage.count_search_results.return_value = 0
+    mock_storage.count_search_results_with_estimate.return_value = SearchCount(total=0, is_estimate=False)
 
     # Test various parameter combinations
     test_cases: List[Dict[str, Union[str, List[str], List[int], int, bool]]] = [
@@ -264,7 +264,7 @@ def test_search_parameters(client: TestClient, mock_storage: MagicMock) -> None:
 
 def test_search_timestamp_conversion(client: TestClient, mock_storage: MagicMock) -> None:
     mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[], has_next=False)
-    mock_storage.count_search_results.return_value = 0
+    mock_storage.count_search_results_with_estimate.return_value = SearchCount(total=0, is_estimate=False)
 
     # Test various timestamp formats
     base_timestamp = int(datetime(2023, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
@@ -286,7 +286,7 @@ def test_search_timestamp_conversion(client: TestClient, mock_storage: MagicMock
 def test_search_duplicate_parameters(client: TestClient, mock_storage: MagicMock) -> None:
     """Test that duplicate query parameters are preserved in pagination URLs."""
     mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[], has_next=True)
-    mock_storage.count_search_results.return_value = 150
+    mock_storage.count_search_results_with_estimate.return_value = SearchCount(total=150, is_estimate=False)
 
     # Test with duplicate note_status parameters
     response = client.get(
@@ -305,7 +305,7 @@ def test_search_duplicate_parameters(client: TestClient, mock_storage: MagicMock
 def test_search_sort_field_asc(client: TestClient, mock_storage: MagicMock) -> None:
     """Test that sort_field and sort_order parameters are passed to storage."""
     mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[], has_next=False)
-    mock_storage.count_search_results.return_value = 0
+    mock_storage.count_search_results_with_estimate.return_value = SearchCount(total=0, is_estimate=False)
 
     response = client.get("/api/v1/data/search?sort_field=note_created_at&sort_order=asc")
     assert response.status_code == 200
@@ -319,7 +319,7 @@ def test_search_sort_field_asc(client: TestClient, mock_storage: MagicMock) -> N
 def test_search_sort_field_desc(client: TestClient, mock_storage: MagicMock) -> None:
     """Test that sort_field=note_created_at&sort_order=desc works."""
     mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[], has_next=False)
-    mock_storage.count_search_results.return_value = 0
+    mock_storage.count_search_results_with_estimate.return_value = SearchCount(total=0, is_estimate=False)
 
     response = client.get("/api/v1/data/search?sort_field=note_created_at&sort_order=desc")
     assert response.status_code == 200
@@ -332,7 +332,7 @@ def test_search_sort_field_desc(client: TestClient, mock_storage: MagicMock) -> 
 def test_search_sort_default(client: TestClient, mock_storage: MagicMock) -> None:
     """Test that default sort is None (no sorting)."""
     mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[], has_next=False)
-    mock_storage.count_search_results.return_value = 0
+    mock_storage.count_search_results_with_estimate.return_value = SearchCount(total=0, is_estimate=False)
 
     response = client.get("/api/v1/data/search")
     assert response.status_code == 200
@@ -351,7 +351,7 @@ def test_search_sort_invalid_field(client: TestClient, mock_storage: MagicMock) 
 def test_search_sort_preserved_in_pagination(client: TestClient, mock_storage: MagicMock) -> None:
     """Test that sort parameters are preserved in pagination URLs."""
     mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[], has_next=True)
-    mock_storage.count_search_results.return_value = 150
+    mock_storage.count_search_results_with_estimate.return_value = SearchCount(total=150, is_estimate=False)
 
     response = client.get("/api/v1/data/search?sort_field=note_created_at&sort_order=asc&limit=50&offset=0")
     assert response.status_code == 200
@@ -365,25 +365,47 @@ def test_search_sort_preserved_in_pagination(client: TestClient, mock_storage: M
 
 def test_search_count_basic(client: TestClient, mock_storage: MagicMock) -> None:
     """カウントエンドポイントは総件数を返す。"""
-    mock_storage.count_search_results.return_value = 2598948
+    mock_storage.count_search_results_with_estimate.return_value = SearchCount(total=2598948, is_estimate=False)
 
     response = client.get("/api/v1/data/search/count")
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 2598948
+    assert data["isEstimate"] is False
+
+
+def test_search_count_returns_estimate_flag(client: TestClient, mock_storage: MagicMock) -> None:
+    mock_storage.count_search_results_with_estimate.return_value = SearchCount(total=3431273, is_estimate=True)
+
+    response = client.get("/api/v1/data/search/count")
+    assert response.status_code == 200
+    assert response.json() == {"total": 3431273, "isEstimate": True}
+
+
+def test_search_meta_returns_estimate_flag(client: TestClient, mock_storage: MagicMock) -> None:
+    mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[], has_next=True)
+    mock_storage.count_search_results_with_estimate.return_value = SearchCount(total=3431273, is_estimate=True)
+
+    meta = client.get("/api/v1/data/search").json()["meta"]
+    assert meta["total"] == 3431273
+    assert meta["totalIsEstimate"] is True
+
+    meta = client.get("/api/v1/data/search?include_total=false").json()["meta"]
+    assert meta["total"] is None
+    assert meta["totalIsEstimate"] is None
 
 
 def test_search_count_with_filters(client: TestClient, mock_storage: MagicMock) -> None:
     """カウントエンドポイントはフィルタパラメータをstorageに渡す。"""
-    mock_storage.count_search_results.return_value = 42
+    mock_storage.count_search_results_with_estimate.return_value = SearchCount(total=42, is_estimate=False)
 
     response = client.get("/api/v1/data/search/count?language=ja&note_includes_text=test")
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 42
 
-    mock_storage.count_search_results.assert_called_once()
-    call_kwargs = mock_storage.count_search_results.call_args
+    mock_storage.count_search_results_with_estimate.assert_called_once()
+    call_kwargs = mock_storage.count_search_results_with_estimate.call_args
     assert call_kwargs.kwargs["language"] == "ja"
     assert call_kwargs.kwargs["note_includes_texts"] == ["test"]
 
@@ -391,18 +413,18 @@ def test_search_count_with_filters(client: TestClient, mock_storage: MagicMock) 
 def test_search_include_total_true(client: TestClient, mock_storage: MagicMock) -> None:
     """include_total=trueのとき、従来通りCOUNTクエリを実行してtotalを返す（後方互換）。"""
     mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[], has_next=False)
-    mock_storage.count_search_results.return_value = 150
+    mock_storage.count_search_results_with_estimate.return_value = SearchCount(total=150, is_estimate=False)
 
     response = client.get("/api/v1/data/search?include_total=true&limit=50&offset=0")
     assert response.status_code == 200
     data = response.json()
     assert data["meta"]["total"] == 150
-    mock_storage.count_search_results.assert_called_once()
+    mock_storage.count_search_results_with_estimate.assert_called_once()
 
 
 def test_search_include_total_true_pagination(client: TestClient, mock_storage: MagicMock) -> None:
     """include_total=true でも next は limit+1 の取得結果で判定する（total は概算のことがあるため）。"""
-    mock_storage.count_search_results.return_value = 150
+    mock_storage.count_search_results_with_estimate.return_value = SearchCount(total=150, is_estimate=False)
 
     # total では次ページなし（100+50 >= 150）でも、実際にもう1件あれば next を出す
     mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[], has_next=True)
@@ -423,13 +445,13 @@ def test_search_include_total_true_pagination(client: TestClient, mock_storage: 
 def test_search_include_total_default_is_true(client: TestClient, mock_storage: MagicMock) -> None:
     """デフォルトではinclude_total=trueとして動作する（後方互換）。"""
     mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[], has_next=False)
-    mock_storage.count_search_results.return_value = 42
+    mock_storage.count_search_results_with_estimate.return_value = SearchCount(total=42, is_estimate=False)
 
     response = client.get("/api/v1/data/search")
     assert response.status_code == 200
     data = response.json()
     assert data["meta"]["total"] == 42
-    mock_storage.count_search_results.assert_called_once()
+    mock_storage.count_search_results_with_estimate.assert_called_once()
 
 
 def test_search_include_total_false(client: TestClient, mock_storage: MagicMock) -> None:
@@ -440,24 +462,24 @@ def test_search_include_total_false(client: TestClient, mock_storage: MagicMock)
     assert response.status_code == 200
     data = response.json()
     assert data["meta"].get("total") is None
-    mock_storage.count_search_results.assert_not_called()
+    mock_storage.count_search_results_with_estimate.assert_not_called()
 
 
 def test_search_count_accepts_non_enum_language(client: TestClient, mock_storage: MagicMock) -> None:
     """LanguageIdentifier enum に無いが有効な ISO 639-1 コード(zh)でも絞り込める。"""
-    mock_storage.count_search_results.return_value = 7
+    mock_storage.count_search_results_with_estimate.return_value = SearchCount(total=7, is_estimate=False)
 
     response = client.get("/api/v1/data/search/count?language=zh")
     assert response.status_code == 200
     assert response.json()["total"] == 7
 
-    call_kwargs = mock_storage.count_search_results.call_args
+    call_kwargs = mock_storage.count_search_results_with_estimate.call_args
     assert call_kwargs.kwargs["language"] == "zh"
 
 
 def test_search_sort_by_impression(client: TestClient, mock_storage: MagicMock) -> None:
     mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[], has_next=False)
-    mock_storage.count_search_results.return_value = 0
+    mock_storage.count_search_results_with_estimate.return_value = SearchCount(total=0, is_estimate=False)
 
     response = client.get("/api/v1/data/search?sort_field=impression_count&sort_order=desc")
     assert response.status_code == 200
@@ -510,7 +532,7 @@ def test_search_returns_non_enum_language(client: TestClient, mock_storage: Magi
     )
 
     mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[(note, post)], has_next=False)
-    mock_storage.count_search_results.return_value = 1
+    mock_storage.count_search_results_with_estimate.return_value = SearchCount(total=1, is_estimate=False)
 
     response = client.get("/api/v1/data/search?language=zh")
     assert response.status_code == 200
@@ -528,6 +550,7 @@ def test_search_keyword_uses_opensearch(
     assert mock_storage.hydrate_notes_with_posts.called
     assert not mock_storage.search_notes_with_posts.called  # フォールバックしていない
     assert body["meta"]["total"] == 2
+    assert body["meta"]["totalIsEstimate"] is False
     assert len(body["data"]) == 2
 
 
@@ -555,13 +578,14 @@ def test_search_keyword_fallback_decides_next_by_fetched_rows(
     from birdxplorer_api.semantic_search import SemanticSearchUnavailableError
 
     mock_semantic_search.keyword_search.side_effect = SemanticSearchUnavailableError("boom")
-    mock_storage.count_search_results.return_value = 150
+    mock_storage.count_search_results_with_estimate.return_value = SearchCount(total=150, is_estimate=False)
 
     # total では次ページなし（100+50 >= 150）でも、実際にもう1件あれば next を出す
     mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[], has_next=True)
     res = client.get("/api/v1/data/search/keyword?note_includes_text=ワクチン&include_total=true&limit=50&offset=100")
     assert res.status_code == 200
     assert res.json()["meta"]["total"] == 150
+    assert res.json()["meta"]["totalIsEstimate"] is False
     assert res.json()["meta"]["next"] is not None
 
     # total では次ページあり（0+50 < 150）でも、実際に続きが無ければ next は出さない
@@ -618,4 +642,6 @@ def test_search_keyword_has_next_via_limit_plus_one_sentinel(
     assert res.status_code == 200
     body = res.json()
     assert body["meta"]["next"] is not None
+    assert body["meta"]["total"] is None
+    assert body["meta"]["totalIsEstimate"] is None
     assert len(body["data"]) == limit
