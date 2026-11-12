@@ -934,9 +934,8 @@ def gen_router(
                 post_search_mode=post_search_mode,
             )
 
-        # include_total時はCOUNTベースで判定（従来互換）、それ以外はlimit+1ベース
-        has_next = (offset + limit < total_count) if total_count is not None else page.has_next
-        return _build_search_response(page.items, has_next, total_count, request, offset, limit)
+        # total は条件なしのとき概算になるので、次ページの有無は limit+1 件の取得結果で判定する
+        return _build_search_response(page.items, page.has_next, total_count, request, offset, limit)
 
     @router.get("/search/keyword", description="広域 note テキスト検索（OpenSearch）", response_model=SearchResponse)
     def search_keyword(
@@ -1023,8 +1022,7 @@ def gen_router(
                 note_created_at_to=note_created_at_to,
                 note_search_mode=note_search_mode,
             )
-        has_next = (offset + limit < total) if total is not None else page.has_next
-        return _build_search_response(page.items, has_next, total, request, offset, limit)
+        return _build_search_response(page.items, page.has_next, total, request, offset, limit)
 
     @router.get(
         "/export/csv",
