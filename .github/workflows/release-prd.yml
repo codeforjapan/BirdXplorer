@@ -39,7 +39,7 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/build-push-action@v5
+      - uses: docker/build-push-action@v7
         with:
           context: ./api
           file: ./api/Dockerfile.prd
@@ -82,7 +82,7 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/build-push-action@v5
+      - uses: docker/build-push-action@v7
         with:
           context: ./
           file: ./etl/${{ matrix.lambda.dockerfile }}
