@@ -35,7 +35,7 @@ jobs:
     
     steps:
       - name: Checkout BirdXplorer repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -89,7 +89,7 @@ jobs:
           echo "All required images are available in ECR"
       
       - name: Checkout BirdXplorer-cdk repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: codeforjapan/BirdXplorer-cdk
           path: BirdXplorer-cdk
