@@ -401,23 +401,23 @@ def test_search_include_total_true(client: TestClient, mock_storage: MagicMock) 
 
 
 def test_search_include_total_true_pagination(client: TestClient, mock_storage: MagicMock) -> None:
-    """include_total=trueのとき、COUNTベースでnext/prevを判定する（従来互換）。"""
-    mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[], has_next=True)
+    """include_total=true でも next は limit+1 の取得結果で判定する（total は概算のことがあるため）。"""
     mock_storage.count_search_results.return_value = 150
 
-    # offset=0, limit=50, total=150 → next あり
-    response = client.get("/api/v1/data/search?include_total=true&limit=50&offset=0")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["meta"]["next"] is not None
-    assert data["meta"]["total"] == 150
-
-    # offset=100, limit=50, total=150 → next あり（limit+1ではなくCOUNTベースで判定）
+    # total では次ページなし（100+50 >= 150）でも、実際にもう1件あれば next を出す
+    mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[], has_next=True)
     response = client.get("/api/v1/data/search?include_total=true&limit=50&offset=100")
     assert response.status_code == 200
     data = response.json()
-    assert data["meta"]["next"] is None  # 100+50 >= 150 → 次ページなし
+    assert data["meta"]["next"] is not None
     assert data["meta"]["prev"] is not None
+    assert data["meta"]["total"] == 150
+
+    # total では次ページあり（0+50 < 150）でも、実際に続きが無ければ next は出さない
+    mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[], has_next=False)
+    response = client.get("/api/v1/data/search?include_total=true&limit=50&offset=0")
+    assert response.status_code == 200
+    assert response.json()["meta"]["next"] is None
 
 
 def test_search_include_total_default_is_true(client: TestClient, mock_storage: MagicMock) -> None:
@@ -546,6 +546,29 @@ def test_search_keyword_falls_back_to_postgres_on_opensearch_error(
     res = client.get("/api/v1/data/search/keyword?note_includes_text=ワクチン&include_total=false")
     assert res.status_code == 200
     assert mock_storage.search_notes_with_posts.called  # Postgres 経路に落ちた
+
+
+def test_search_keyword_fallback_decides_next_by_fetched_rows(
+    client: TestClient, mock_semantic_search: MagicMock, mock_storage: MagicMock
+) -> None:
+    """Postgres フォールバックで include_total=true でも、next は total ではなく limit+1 の取得結果で決める。"""
+    from birdxplorer_api.semantic_search import SemanticSearchUnavailableError
+
+    mock_semantic_search.keyword_search.side_effect = SemanticSearchUnavailableError("boom")
+    mock_storage.count_search_results.return_value = 150
+
+    # total では次ページなし（100+50 >= 150）でも、実際にもう1件あれば next を出す
+    mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[], has_next=True)
+    res = client.get("/api/v1/data/search/keyword?note_includes_text=ワクチン&include_total=true&limit=50&offset=100")
+    assert res.status_code == 200
+    assert res.json()["meta"]["total"] == 150
+    assert res.json()["meta"]["next"] is not None
+
+    # total では次ページあり（0+50 < 150）でも、実際に続きが無ければ next は出さない
+    mock_storage.search_notes_with_posts.return_value = SearchResultPage(items=[], has_next=False)
+    res = client.get("/api/v1/data/search/keyword?note_includes_text=ワクチン&include_total=true&limit=50&offset=0")
+    assert res.status_code == 200
+    assert res.json()["meta"]["next"] is None
 
 
 def test_search_keyword_fallback_sorts_by_created_at_when_field_omitted(
