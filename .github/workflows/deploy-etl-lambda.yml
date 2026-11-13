@@ -44,7 +44,7 @@ jobs:
           - { dockerfile: Dockerfile.search_index_writer, repository: birdxplorer-etl-search-index-writer }
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
