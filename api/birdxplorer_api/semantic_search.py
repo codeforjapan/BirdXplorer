@@ -22,7 +22,7 @@ from opensearchpy import (
     RequestsHttpConnection,
     TransportError,
 )
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 from pydantic_settings import SettingsConfigDict
 
 from birdxplorer_common.exceptions import BaseError
@@ -105,7 +105,12 @@ class SemanticSearchSettings(BaseSettings):
 
     opensearch_endpoint: Optional[str] = None
     openai_api_key: Optional[str] = None
-    opensearch_timeout_seconds: int = 15
+    # 0 は opensearch-py 側で黙って client 既定値扱いになるので弾く
+    opensearch_timeout_seconds: int = Field(default=15, gt=0)
+    # 切れた keep-alive 接続で既定の待ち時間を丸ごと待たないよう、knn 等の1回目だけ短く待つ。
+    # 正常でも混雑時は SearchLatency が 5〜6 秒に達した実績があるため、それより長くとる
+    # 通常の待ち時間より長い場合は通常の待ち時間に丸める(SemanticSearchService 側)
+    opensearch_first_attempt_timeout_seconds: int = Field(default=8, gt=0)
 
 
 class SemanticSearchUnavailableError(BaseError):
@@ -119,7 +124,10 @@ class SemanticSearchService:
         openai_api_key: str,
         region: str = "ap-northeast-1",
         timeout: int = 15,
+        first_attempt_timeout: int = 8,
     ) -> None:
+        self._timeout = timeout
+        self._first_attempt_timeout = min(first_attempt_timeout, timeout)
         self._openai = OpenAI(api_key=openai_api_key)
         credentials = boto3.Session().get_credentials()
         auth = AWSV4SignerAuth(credentials, region, "es")
@@ -134,15 +142,20 @@ class SemanticSearchService:
             timeout=timeout,
         )
 
-    def _run_with_retry(self, operation: Callable[[], T], description: str) -> T:
+    def _run_with_retry(
+        self, operation: Callable[[int], T], description: str, timeouts: Optional[Tuple[int, int]] = None
+    ) -> T:
         """OpenSearch 呼び出しを実行し、transient エラー時のみ1回だけ再試行する。
+
+        operation には各回の待ち時間(秒)を渡す。timeouts 省略時は2回とも既定の待ち時間。
 
         非 transient なエラーは即座に送出する(呼び出し側で
         SemanticSearchUnavailableError に変換される)。
         """
+        attempt_timeouts = timeouts or (self._timeout, self._timeout)
         for attempt in range(2):
             try:
-                return operation()
+                return operation(attempt_timeouts[attempt])
             except Exception as e:  # noqa: BLE001
                 if attempt == 0 and _is_transient_opensearch_error(e):
                     logger.warning(f"{description} attempt 1 failed, retrying: {e}")
@@ -165,9 +178,15 @@ class SemanticSearchService:
     def get_note_embedding(self, note_id: NoteId) -> Optional[List[float]]:
         """ノートの保存済みembeddingを取得する(未インデックスならNone)"""
         try:
-            # NOTE: 意図的にリトライしない。search_similar は get_note_embedding→knn_search を直列で呼ぶため、
-            # 両方リトライすると最悪~60秒となり ~30秒予算を超える。リトライするのは knn_search のみ。
-            doc = self._opensearch.get(index=ALIAS_NAME, id=str(note_id), _source_includes=["embedding"])
+            # id 指定の取得は普段ミリ秒で返るので、2回とも短い待ち時間で試す(最悪でも約2x8秒)。
+            # search_similar は続けて knn_search を呼ぶが、合計の最悪値は従来(15+30.5秒)より短い。
+            doc = self._run_with_retry(
+                lambda t: self._opensearch.get(
+                    index=ALIAS_NAME, id=str(note_id), _source_includes=["embedding"], params={"request_timeout": t}
+                ),
+                "note embedding fetch",
+                timeouts=(self._first_attempt_timeout, self._first_attempt_timeout),
+            )
         except NotFoundError:
             return None
         except Exception as e:  # noqa: BLE001
@@ -205,8 +224,9 @@ class SemanticSearchService:
 
         try:
             response = self._run_with_retry(
-                lambda: self._opensearch.search(index=ALIAS_NAME, body=body),
+                lambda t: self._opensearch.search(index=ALIAS_NAME, body=body, params={"request_timeout": t}),
                 "knn search",
+                timeouts=(self._first_attempt_timeout, self._timeout),
             )
         except Exception as e:  # noqa: BLE001
             raise SemanticSearchUnavailableError(f"knn search failed: {e}") from e
@@ -264,7 +284,7 @@ class SemanticSearchService:
 
         try:
             response = self._run_with_retry(
-                lambda: self._opensearch.search(index=ALIAS_NAME, body=body),
+                lambda t: self._opensearch.search(index=ALIAS_NAME, body=body, params={"request_timeout": t}),
                 "keyword search",
             )
         except Exception as e:  # noqa: BLE001
@@ -305,6 +325,7 @@ def gen_semantic_search_service(
             opensearch_endpoint=settings.opensearch_endpoint,
             openai_api_key=settings.openai_api_key,
             timeout=settings.opensearch_timeout_seconds,
+            first_attempt_timeout=settings.opensearch_first_attempt_timeout_seconds,
         )
     except Exception as e:
         logger.error(f"semantic search service initialization failed: {e}")

@@ -653,6 +653,7 @@ v1_data_search_include_total = FastAPIEndpointParamDocs(
 
 `false` にすると COUNT クエリをスキップしてレスポンスが高速化される。
 件数が不要な場合や `/search/count` で非同期取得する場合に利用する。
+絞り込み条件を1つも指定しない場合の総件数は、DB の統計値による概算になる。
 """,
     openapi_examples={
         "true": {
@@ -729,7 +730,7 @@ V1DataSearchSimilarDocs = FastAPIEndpointDocs(
 
 # Get /api/v1/data/search/count の OpenAPI ドキュメント
 V1DataSearchCountDocs = FastAPIEndpointDocs(
-    "検索結果の総件数を取得するエンドポイント",
+    "検索結果の総件数を取得するエンドポイント。絞り込み条件を1つも指定しない場合は DB の統計値による概算を返す",
     {
         "note_includes_text": v1_data_notes_search_text,
         "note_excludes_text": v1_data_notes_search_text,

@@ -1,3 +1,4 @@
+import inspect
 from typing import Any, List, Optional
 from unittest.mock import MagicMock, patch
 
@@ -18,6 +19,7 @@ from birdxplorer_common.models import (
 from birdxplorer_common.storage import (
     NoteRecord,
     PostRecord,
+    SearchCount,
     Storage,
     TopicRecord,
     XUserRecord,
@@ -196,6 +198,97 @@ def test_count_search_results(
     # Verify count matches actual results
     results = storage.search_notes_with_posts(note_includes_texts=["summary"], language=LanguageCode("en")).items
     assert len(results) == filtered_count
+
+
+def test_count_search_results_unfiltered_uses_estimate(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    storage = Storage(engine=engine_for_test)
+    with patch.object(Storage, "_estimate_note_count", return_value=12345):
+        assert storage.count_search_results_with_estimate() == SearchCount(total=12345, is_estimate=True)
+        assert storage.count_search_results_with_estimate(note_status=[]) == SearchCount(total=12345, is_estimate=True)
+        assert storage.count_search_results() == 12345
+
+
+# 条件を足したらここにも足す。足し忘れると test_filter_params_cover_all_count_arguments が落ちる
+_COUNT_FILTERS: dict[str, Any] = {
+    "note_includes_texts": ["summary"],
+    "note_excludes_text": "summary",
+    "post_includes_texts": ["text"],
+    "post_excludes_text": "text",
+    "language": LanguageCode("en"),
+    "topic_ids": [TopicId(0)],
+    "note_status": ["CURRENTLY_RATED_HELPFUL"],
+    "note_created_at_from": 1152921600000,
+    "note_created_at_to": 1152921600000,
+    "x_user_names": ["user"],
+    "x_user_followers_count_from": 1,
+    "x_user_follow_count_from": 1,
+    "post_like_count_from": 1,
+    "post_repost_count_from": 1,
+    "post_impression_count_from": 1,
+    "post_includes_media": True,
+}
+
+
+def test_filter_params_cover_all_count_arguments() -> None:
+    params = inspect.signature(Storage.count_search_results_with_estimate).parameters
+    assert set(params) - {"self", "note_search_mode", "post_search_mode"} == set(_COUNT_FILTERS)
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [{name: value} for name, value in _COUNT_FILTERS.items()] + [{"post_includes_media": False}],
+    ids=lambda f: f"{next(iter(f))}={next(iter(f.values()))}",
+)
+def test_count_search_results_with_filter_counts_exactly(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+    filters: dict[str, Any],
+) -> None:
+    storage = Storage(engine=engine_for_test)
+    with patch.object(Storage, "_estimate_note_count", return_value=12345) as estimate:
+        result = storage.count_search_results_with_estimate(**filters)
+    estimate.assert_not_called()
+    assert result.is_estimate is False
+
+
+def test_count_search_results_language_filter_matches_search(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    storage = Storage(engine=engine_for_test)
+    expected = len(storage.search_notes_with_posts(language=LanguageCode("en"), limit=1000).items)
+    with patch.object(Storage, "_estimate_note_count", return_value=12345):
+        assert storage.count_search_results(language=LanguageCode("en")) == expected
+
+
+def test_count_search_results_falls_back_to_exact_count_without_statistics(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    storage = Storage(engine=engine_for_test)
+    with patch.object(Storage, "_estimate_note_count", return_value=None):
+        assert storage.count_search_results_with_estimate() == SearchCount(
+            total=len(note_records_sample), is_estimate=False
+        )
+
+
+def test_estimate_note_count_reads_statistics(
+    engine_for_test: Engine,
+    note_records_sample: List[NoteRecord],
+    post_records_sample: List[PostRecord],
+) -> None:
+    storage = Storage(engine=engine_for_test)
+    with engine_for_test.connect() as conn:
+        conn.execute(text("ANALYZE notes"))
+        conn.commit()
+    assert storage._estimate_note_count() == len(note_records_sample)
 
 
 def test_search_notes_with_non_enum_language(

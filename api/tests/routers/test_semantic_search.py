@@ -8,7 +8,10 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from birdxplorer_api.semantic_search import SemanticSearchUnavailableError
+from birdxplorer_api.semantic_search import (
+    SemanticSearchService,
+    SemanticSearchUnavailableError,
+)
 from birdxplorer_common.models import Note, TextSearchMode
 from birdxplorer_common.settings import GlobalSettings
 
@@ -124,14 +127,21 @@ def test_semantic_search_returns_503_when_not_configured(
     assert no_service_client.get("/api/v1/data/search/semantic?q=test").status_code == 503
 
 
+def _service_with_fake_opensearch(fake: Any) -> SemanticSearchService:
+    """__init__ を通さずに OpenSearch だけ差し替えたサービスを作る"""
+    svc = SemanticSearchService.__new__(SemanticSearchService)
+    svc._opensearch = fake
+    svc._timeout, svc._first_attempt_timeout = 15, 8
+    return svc
+
+
 def test_keyword_search_builds_query_and_parses_hits(monkeypatch: pytest.MonkeyPatch) -> None:
-    from birdxplorer_api.semantic_search import SemanticSearchService
     from birdxplorer_common.models import TextSearchMode
 
     captured: Dict[str, Any] = {}
 
     class FakeOS:
-        def search(self, index: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        def search(self, index: str, body: Dict[str, Any], params: Any = None) -> Dict[str, Any]:
             captured["index"] = index
             captured["body"] = body
             return {
@@ -143,8 +153,7 @@ def test_keyword_search_builds_query_and_parses_hits(monkeypatch: pytest.MonkeyP
                 }
             }
 
-    svc = SemanticSearchService.__new__(SemanticSearchService)
-    svc._opensearch = FakeOS()  # type: ignore[assignment]
+    svc = _service_with_fake_opensearch(FakeOS())
     # _run_with_retry をそのまま使う（operation を1回実行するだけ）
     note_ids, total = svc.keyword_search(
         includes=["ワクチン", "河川"],
@@ -173,14 +182,12 @@ def test_keyword_search_builds_query_and_parses_hits(monkeypatch: pytest.MonkeyP
 
 
 def test_keyword_search_no_total_when_track_false(monkeypatch: pytest.MonkeyPatch) -> None:
-    from birdxplorer_api.semantic_search import SemanticSearchService
 
     class FakeOS:
-        def search(self, index: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        def search(self, index: str, body: Dict[str, Any], params: Any = None) -> Dict[str, Any]:
             return {"hits": {"hits": []}}
 
-    svc = SemanticSearchService.__new__(SemanticSearchService)
-    svc._opensearch = FakeOS()  # type: ignore[assignment]
+    svc = _service_with_fake_opensearch(FakeOS())
     note_ids, total = svc.keyword_search(includes=["x"], track_total=False)
     assert note_ids == []
     assert total is None
@@ -188,18 +195,16 @@ def test_keyword_search_no_total_when_track_false(monkeypatch: pytest.MonkeyPatc
 
 def test_keyword_search_and_mode_uses_must_not_should(monkeypatch: pytest.MonkeyPatch) -> None:
     """AND モードでは should ではなく must 句を使う。"""
-    from birdxplorer_api.semantic_search import SemanticSearchService
     from birdxplorer_common.models import TextSearchMode
 
     captured: Dict[str, Any] = {}
 
     class FakeOS:
-        def search(self, index: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        def search(self, index: str, body: Dict[str, Any], params: Any = None) -> Dict[str, Any]:
             captured["body"] = body
             return {"hits": {"hits": []}}
 
-    svc = SemanticSearchService.__new__(SemanticSearchService)
-    svc._opensearch = FakeOS()  # type: ignore[assignment]
+    svc = _service_with_fake_opensearch(FakeOS())
     svc.keyword_search(includes=["ワクチン", "河川"], search_mode=TextSearchMode.AND)
 
     bool_body = captured["body"]["query"]["bool"]
@@ -211,17 +216,15 @@ def test_keyword_search_and_mode_uses_must_not_should(monkeypatch: pytest.Monkey
 
 def test_keyword_search_excludes_builds_must_not(monkeypatch: pytest.MonkeyPatch) -> None:
     """excludes は常に must_not 句になる。"""
-    from birdxplorer_api.semantic_search import SemanticSearchService
 
     captured: Dict[str, Any] = {}
 
     class FakeOS:
-        def search(self, index: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        def search(self, index: str, body: Dict[str, Any], params: Any = None) -> Dict[str, Any]:
             captured["body"] = body
             return {"hits": {"hits": []}}
 
-    svc = SemanticSearchService.__new__(SemanticSearchService)
-    svc._opensearch = FakeOS()  # type: ignore[assignment]
+    svc = _service_with_fake_opensearch(FakeOS())
     svc.keyword_search(includes=["ワクチン"], excludes=["デマ"])
 
     bool_body = captured["body"]["query"]["bool"]
@@ -232,18 +235,16 @@ def test_keyword_search_excludes_builds_must_not(monkeypatch: pytest.MonkeyPatch
 
 def test_keyword_search_language_builds_term_filter(monkeypatch: pytest.MonkeyPatch) -> None:
     """language を渡すと term フィルタが filter 句に入る。"""
-    from birdxplorer_api.semantic_search import SemanticSearchService
     from birdxplorer_common.models import LanguageCode
 
     captured: Dict[str, Any] = {}
 
     class FakeOS:
-        def search(self, index: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        def search(self, index: str, body: Dict[str, Any], params: Any = None) -> Dict[str, Any]:
             captured["body"] = body
             return {"hits": {"hits": []}}
 
-    svc = SemanticSearchService.__new__(SemanticSearchService)
-    svc._opensearch = FakeOS()  # type: ignore[assignment]
+    svc = _service_with_fake_opensearch(FakeOS())
     svc.keyword_search(includes=["ワクチン"], language=LanguageCode.from_str("ja"))
 
     bool_body = captured["body"]["query"]["bool"]

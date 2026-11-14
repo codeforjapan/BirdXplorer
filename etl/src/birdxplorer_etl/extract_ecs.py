@@ -274,9 +274,11 @@ _SNAPSHOT_FIRST_FILE = {
 _SNAPSHOT_RETRY_INTERVAL_SECONDS = 600
 _SNAPSHOT_MAX_RETRIES = 6
 _SNAPSHOT_MAX_FALLBACK_DAYS = 3
-# HEAD/GET の接続待ち上限。半開ソケットに当たると requests はデフォルトで無期限に待つ。
+# HEAD/GET の (接続, 読み取り) 待ち上限。半開ソケットに当たると requests はデフォルトで無期限に待つ。
 # この設計の中で唯一の無制限待機になる箇所なので、必ず上限を付ける。
-_SNAPSHOT_PROBE_TIMEOUT_SECONDS = 30
+# 読み取りを長めに取るのは、CDN がキャッシュに無いファイルを原本から取り終えるまで HEAD に応答しないため。
+# 1.4GB の ratings で 33〜39秒かかる（2026-11 実測）。
+_SNAPSHOT_PROBE_TIMEOUT_SECONDS = (30, 300)
 
 
 def _snapshot_file_url(kind: str, date_string: str, file_index: int) -> str:

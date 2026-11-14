@@ -109,13 +109,36 @@ class TestGetNoteEmbedding:
         with pytest.raises(SemanticSearchUnavailableError):
             service.get_note_embedding(NoteId.from_str("1" * 19))
 
-    def test_transient_error_is_not_retried(self) -> None:
+    def test_transient_error_is_retried_once_with_short_timeouts(self) -> None:
+        """id 指定の取得は普段ミリ秒で返るので、2回とも短い待ち時間で試す"""
+        from opensearchpy import ConnectionTimeout
+
+        service, _, os_client = _service_with_mocks()
+        os_client.get.side_effect = [
+            ConnectionTimeout("N/A", "read timed out", None),
+            {"_source": {"embedding": [0.1, 0.2]}},
+        ]
+        with patch("birdxplorer_api.semantic_search.time.sleep"):
+            assert service.get_note_embedding(NoteId.from_str("1" * 19)) == [0.1, 0.2]
+        timeouts = [c.kwargs["params"]["request_timeout"] for c in os_client.get.call_args_list]
+        assert timeouts == [8, 8]
+
+    def test_transient_error_exhausted_then_raises(self) -> None:
         from opensearchpy import ConnectionTimeout
 
         service, _, os_client = _service_with_mocks()
         os_client.get.side_effect = ConnectionTimeout("N/A", "read timed out", None)
-        with pytest.raises(SemanticSearchUnavailableError):
-            service.get_note_embedding(NoteId.from_str("1" * 19))
+        with patch("birdxplorer_api.semantic_search.time.sleep"):
+            with pytest.raises(SemanticSearchUnavailableError):
+                service.get_note_embedding(NoteId.from_str("1" * 19))
+        assert os_client.get.call_count == 2
+
+    def test_not_found_is_not_retried(self) -> None:
+        from opensearchpy import NotFoundError
+
+        service, _, os_client = _service_with_mocks()
+        os_client.get.side_effect = NotFoundError(404, "not_found", {})
+        assert service.get_note_embedding(NoteId.from_str("1" * 19)) is None
         assert os_client.get.call_count == 1
 
 
@@ -264,6 +287,21 @@ class TestKnnSearch:
         mock_sleep.assert_called_once_with(_RETRY_BACKOFF_SECONDS)
         assert "knn search attempt 1 failed" in caplog.text
 
+    def test_first_attempt_uses_short_timeout_then_full_timeout(self) -> None:
+        """切れた接続で既定の15秒を丸ごと待たないよう、1回目だけ短く待つ"""
+        from opensearchpy import ConnectionTimeout
+
+        service, _, os_client = _service_with_mocks()
+        os_client.search.side_effect = [
+            ConnectionTimeout("N/A", "read timed out", None),
+            {"hits": {"hits": []}},
+        ]
+        with patch("birdxplorer_api.semantic_search.time.sleep"):
+            service.knn_search([0.1] * 3, limit=5)
+
+        timeouts = [c.kwargs["params"]["request_timeout"] for c in os_client.search.call_args_list]
+        assert timeouts == [8, 15]
+
     def test_retries_exhausted_then_raises(self) -> None:
         from opensearchpy import ConnectionTimeout
 
@@ -297,6 +335,22 @@ class TestKnnSearch:
                 service.knn_search([0.1] * 3, limit=5)
         assert os_client.search.call_count == 1
         mock_sleep.assert_not_called()
+
+
+class TestKeywordSearchTimeout:
+    def test_keyword_search_keeps_full_timeout_on_both_attempts(self) -> None:
+        """total 件数や深い offset で正常でも遅くなりうるので、キーワード検索は1回目も短くしない"""
+        from opensearchpy import ConnectionTimeout
+
+        service, _, os_client = _service_with_mocks()
+        os_client.search.side_effect = [
+            ConnectionTimeout("N/A", "read timed out", None),
+            {"hits": {"hits": [], "total": {"value": 0, "relation": "eq"}}},
+        ]
+        with patch("birdxplorer_api.semantic_search.time.sleep"):
+            service.keyword_search(includes=["ワクチン"], search_mode=TextSearchMode.OR, limit=10, offset=0)
+        timeouts = [c.kwargs["params"]["request_timeout"] for c in os_client.search.call_args_list]
+        assert timeouts == [15, 15]
 
 
 class TestSettingsRobustness:
@@ -348,3 +402,51 @@ class TestTimeoutConfig:
         ):
             gen_semantic_search_service(settings)
         assert mock_os_cls.call_args.kwargs["timeout"] == 30
+
+    def test_default_first_attempt_timeout_is_8(self) -> None:
+        settings = SemanticSearchSettings(opensearch_endpoint="example.com", openai_api_key="key")
+        assert settings.opensearch_first_attempt_timeout_seconds == 8
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [{"opensearch_first_attempt_timeout_seconds": 0}, {"opensearch_timeout_seconds": 0}],
+    )
+    def test_rejects_zero_timeouts(self, kwargs: dict[str, Any]) -> None:
+        """0 は opensearch-py 側で黙って client 既定値扱いになる"""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            SemanticSearchSettings(opensearch_endpoint="example.com", openai_api_key="key", **kwargs)
+
+    def test_first_attempt_is_capped_by_timeout(self) -> None:
+        """通常の待ち時間だけ短く設定しても機能が無効にならず、1回目はそれに丸める"""
+        settings = SemanticSearchSettings(
+            opensearch_endpoint="example.com", openai_api_key="key", opensearch_timeout_seconds=5
+        )
+        with (
+            patch("birdxplorer_api.semantic_search.OpenAI"),
+            patch("birdxplorer_api.semantic_search.OpenSearch") as mock_os_cls,
+            patch("birdxplorer_api.semantic_search.boto3"),
+            patch("birdxplorer_api.semantic_search.AWSV4SignerAuth"),
+        ):
+            service = gen_semantic_search_service(settings)
+        assert service is not None
+        mock_os_cls.return_value.search.return_value = {"hits": {"hits": []}}
+        service.knn_search([0.1] * 3, limit=5)
+        assert mock_os_cls.return_value.search.call_args.kwargs["params"]["request_timeout"] == 5
+
+    def test_factory_injects_configured_first_attempt_timeout(self) -> None:
+        settings = SemanticSearchSettings(
+            opensearch_endpoint="example.com", openai_api_key="key", opensearch_first_attempt_timeout_seconds=3
+        )
+        with (
+            patch("birdxplorer_api.semantic_search.OpenAI"),
+            patch("birdxplorer_api.semantic_search.OpenSearch") as mock_os_cls,
+            patch("birdxplorer_api.semantic_search.boto3"),
+            patch("birdxplorer_api.semantic_search.AWSV4SignerAuth"),
+        ):
+            service = gen_semantic_search_service(settings)
+        assert service is not None
+        mock_os_cls.return_value.search.return_value = {"hits": {"hits": []}}
+        service.knn_search([0.1] * 3, limit=5)
+        assert mock_os_cls.return_value.search.call_args.kwargs["params"]["request_timeout"] == 3

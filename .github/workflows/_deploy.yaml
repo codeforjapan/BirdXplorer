@@ -35,10 +35,10 @@ jobs:
     
     steps:
       - name: Checkout BirdXplorer repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_CDK_ROLE_TO_ASSUME }}
           aws-region: ap-northeast-1
@@ -89,7 +89,7 @@ jobs:
           echo "All required images are available in ECR"
       
       - name: Checkout BirdXplorer-cdk repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: codeforjapan/BirdXplorer-cdk
           path: BirdXplorer-cdk
@@ -97,7 +97,7 @@ jobs:
           persist-credentials: false
       
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: 'yarn'

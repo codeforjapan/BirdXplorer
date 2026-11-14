@@ -50,4 +50,6 @@ COPY --chown=app:app . ./
 
 # --no-control-socket: gunicorn 25+ の control socket はデフォルト有効だが、
 # 非 root ユーザー(ホームディレクトリ無し)ではソケット作成に失敗し起動毎に ERROR ログが出るため無効化
-ENTRYPOINT ["python", "-m", "gunicorn", "birdxplorer_api.main:app", "-k", "uvicorn.workers.UvicornWorker", "-w", "1", "--bind", "0.0.0.0:10000", "--no-control-socket"]
+# -w 2: 重い応答の組み立て中も、もう一方のワーカーがヘルスチェックや軽いリクエストに答えられるように
+# --keep-alive 75: ALB のアイドルタイムアウト(60秒)より長くし、ALB が閉じられた接続を使って 502 を返すのを防ぐ
+ENTRYPOINT ["python", "-m", "gunicorn", "birdxplorer_api.main:app", "-k", "uvicorn.workers.UvicornWorker", "-w", "2", "--keep-alive", "75", "--bind", "0.0.0.0:10000", "--no-control-socket"]

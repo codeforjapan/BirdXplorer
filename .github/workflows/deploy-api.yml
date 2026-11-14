@@ -26,9 +26,9 @@ jobs:
       image-tag: ${{ steps.tag.outputs.tag }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ap-northeast-1
@@ -36,14 +36,14 @@ jobs:
       - uses: aws-actions/amazon-ecr-login@v2
         id: login-ecr
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - id: tag
         run: |
           sha=$(echo "${{ github.sha }}" | cut -c1-7)
           echo "tag=dev-sha$sha" >> $GITHUB_OUTPUT
 
-      - uses: docker/build-push-action@v5
+      - uses: docker/build-push-action@v7
         with:
           context: ./api
           file: ./api/Dockerfile.prd
