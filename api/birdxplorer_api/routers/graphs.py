@@ -168,8 +168,6 @@ def gen_router(storage: Storage) -> APIRouter:
             raise
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
     @router.get("/daily-posts", response_model=GraphListResponse[DailyPostCountDataItem])
     def get_daily_posts(
@@ -261,8 +259,6 @@ def gen_router(storage: Storage) -> APIRouter:
             raise
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
     @router.get("/notes-annual", response_model=GraphListResponse[MonthlyNoteDataItem])
     def get_notes_annual(
@@ -362,8 +358,6 @@ def gen_router(storage: Storage) -> APIRouter:
             raise
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
     @router.get("/notes-evaluation", response_model=GraphListResponse[NoteEvaluationDataItem])
     def get_notes_evaluation(
@@ -455,8 +449,6 @@ def gen_router(storage: Storage) -> APIRouter:
             raise
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
     @router.get("/notes-evaluation-status", response_model=GraphListResponse[NoteEvaluationDataItem])
     def get_notes_evaluation_status(
@@ -549,8 +541,6 @@ def gen_router(storage: Storage) -> APIRouter:
             raise
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
     @router.get("/post-influence", response_model=GraphListResponse[PostInfluenceDataItem])
     def get_post_influence(
@@ -642,8 +632,6 @@ def gen_router(storage: Storage) -> APIRouter:
             raise
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
     @router.get("/top-note-accounts", response_model=GraphListResponse[TopNoteAccountDataItem])
     def get_top_note_accounts(
@@ -727,7 +715,5 @@ def gen_router(storage: Storage) -> APIRouter:
             raise
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
     return router

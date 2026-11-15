@@ -11,7 +11,7 @@ from typing import Optional
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
-from pytest import LogCaptureFixture
+from pytest import LogCaptureFixture, mark
 from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
@@ -245,3 +245,54 @@ def test_dbapi_error_without_orig_does_not_leak_bound_values(
     assert "secret-search-term" not in caplog.text
     assert "[SQL:" not in caplog.text
     assert "InterfaceError" in caplog.text
+
+
+_GRAPH_ENDPOINTS = [
+    ("/api/v1/graphs/daily-notes", "get_daily_note_counts"),
+    ("/api/v1/graphs/daily-posts", "get_daily_post_counts"),
+    ("/api/v1/graphs/notes-annual", "get_monthly_note_counts"),
+    ("/api/v1/graphs/notes-evaluation", "get_note_evaluation_points"),
+    ("/api/v1/graphs/notes-evaluation-status", "get_note_evaluation_points"),
+    ("/api/v1/graphs/post-influence", "get_post_influence_points"),
+    ("/api/v1/graphs/top-note-accounts", "get_top_note_accounts"),
+]
+_GRAPH_PARAMS = {"start_date": _VALID_FROM, "end_date": _VALID_TO}
+
+
+@mark.parametrize("path, storage_method", _GRAPH_ENDPOINTS)
+def test_graph_query_canceled_returns_504(
+    client: TestClient, mock_storage: MagicMock, path: str, storage_method: str
+) -> None:
+    """graphs ルーターが例外を 500 に変えてしまい、ハンドラまで届かなくならないことを固定する。"""
+    getattr(mock_storage, storage_method).side_effect = _query_canceled_error()
+
+    response = client.get(path, params=_GRAPH_PARAMS)
+
+    assert response.status_code == 504
+
+
+@mark.parametrize("path, storage_method", _GRAPH_ENDPOINTS)
+def test_graph_db_error_response_has_no_sql_or_bound_values(
+    client: TestClient, mock_storage: MagicMock, path: str, storage_method: str
+) -> None:
+    statement = "SELECT * FROM note WHERE summary LIKE %(keyword)s"
+    params = {"keyword": "%secret-search-term%"}
+    getattr(mock_storage, storage_method).side_effect = OperationalError(
+        statement, params, _Psycopg2StyleError("connection to server failed: Connection refused")
+    )
+
+    response = client.get(path, params=_GRAPH_PARAMS)
+
+    assert response.status_code == 503
+    assert "secret-search-term" not in response.text
+    assert "[SQL:" not in response.text
+
+
+def test_graph_unexpected_error_does_not_leak_message(client: TestClient, mock_storage: MagicMock) -> None:
+    mock_storage.get_daily_note_counts.side_effect = RuntimeError("secret-internal-detail")
+    raw_client = TestClient(client.app, raise_server_exceptions=False)
+
+    response = raw_client.get("/api/v1/graphs/daily-notes", params=_GRAPH_PARAMS)
+
+    assert response.status_code == 500
+    assert "secret-internal-detail" not in response.text
