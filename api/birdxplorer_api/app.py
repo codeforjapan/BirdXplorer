@@ -1,17 +1,26 @@
 import csv
 import io
+import traceback
 from logging import getLogger
 from typing import Any, Optional
 from urllib.parse import parse_qs as parse_query_string
 from urllib.parse import urlencode as encode_query_string
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import ResponseValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 from pydantic.alias_generators import to_snake
-from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
+from sqlalchemy.exc import (
+    DBAPIError,
+    InterfaceError,
+    OperationalError,
+    SQLAlchemyError,
+    StatementError,
+)
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from birdxplorer_common.logger import get_logger
 from birdxplorer_common.settings import GlobalSettings
@@ -58,20 +67,119 @@ class QueryStringFlatteningMiddleware:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         query_string = scope.get("query_string")
-        if not isinstance(query_string, bytes):
-            query_string = b""
-        query_string = query_string.decode("utf-8")
-        if scope["type"] == "http" and query_string:
-            parsed = parse_query_string(query_string)
-            flattened = {}
-            for name, values in parsed.items():
-                flattened[to_snake(name)] = [c for value in values for r in csv.reader(io.StringIO(value)) for c in r]
-
-            scope["query_string"] = encode_query_string(flattened, doseq=True).encode("utf-8")
-
+        if scope["type"] != "http" or not isinstance(query_string, bytes) or not query_string:
             await self._app(scope, receive, send)
+            return
+        try:
+            parsed = parse_query_string(query_string.decode("utf-8"))
+            # csv.reader は値の途中の改行 (CR) や NUL で csv.Error を投げる。psycopg2 も NUL を受け付けない
+            if any("\x00" in name or any("\x00" in v for v in values) for name, values in parsed.items()):
+                raise ValueError("NUL in query string")
+            flattened = {
+                to_snake(name): [c for value in values for r in csv.reader(io.StringIO(value)) for c in r]
+                for name, values in parsed.items()
+            }
+        except (ValueError, csv.Error):
+            await JSONResponse(status_code=400, content={"detail": "invalid query string"})(scope, receive, send)
+            return
+
+        scope["query_string"] = encode_query_string(flattened, doseq=True).encode("utf-8")
+        await self._app(scope, receive, send)
+
+
+def _one_line(text: str) -> str:
+    # awslogs は複数行をまとめない。psycopg2 のメッセージは複数行で末尾にも改行が付く。
+    # パスも uvicorn が unquote するので %0A が改行になる
+    return text.replace("\r", "\\r").replace("\n", "\\n")
+
+
+def _describe_unhandled(exc: BaseException) -> str:
+    """ログ用の例外の説明。SQL・バインド値・行データを含めず、1 行に収める。
+
+    - StatementError (DBAPIError の親) の str() は SQL とバインド値を含む。ProgrammingError や DataError では
+      ドライバ側のメッセージ (orig) にも入力値が入る (psycopg2 はクライアント側で値を埋め込むので
+      `LINE 1: ...` に値入りの SQL が出る) ので、型名と SQLSTATE だけにする。
+    - それ以外の SQLAlchemy の例外も SQL を含むことがある (PendingRollbackError など) ので型名だけにする。
+    - pydantic の ValidationError と FastAPI の ResponseValidationError は、msg も含めて入力値を含みうるので
+      loc と type だけにする。
+    - 原因の例外 (__cause__) は型名だけにする。SQLAlchemy は必ずドライバの例外を原因にして投げる。
+    """
+    if isinstance(exc, StatementError):
+        orig = exc.orig
+        code = getattr(orig, "pgcode", None) or getattr(orig, "sqlstate", None)
+        description = f"{type(exc).__name__} ({type(orig).__name__}, SQLSTATE={code})"
+    elif isinstance(exc, SQLAlchemyError):
+        description = type(exc).__name__
+    elif isinstance(exc, (ValidationError, ResponseValidationError)):
+        errors = [{"loc": e.get("loc"), "type": e.get("type")} for e in exc.errors()]
+        description = f"{type(exc).__name__}: {errors}"
+    else:
+        # 型の分からない例外はデバッグのためにメッセージを残す
+        description = f"{type(exc).__name__}: {exc}"
+    cause = exc.__cause__
+    if cause is not None:
+        # 応答の途中で起きたハンドラ付きの例外は、Starlette が RuntimeError で包む。その中身は 1 段だけ説明する
+        if isinstance(exc, RuntimeError) and isinstance(cause, (StatementError, ValidationError)):
+            description += f" caused by {_describe_unhandled(cause)}"
         else:
+            description += f" caused by {type(cause).__name__}"
+    return _one_line(description)
+
+
+def _format_frames(exc: BaseException) -> str:
+    # awslogs は複数行をまとめないので 1 行にする。フレームの位置だけで値は含まない
+    frames = []
+    for f in reversed(traceback.extract_tb(exc.__traceback__)):
+        filename = f.filename.split("site-packages/")[-1]
+        frames.append(f"{filename}:{f.lineno} in {f.name}")
+    return " <- ".join(frames)
+
+
+class UnhandledErrorMiddleware:
+    """ハンドラの無い例外を JSON の 500 にする。
+
+    CORSMiddleware より内側に置く。Starlette 既定の 500 は最外層の ServerErrorMiddleware が返すので
+    CORS ヘッダが付かず、ブラウザからは CORS エラーに見える。また既定のログ (uvicorn の
+    "Exception in ASGI application") は例外の str() を含むので、DBAPIError だと SQL とバインド値が漏れる。
+
+    例外は外へ投げないので、外側にあるものには届かない。
+    - FastAPI のテレメトリ: 例外の str() を記録するので意図どおり。
+    - `@app.exception_handler(Exception)` や 500 のハンドラ: ServerErrorMiddleware で処理されるので効かない。
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
             await self._app(scope, receive, send)
+            return
+
+        response_started = False
+
+        async def send_wrapper(message: Message) -> None:
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self._app(scope, receive, send_wrapper)
+        except Exception as exc:
+            frames = _format_frames(exc)
+            if exc.__cause__ is not None:
+                frames += f" | cause at {_format_frames(exc.__cause__)}"
+            logger.error(
+                _one_line(
+                    f"unhandled error: {_describe_unhandled(exc)} ({scope['method']} {scope['path']}) "
+                    f"response_started={response_started} at {frames}"
+                )
+            )
+            # 応答を書き始めた後は 500 に差し替えられない。外へ投げると uvicorn が str(exc) をログに出すので、
+            # 投げずに戻って接続を切らせる (クライアントには途中で切れた応答として届く)
+            if response_started:
+                return
+            await JSONResponse(status_code=500, content={"detail": "Internal Server Error"})(scope, receive, send)
 
 
 def gen_app(settings: GlobalSettings) -> FastAPI:
@@ -79,14 +187,16 @@ def gen_app(settings: GlobalSettings) -> FastAPI:
     storage = gen_storage(settings=settings)
     semantic_search = gen_semantic_search_service()
     app = FastAPI()
-    app.add_middleware(CORSMiddleware, **settings.cors_settings.model_dump())
+    # 先に追加したものほど内側になる。UnhandledErrorMiddleware は CORS の内側かつ QueryStringFlattening の外側
     app.add_middleware(QueryStringFlatteningMiddleware)
+    app.add_middleware(UnhandledErrorMiddleware)
+    app.add_middleware(CORSMiddleware, **settings.cors_settings.model_dump())
     app.add_middleware(TimingMiddleware)
 
     @app.exception_handler(SemanticSearchUnavailableError)
     def handle_semantic_search_unavailable(request: Request, exc: SemanticSearchUnavailableError) -> JSONResponse:
         """SemanticSearchUnavailableError を 503 に変換するアプリレベルハンドラ"""
-        logger.error(f"semantic search unavailable: {exc}")
+        logger.error(_one_line(f"semantic search unavailable: {exc}"))
         return JSONResponse(status_code=503, content={"detail": "semantic search is temporarily unavailable"})
 
     @app.exception_handler(OperationalError)
@@ -107,15 +217,19 @@ def gen_app(settings: GlobalSettings) -> FastAPI:
             # ("due to statement timeout" / "due to user request") が両者を区別する唯一の手がかりになる。
             # タイムアウト時の exc.orig はバインド値を含まない (503 側と同じ理由で str(exc) は使わない)。
             logger.warning(
-                f"query canceled: {type(exc.orig).__name__}: {exc.orig} " f"({request.method} {request.url.path})"
+                _one_line(
+                    f"query canceled: {type(exc.orig).__name__}: {exc.orig} ({request.method} {request.url.path})"
+                )
             )
             return JSONResponse(
                 status_code=504,
                 content={"detail": _QUERY_TIMEOUT_DETAIL},
             )
         logger.error(
-            f"database operational error: {type(exc.orig).__name__}: {exc.orig} "
-            f"({request.method} {request.url.path})"
+            _one_line(
+                f"database operational error: {type(exc.orig).__name__}: {exc.orig} "
+                f"({request.method} {request.url.path})"
+            )
         )
         return JSONResponse(status_code=503, content={"detail": _DB_UNAVAILABLE_DETAIL})
 
@@ -157,7 +271,9 @@ def gen_app(settings: GlobalSettings) -> FastAPI:
             detail = type(exc).__name__
         else:
             detail = str(exc)
-        logger.error(f"database unavailable: {type(exc).__name__}: {detail} ({request.method} {request.url.path})")
+        logger.error(
+            _one_line(f"database unavailable: {type(exc).__name__}: {detail} ({request.method} {request.url.path})")
+        )
         return JSONResponse(status_code=503, content={"detail": _DB_UNAVAILABLE_DETAIL})
 
     app.include_router(gen_system_router(), prefix="/api/v1/system")
