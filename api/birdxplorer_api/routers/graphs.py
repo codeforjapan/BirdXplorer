@@ -3,7 +3,7 @@
 Provides time-series aggregations and evaluation metrics for community notes and posts.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -43,6 +43,9 @@ def twitter_timestamp_to_iso_date(ts: int) -> str:
     return ms_to_jst_date(int(ts))
 
 
+_MAX_TIMESTAMP_MS = int(datetime(3000, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
+
+
 def validate_timestamp_range(
     start_date: int,
     end_date: int,
@@ -69,6 +72,9 @@ def validate_timestamp_range(
 
     if start_date > end_date:
         raise HTTPException(status_code=400, detail="start_date must be before or equal to end_date")
+    # 遠い未来は datetime の上限 (9999 年) や月の穴埋め (翌月を作る) で変換に失敗し 500 になるので、ここで弾く
+    if end_date > _MAX_TIMESTAMP_MS:
+        raise HTTPException(status_code=400, detail="end_date is out of range")
 
     days_diff = math.floor((end_date - start_date) / (1000 * 60 * 60 * 24))
     if days_diff > max_days:
@@ -128,48 +134,40 @@ def gen_router(storage: Storage) -> APIRouter:
         Raises:
             HTTPException: 400 if validation fails, 422 if timestamp format invalid
         """
-        try:
-            # Validate timestamp range
-            validate_timestamp_range(start_date, end_date, max_days=90)
+        # Validate timestamp range
+        validate_timestamp_range(start_date, end_date, max_days=90)
 
-            # Parse comma-separated filters
-            language_list: Optional[List[str]] = [lang.strip() for lang in language.split(",")] if language else None
-            keywords_list: Optional[List[str]] = [kw.strip() for kw in keywords.split(",")] if keywords else None
+        # Parse comma-separated filters
+        language_list: Optional[List[str]] = [lang.strip() for lang in language.split(",")] if language else None
+        keywords_list: Optional[List[str]] = [kw.strip() for kw in keywords.split(",")] if keywords else None
 
-            # Convert timestamps to ISO date strings
-            start_date_str = twitter_timestamp_to_iso_date(start_date)
-            end_date_str = twitter_timestamp_to_iso_date(end_date)
+        # Convert timestamps to ISO date strings
+        start_date_str = twitter_timestamp_to_iso_date(start_date)
+        end_date_str = twitter_timestamp_to_iso_date(end_date)
 
-            # Fetch data from storage
-            raw_data = storage.get_daily_note_counts(
-                start_date=start_date_str,
-                end_date=end_date_str,
-                status_filter=status,
-                language_filter=language_list,
-                keywords=keywords_list,
-            )
+        # Fetch data from storage
+        raw_data = storage.get_daily_note_counts(
+            start_date=start_date_str,
+            end_date=end_date_str,
+            status_filter=status,
+            language_filter=language_list,
+            keywords=keywords_list,
+        )
 
-            # Fill gaps for continuous time series
-            filled_data = storage._fill_daily_gaps(
-                data=raw_data,
-                start_date=start_date_str,
-                end_date=end_date_str,
-            )
+        # Fill gaps for continuous time series
+        filled_data = storage._fill_daily_gaps(
+            data=raw_data,
+            start_date=start_date_str,
+            end_date=end_date_str,
+        )
 
-            # Convert to Pydantic models
-            items = [DailyNotesCreationDataItem(**item) for item in filled_data]
+        # Convert to Pydantic models
+        items = [DailyNotesCreationDataItem(**item) for item in filled_data]
 
-            # Get metadata timestamp
-            updated_at = storage.get_graph_updated_at("notes")
+        # Get metadata timestamp
+        updated_at = storage.get_graph_updated_at("notes")
 
-            return GraphListResponse(data=items, updated_at=updated_at)
-
-        except HTTPException:
-            raise
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        return GraphListResponse(data=items, updated_at=updated_at)
 
     @router.get("/daily-posts", response_model=GraphListResponse[DailyPostCountDataItem])
     def get_daily_posts(
@@ -214,55 +212,47 @@ def gen_router(storage: Storage) -> APIRouter:
         Raises:
             HTTPException: 400 if validation fails, 422 if timestamp format invalid
         """
-        try:
-            # Validate timestamp range
-            validate_timestamp_range(start_date, end_date, max_days=90)
+        # Validate timestamp range
+        validate_timestamp_range(start_date, end_date, max_days=90)
 
-            # Parse comma-separated filters
-            language_list = [lang.strip() for lang in language.split(",")] if language else None
-            keywords_list = [kw.strip() for kw in keywords.split(",")] if keywords else None
+        # Parse comma-separated filters
+        language_list = [lang.strip() for lang in language.split(",")] if language else None
+        keywords_list = [kw.strip() for kw in keywords.split(",")] if keywords else None
 
-            # Convert timestamps to ISO date strings
-            start_date_str = twitter_timestamp_to_iso_date(start_date)
-            end_date_str = twitter_timestamp_to_iso_date(end_date)
+        # Convert timestamps to ISO date strings
+        start_date_str = twitter_timestamp_to_iso_date(start_date)
+        end_date_str = twitter_timestamp_to_iso_date(end_date)
 
-            # Fetch data from storage
-            raw_data = storage.get_daily_post_counts(
-                start_date=start_date_str,
-                end_date=end_date_str,
-                status_filter=status,
-                language_filter=language_list,
-                keywords=keywords_list,
-            )
+        # Fetch data from storage
+        raw_data = storage.get_daily_post_counts(
+            start_date=start_date_str,
+            end_date=end_date_str,
+            status_filter=status,
+            language_filter=language_list,
+            keywords=keywords_list,
+        )
 
-            # Fill gaps for continuous time series
-            # If no data, create template for post structure
-            if not raw_data:
-                template = {"date": start_date_str, "post_count": 0}
-                if status != "all":
-                    template["status"] = status
-                raw_data = [template]
+        # Fill gaps for continuous time series
+        # If no data, create template for post structure
+        if not raw_data:
+            template = {"date": start_date_str, "post_count": 0}
+            if status != "all":
+                template["status"] = status
+            raw_data = [template]
 
-            filled_data = storage._fill_daily_gaps(
-                data=raw_data,
-                start_date=start_date_str,
-                end_date=end_date_str,
-            )
+        filled_data = storage._fill_daily_gaps(
+            data=raw_data,
+            start_date=start_date_str,
+            end_date=end_date_str,
+        )
 
-            # Convert to Pydantic models
-            items = [DailyPostCountDataItem(**item) for item in filled_data]
+        # Convert to Pydantic models
+        items = [DailyPostCountDataItem(**item) for item in filled_data]
 
-            # Get metadata timestamp
-            updated_at = storage.get_graph_updated_at("posts")
+        # Get metadata timestamp
+        updated_at = storage.get_graph_updated_at("posts")
 
-            return GraphListResponse(data=items, updated_at=updated_at)
-
-        except HTTPException:
-            raise
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        return GraphListResponse(data=items, updated_at=updated_at)
 
     @router.get("/notes-annual", response_model=GraphListResponse[MonthlyNoteDataItem])
     def get_notes_annual(
@@ -310,60 +300,52 @@ def gen_router(storage: Storage) -> APIRouter:
         Raises:
             HTTPException: 400 if validation fails, 422 if timestamp format invalid
         """
-        try:
-            # Validate timestamp range (max 365 days for ~12 months)
-            validate_timestamp_range(start_date, end_date, max_days=365)
+        # Validate timestamp range (max 365 days for ~12 months)
+        validate_timestamp_range(start_date, end_date, max_days=365)
 
-            # Parse comma-separated filters
-            language_list = [lang.strip() for lang in language.split(",")] if language else None
-            keywords_list = [kw.strip() for kw in keywords.split(",")] if keywords else None
+        # Parse comma-separated filters
+        language_list = [lang.strip() for lang in language.split(",")] if language else None
+        keywords_list = [kw.strip() for kw in keywords.split(",")] if keywords else None
 
-            # Format as YYYY-MM (JST) for storage method
-            start_month = ms_to_jst_month(int(start_date))
-            end_month = ms_to_jst_month(int(end_date))
+        # Format as YYYY-MM (JST) for storage method
+        start_month = ms_to_jst_month(int(start_date))
+        end_month = ms_to_jst_month(int(end_date))
 
-            # Fetch data from storage
-            raw_data = storage.get_monthly_note_counts(
-                start_month=start_month,
-                end_month=end_month,
-                status_filter=status,
-                language_filter=language_list,
-                keywords=keywords_list,
-            )
+        # Fetch data from storage
+        raw_data = storage.get_monthly_note_counts(
+            start_month=start_month,
+            end_month=end_month,
+            status_filter=status,
+            language_filter=language_list,
+            keywords=keywords_list,
+        )
 
-            # Fill gaps for continuous time series
-            # If no data, create template for monthly note structure
-            if not raw_data:
-                template = {
-                    "month": start_month,
-                    "published": 0,
-                    "evaluating": 0,
-                    "unpublished": 0,
-                    "temporarilyPublished": 0,
-                    "publication_rate": 0.0,
-                }
-                raw_data = [template]
+        # Fill gaps for continuous time series
+        # If no data, create template for monthly note structure
+        if not raw_data:
+            template = {
+                "month": start_month,
+                "published": 0,
+                "evaluating": 0,
+                "unpublished": 0,
+                "temporarilyPublished": 0,
+                "publication_rate": 0.0,
+            }
+            raw_data = [template]
 
-            filled_data = storage._fill_monthly_gaps(
-                data=raw_data,
-                start_month=start_month,
-                end_month=end_month,
-            )
+        filled_data = storage._fill_monthly_gaps(
+            data=raw_data,
+            start_month=start_month,
+            end_month=end_month,
+        )
 
-            # Convert to Pydantic models
-            items = [MonthlyNoteDataItem(**item) for item in filled_data]
+        # Convert to Pydantic models
+        items = [MonthlyNoteDataItem(**item) for item in filled_data]
 
-            # Get metadata timestamp
-            updated_at = storage.get_graph_updated_at("notes")
+        # Get metadata timestamp
+        updated_at = storage.get_graph_updated_at("notes")
 
-            return GraphListResponse(data=items, updated_at=updated_at)
-
-        except HTTPException:
-            raise
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        return GraphListResponse(data=items, updated_at=updated_at)
 
     @router.get("/notes-evaluation", response_model=GraphListResponse[NoteEvaluationDataItem])
     def get_notes_evaluation(
@@ -417,46 +399,34 @@ def gen_router(storage: Storage) -> APIRouter:
         Raises:
             HTTPException: 400 if validation fails, 422 if timestamp format invalid
         """
-        try:
-            # Validate timestamp range
-            validate_timestamp_range(start_date, end_date, max_days=90)
+        # Validate timestamp range
+        validate_timestamp_range(start_date, end_date, max_days=90)
 
-            # Validate limit
-            if limit > 5000:
-                raise ValueError("Limit cannot exceed 5000")
+        # Parse comma-separated filters
+        language_list = [lang.strip() for lang in language.split(",")] if language else None
+        keywords_list = [kw.strip() for kw in keywords.split(",")] if keywords else None
 
-            # Parse comma-separated filters
-            language_list = [lang.strip() for lang in language.split(",")] if language else None
-            keywords_list = [kw.strip() for kw in keywords.split(",")] if keywords else None
+        # Convert timestamps to ISO date strings
+        start_date_str = twitter_timestamp_to_iso_date(start_date)
+        end_date_str = twitter_timestamp_to_iso_date(end_date)
 
-            # Convert timestamps to ISO date strings
-            start_date_str = twitter_timestamp_to_iso_date(start_date)
-            end_date_str = twitter_timestamp_to_iso_date(end_date)
+        # Fetch data from storage
+        raw_data = storage.get_note_evaluation_points(
+            start_date=start_date_str,
+            end_date=end_date_str,
+            status_filter=status,
+            limit=limit,
+            language_filter=language_list,
+            keywords=keywords_list,
+        )
 
-            # Fetch data from storage
-            raw_data = storage.get_note_evaluation_points(
-                start_date=start_date_str,
-                end_date=end_date_str,
-                status_filter=status,
-                limit=limit,
-                language_filter=language_list,
-                keywords=keywords_list,
-            )
+        # Convert to Pydantic models
+        items = [NoteEvaluationDataItem(**item) for item in raw_data]
 
-            # Convert to Pydantic models
-            items = [NoteEvaluationDataItem(**item) for item in raw_data]
+        # Get metadata timestamp
+        updated_at = storage.get_graph_updated_at("notes")
 
-            # Get metadata timestamp
-            updated_at = storage.get_graph_updated_at("notes")
-
-            return GraphListResponse(data=items, updated_at=updated_at)
-
-        except HTTPException:
-            raise
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        return GraphListResponse(data=items, updated_at=updated_at)
 
     @router.get("/notes-evaluation-status", response_model=GraphListResponse[NoteEvaluationDataItem])
     def get_notes_evaluation_status(
@@ -510,47 +480,35 @@ def gen_router(storage: Storage) -> APIRouter:
         Raises:
             HTTPException: 400 if validation fails, 422 if timestamp format invalid
         """
-        try:
-            # Validate timestamp range
-            validate_timestamp_range(start_date, end_date, max_days=90)
+        # Validate timestamp range
+        validate_timestamp_range(start_date, end_date, max_days=90)
 
-            # Validate limit
-            if limit > 5000:
-                raise ValueError("Limit cannot exceed 5000")
+        # Parse comma-separated filters
+        language_list = [lang.strip() for lang in language.split(",")] if language else None
+        keywords_list = [kw.strip() for kw in keywords.split(",")] if keywords else None
 
-            # Parse comma-separated filters
-            language_list = [lang.strip() for lang in language.split(",")] if language else None
-            keywords_list = [kw.strip() for kw in keywords.split(",")] if keywords else None
+        # Convert timestamps to ISO date strings
+        start_date_str = twitter_timestamp_to_iso_date(start_date)
+        end_date_str = twitter_timestamp_to_iso_date(end_date)
 
-            # Convert timestamps to ISO date strings
-            start_date_str = twitter_timestamp_to_iso_date(start_date)
-            end_date_str = twitter_timestamp_to_iso_date(end_date)
+        # Fetch data from storage with helpful_count ordering
+        raw_data = storage.get_note_evaluation_points(
+            start_date=start_date_str,
+            end_date=end_date_str,
+            status_filter=status,
+            limit=limit,
+            order_by="helpful_count",
+            language_filter=language_list,
+            keywords=keywords_list,
+        )
 
-            # Fetch data from storage with helpful_count ordering
-            raw_data = storage.get_note_evaluation_points(
-                start_date=start_date_str,
-                end_date=end_date_str,
-                status_filter=status,
-                limit=limit,
-                order_by="helpful_count",
-                language_filter=language_list,
-                keywords=keywords_list,
-            )
+        # Convert to Pydantic models
+        items = [NoteEvaluationDataItem(**item) for item in raw_data]
 
-            # Convert to Pydantic models
-            items = [NoteEvaluationDataItem(**item) for item in raw_data]
+        # Get metadata timestamp
+        updated_at = storage.get_graph_updated_at("notes")
 
-            # Get metadata timestamp
-            updated_at = storage.get_graph_updated_at("notes")
-
-            return GraphListResponse(data=items, updated_at=updated_at)
-
-        except HTTPException:
-            raise
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        return GraphListResponse(data=items, updated_at=updated_at)
 
     @router.get("/post-influence", response_model=GraphListResponse[PostInfluenceDataItem])
     def get_post_influence(
@@ -604,46 +562,34 @@ def gen_router(storage: Storage) -> APIRouter:
         Raises:
             HTTPException: 400 if validation fails, 422 if timestamp format invalid
         """
-        try:
-            # Validate timestamp range
-            validate_timestamp_range(start_date, end_date, max_days=90)
+        # Validate timestamp range
+        validate_timestamp_range(start_date, end_date, max_days=90)
 
-            # Validate limit
-            if limit > 5000:
-                raise ValueError("Limit cannot exceed 5000")
+        # Parse comma-separated filters
+        language_list = [lang.strip() for lang in language.split(",")] if language else None
+        keywords_list = [kw.strip() for kw in keywords.split(",")] if keywords else None
 
-            # Parse comma-separated filters
-            language_list = [lang.strip() for lang in language.split(",")] if language else None
-            keywords_list = [kw.strip() for kw in keywords.split(",")] if keywords else None
+        # Convert timestamps to ISO date strings
+        start_date_str = twitter_timestamp_to_iso_date(start_date)
+        end_date_str = twitter_timestamp_to_iso_date(end_date)
 
-            # Convert timestamps to ISO date strings
-            start_date_str = twitter_timestamp_to_iso_date(start_date)
-            end_date_str = twitter_timestamp_to_iso_date(end_date)
+        # Fetch data from storage
+        raw_data = storage.get_post_influence_points(
+            start_date=start_date_str,
+            end_date=end_date_str,
+            status_filter=status,
+            limit=limit,
+            language_filter=language_list,
+            keywords=keywords_list,
+        )
 
-            # Fetch data from storage
-            raw_data = storage.get_post_influence_points(
-                start_date=start_date_str,
-                end_date=end_date_str,
-                status_filter=status,
-                limit=limit,
-                language_filter=language_list,
-                keywords=keywords_list,
-            )
+        # Convert to Pydantic models
+        items = [PostInfluenceDataItem(**item) for item in raw_data]
 
-            # Convert to Pydantic models
-            items = [PostInfluenceDataItem(**item) for item in raw_data]
+        # Get metadata timestamp
+        updated_at = storage.get_graph_updated_at("posts")
 
-            # Get metadata timestamp
-            updated_at = storage.get_graph_updated_at("posts")
-
-            return GraphListResponse(data=items, updated_at=updated_at)
-
-        except HTTPException:
-            raise
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        return GraphListResponse(data=items, updated_at=updated_at)
 
     @router.get("/top-note-accounts", response_model=GraphListResponse[TopNoteAccountDataItem])
     def get_top_note_accounts(
@@ -687,47 +633,39 @@ def gen_router(storage: Storage) -> APIRouter:
         Raises:
             HTTPException: 400 if validation fails, 422 if timestamp format invalid
         """
-        try:
-            validate_timestamp_range(start_date, end_date, max_days=90)
+        validate_timestamp_range(start_date, end_date, max_days=90)
 
-            # Parse comma-separated filters
-            language_list = [lang.strip() for lang in language.split(",")] if language else None
-            keywords_list = [kw.strip() for kw in keywords.split(",")] if keywords else None
+        # Parse comma-separated filters
+        language_list = [lang.strip() for lang in language.split(",")] if language else None
+        keywords_list = [kw.strip() for kw in keywords.split(",")] if keywords else None
 
-            # Current period
-            start_date_str = twitter_timestamp_to_iso_date(start_date)
-            end_date_str = twitter_timestamp_to_iso_date(end_date)
+        # Current period
+        start_date_str = twitter_timestamp_to_iso_date(start_date)
+        end_date_str = twitter_timestamp_to_iso_date(end_date)
 
-            # Previous period: same number of JST days, ending the day before start_date
-            start_day = datetime.strptime(start_date_str, "%Y-%m-%d").date()
-            end_day = datetime.strptime(end_date_str, "%Y-%m-%d").date()
-            days = (end_day - start_day).days + 1
-            prev_end_day = start_day - timedelta(days=1)
-            prev_start_day = prev_end_day - timedelta(days=days - 1)
-            prev_start_date_str = prev_start_day.strftime("%Y-%m-%d")
-            prev_end_date_str = prev_end_day.strftime("%Y-%m-%d")
+        # Previous period: same number of JST days, ending the day before start_date
+        start_day = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+        end_day = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+        days = (end_day - start_day).days + 1
+        prev_end_day = start_day - timedelta(days=1)
+        prev_start_day = prev_end_day - timedelta(days=days - 1)
+        prev_start_date_str = prev_start_day.strftime("%Y-%m-%d")
+        prev_end_date_str = prev_end_day.strftime("%Y-%m-%d")
 
-            raw_data = storage.get_top_note_accounts(
-                start_date=start_date_str,
-                end_date=end_date_str,
-                prev_start_date=prev_start_date_str,
-                prev_end_date=prev_end_date_str,
-                status_filter=status,
-                limit=10,
-                language_filter=language_list,
-                keywords=keywords_list,
-            )
+        raw_data = storage.get_top_note_accounts(
+            start_date=start_date_str,
+            end_date=end_date_str,
+            prev_start_date=prev_start_date_str,
+            prev_end_date=prev_end_date_str,
+            status_filter=status,
+            limit=10,
+            language_filter=language_list,
+            keywords=keywords_list,
+        )
 
-            items = [TopNoteAccountDataItem(**item) for item in raw_data]
-            updated_at = storage.get_graph_updated_at("notes")
+        items = [TopNoteAccountDataItem(**item) for item in raw_data]
+        updated_at = storage.get_graph_updated_at("notes")
 
-            return GraphListResponse(data=items, updated_at=updated_at)
-
-        except HTTPException:
-            raise
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        return GraphListResponse(data=items, updated_at=updated_at)
 
     return router
