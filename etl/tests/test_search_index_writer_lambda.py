@@ -1,6 +1,7 @@
 """search_index_writer_lambda のテスト"""
 
 import json
+from itertools import chain, repeat
 from unittest.mock import MagicMock, patch
 
 from birdxplorer_etl.lib.lambda_handler import search_index_writer_lambda as writer
@@ -235,6 +236,41 @@ class TestLambdaHandler:
         assert bulk_body[1]["indexed_at"] == 1763000000123
         assert bulk_body[3]["indexed_at"] == 1763000000123
         assert bulk_body[1]["created_at"] == 1720000000000
+
+    @patch.object(writer, "_get_client")
+    def test_puts_mapping_before_bulk(self, mock_get_client: MagicMock) -> None:
+        """動的マッピングで型が決まらないよう、bulkより前にindexed_atのマッピングを足す"""
+        client = mock_get_client.return_value
+        client.indices.exists.return_value = True
+        client.indices.exists_alias.return_value = True
+        client.bulk.return_value = {"errors": False, "items": []}
+
+        writer.lambda_handler(_sqs_event([_doc_body("n1")]), None)
+
+        names = [c[0] for c in client.mock_calls]
+        assert names.index("indices.put_mapping") < names.index("bulk")
+
+    @patch("birdxplorer_etl.lib.lambda_handler.search_index_writer_lambda.time.sleep")
+    # time.time は logging も呼ぶので、2回目以降は同じ値を返し続ける
+    @patch.object(writer.time, "time", side_effect=chain([1763000000.0], repeat(1763000005.0)))
+    @patch.object(writer, "_ensure_index")
+    @patch.object(writer, "_get_client")
+    def test_retry_refreshes_indexed_at(
+        self, mock_get_client: MagicMock, mock_ensure: MagicMock, mock_time: MagicMock, mock_sleep: MagicMock
+    ) -> None:
+        """再送ではindexed_atを取り直す"""
+        client = mock_get_client.return_value
+        client.bulk.side_effect = [
+            {"errors": True, "items": [{"index": {"_id": "n1", "status": 429, "error": {"type": "x"}}}]},
+            {"errors": False, "items": []},
+        ]
+
+        result = writer.lambda_handler(_sqs_event([_doc_body("n1")]), None)
+
+        assert result == {"batchItemFailures": []}
+        first, second = (c.kwargs["body"][1] for c in client.bulk.call_args_list)
+        assert first["indexed_at"] == 1763000000000
+        assert second["indexed_at"] == 1763000005000
 
     @patch.object(writer, "_ensure_index")
     @patch.object(writer, "_get_client")

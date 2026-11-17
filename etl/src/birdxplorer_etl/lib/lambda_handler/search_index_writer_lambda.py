@@ -35,7 +35,8 @@ TRANSIENT_STATUSES = {429, 503}
 MAX_BULK_RETRIES = 3
 BACKOFF_BASE_SECONDS = 0.5
 
-# 索引に書き込んだ時刻。created_at(ノートの作成時刻)は日次Extractだと数日前になり、新着順に追えない
+# 索引に書き込んだ時刻。created_at(ノートの作成時刻)は日次Extractだと数日前になり、新着順に追えない。
+# 定義を変えると put_mapping が衝突して書き込みが全件止まる。変えるときは索引を作り直す
 INDEXED_AT_MAPPING = {"type": "date", "format": "strict_date_optional_time||epoch_millis"}
 
 # spec: 2026-07-08-opensearch-phase2-etl-design.md §7
@@ -197,10 +198,12 @@ def _bulk_index_docs(client: OpenSearch, docs: List[Tuple[str, str, Dict[str, An
     failed: List[str] = []
 
     for attempt in range(MAX_BULK_RETRIES + 1):
+        # 再送のたびに取り直し、バックオフ待ちの分だけ検索に見える時刻より古くならないようにする
+        indexed_at = int(time.time() * 1000)
         bulk_body: List[Dict[str, Any]] = []
         for _, note_id, doc in pending:
             bulk_body.append({"index": {"_index": ALIAS_NAME, "_id": note_id}})
-            bulk_body.append(doc)
+            bulk_body.append({**doc, "indexed_at": indexed_at})
 
         response = client.bulk(body=bulk_body)
 
@@ -243,7 +246,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     batch_item_failures: List[Dict[str, str]] = []
     docs: List[Tuple[str, str, Dict[str, Any]]] = []
-    indexed_at = int(time.time() * 1000)
 
     for record in records:
         message_id = record.get("messageId")
@@ -255,7 +257,6 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "text": body.get("text"),
                 "language": body.get("language"),
                 "created_at": body.get("created_at"),
-                "indexed_at": indexed_at,
                 "embedding": body["embedding"],
             }
             docs.append((message_id, note_id, doc))
