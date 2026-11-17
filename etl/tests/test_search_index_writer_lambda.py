@@ -53,6 +53,21 @@ class TestEnsureIndex:
         client.indices.put_alias.assert_called_once_with(index="notes-v3", name="notes")
         assert writer._index_ensured is True
 
+    def test_index_body_has_indexed_at(self) -> None:
+        assert writer.INDEX_BODY["mappings"]["properties"]["indexed_at"] == writer.INDEXED_AT_MAPPING
+
+    def test_puts_indexed_at_mapping_on_existing_index(self) -> None:
+        """作成済みのインデックスにはINDEX_BODYが効かないため、indexed_atのマッピングを足す"""
+        client = MagicMock()
+        client.indices.exists.return_value = True
+        client.indices.exists_alias.return_value = True
+
+        writer._ensure_index(client)
+
+        client.indices.put_mapping.assert_called_once_with(
+            index="notes-v3", body={"properties": {"indexed_at": writer.INDEXED_AT_MAPPING}}
+        )
+
     def test_index_body_has_icu_analyzer(self) -> None:
         """ICUアナライザ設定がINDEX_BODYに正しく含まれているか"""
         assert writer.INDEX_NAME == "notes-v3"
@@ -205,6 +220,21 @@ class TestLambdaHandler:
         assert bulk_body[1]["note_id"] == "n1"
         assert "model" not in bulk_body[1]  # ドキュメントにはembedding元フィールドのみ格納
         assert bulk_body[2] == {"index": {"_index": "notes", "_id": "n2"}}
+
+    @patch.object(writer.time, "time", return_value=1763000000.123)
+    @patch.object(writer, "_ensure_index")
+    @patch.object(writer, "_get_client")
+    def test_sets_indexed_at(self, mock_get_client: MagicMock, mock_ensure: MagicMock, mock_time: MagicMock) -> None:
+        """indexed_atに書き込み時刻(epoch millis)を入れる。created_atはそのまま"""
+        client = mock_get_client.return_value
+        client.bulk.return_value = {"errors": False, "items": []}
+
+        writer.lambda_handler(_sqs_event([_doc_body("n1"), _doc_body("n2")]), None)
+
+        bulk_body = client.bulk.call_args.kwargs["body"]
+        assert bulk_body[1]["indexed_at"] == 1763000000123
+        assert bulk_body[3]["indexed_at"] == 1763000000123
+        assert bulk_body[1]["created_at"] == 1720000000000
 
     @patch.object(writer, "_ensure_index")
     @patch.object(writer, "_get_client")

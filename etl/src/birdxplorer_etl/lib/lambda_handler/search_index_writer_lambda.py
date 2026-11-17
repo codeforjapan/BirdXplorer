@@ -35,6 +35,9 @@ TRANSIENT_STATUSES = {429, 503}
 MAX_BULK_RETRIES = 3
 BACKOFF_BASE_SECONDS = 0.5
 
+# 索引に書き込んだ時刻。created_at(ノートの作成時刻)は日次Extractだと数日前になり、新着順に追えない
+INDEXED_AT_MAPPING = {"type": "date", "format": "strict_date_optional_time||epoch_millis"}
+
 # spec: 2026-07-08-opensearch-phase2-etl-design.md §7
 INDEX_BODY = {
     "settings": {
@@ -72,6 +75,7 @@ INDEX_BODY = {
             },
             "language": {"type": "keyword"},
             "created_at": {"type": "date", "format": "strict_date_optional_time||epoch_millis"},
+            "indexed_at": INDEXED_AT_MAPPING,
             "impression_bucket": {"type": "keyword"},
             "embedding": {
                 "type": "knn_vector",
@@ -137,6 +141,8 @@ def _ensure_index(client: OpenSearch) -> None:
     if not client.indices.exists(index=INDEX_NAME):
         client.indices.create(index=INDEX_NAME, body=INDEX_BODY)
         logger.info(f"Created index {INDEX_NAME}")
+    # 作成済みのインデックスにはINDEX_BODYが効かない。動的マッピングで型が決まる前に足す(同じ定義なら冪等)
+    client.indices.put_mapping(index=INDEX_NAME, body={"properties": {"indexed_at": INDEXED_AT_MAPPING}})
     if not client.indices.exists_alias(name=ALIAS_NAME):
         # 初回: alias が全く無い → 空でも付与(初期構築を妨げない)
         client.indices.put_alias(index=INDEX_NAME, name=ALIAS_NAME)
@@ -237,6 +243,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     batch_item_failures: List[Dict[str, str]] = []
     docs: List[Tuple[str, str, Dict[str, Any]]] = []
+    indexed_at = int(time.time() * 1000)
 
     for record in records:
         message_id = record.get("messageId")
@@ -248,6 +255,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "text": body.get("text"),
                 "language": body.get("language"),
                 "created_at": body.get("created_at"),
+                "indexed_at": indexed_at,
                 "embedding": body["embedding"],
             }
             docs.append((message_id, note_id, doc))
