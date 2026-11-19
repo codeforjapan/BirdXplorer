@@ -1,6 +1,7 @@
 """search_index_writer_lambda のテスト"""
 
 import json
+from itertools import chain, repeat
 from unittest.mock import MagicMock, patch
 
 from birdxplorer_etl.lib.lambda_handler import search_index_writer_lambda as writer
@@ -52,6 +53,21 @@ class TestEnsureIndex:
         assert "method" not in mappings["embedding"]
         client.indices.put_alias.assert_called_once_with(index="notes-v3", name="notes")
         assert writer._index_ensured is True
+
+    def test_index_body_has_indexed_at(self) -> None:
+        assert writer.INDEX_BODY["mappings"]["properties"]["indexed_at"] == writer.INDEXED_AT_MAPPING
+
+    def test_puts_indexed_at_mapping_on_existing_index(self) -> None:
+        """作成済みのインデックスにはINDEX_BODYが効かないため、indexed_atのマッピングを足す"""
+        client = MagicMock()
+        client.indices.exists.return_value = True
+        client.indices.exists_alias.return_value = True
+
+        writer._ensure_index(client)
+
+        client.indices.put_mapping.assert_called_once_with(
+            index="notes-v3", body={"properties": {"indexed_at": writer.INDEXED_AT_MAPPING}}
+        )
 
     def test_index_body_has_icu_analyzer(self) -> None:
         """ICUアナライザ設定がINDEX_BODYに正しく含まれているか"""
@@ -205,6 +221,56 @@ class TestLambdaHandler:
         assert bulk_body[1]["note_id"] == "n1"
         assert "model" not in bulk_body[1]  # ドキュメントにはembedding元フィールドのみ格納
         assert bulk_body[2] == {"index": {"_index": "notes", "_id": "n2"}}
+
+    @patch.object(writer.time, "time", return_value=1763000000.123)
+    @patch.object(writer, "_ensure_index")
+    @patch.object(writer, "_get_client")
+    def test_sets_indexed_at(self, mock_get_client: MagicMock, mock_ensure: MagicMock, mock_time: MagicMock) -> None:
+        """indexed_atに書き込み時刻(epoch millis)を入れる。created_atはそのまま"""
+        client = mock_get_client.return_value
+        client.bulk.return_value = {"errors": False, "items": []}
+
+        writer.lambda_handler(_sqs_event([_doc_body("n1"), _doc_body("n2")]), None)
+
+        bulk_body = client.bulk.call_args.kwargs["body"]
+        assert bulk_body[1]["indexed_at"] == 1763000000123
+        assert bulk_body[3]["indexed_at"] == 1763000000123
+        assert bulk_body[1]["created_at"] == 1720000000000
+
+    @patch.object(writer, "_get_client")
+    def test_puts_mapping_before_bulk(self, mock_get_client: MagicMock) -> None:
+        """動的マッピングで型が決まらないよう、bulkより前にindexed_atのマッピングを足す"""
+        client = mock_get_client.return_value
+        client.indices.exists.return_value = True
+        client.indices.exists_alias.return_value = True
+        client.bulk.return_value = {"errors": False, "items": []}
+
+        writer.lambda_handler(_sqs_event([_doc_body("n1")]), None)
+
+        names = [c[0] for c in client.mock_calls]
+        assert names.index("indices.put_mapping") < names.index("bulk")
+
+    @patch("birdxplorer_etl.lib.lambda_handler.search_index_writer_lambda.time.sleep")
+    # time.time は logging も呼ぶので、2回目以降は同じ値を返し続ける
+    @patch.object(writer.time, "time", side_effect=chain([1763000000.0], repeat(1763000005.0)))
+    @patch.object(writer, "_ensure_index")
+    @patch.object(writer, "_get_client")
+    def test_retry_refreshes_indexed_at(
+        self, mock_get_client: MagicMock, mock_ensure: MagicMock, mock_time: MagicMock, mock_sleep: MagicMock
+    ) -> None:
+        """再送ではindexed_atを取り直す"""
+        client = mock_get_client.return_value
+        client.bulk.side_effect = [
+            {"errors": True, "items": [{"index": {"_id": "n1", "status": 429, "error": {"type": "x"}}}]},
+            {"errors": False, "items": []},
+        ]
+
+        result = writer.lambda_handler(_sqs_event([_doc_body("n1")]), None)
+
+        assert result == {"batchItemFailures": []}
+        first, second = (c.kwargs["body"][1] for c in client.bulk.call_args_list)
+        assert first["indexed_at"] == 1763000000000
+        assert second["indexed_at"] == 1763000005000
 
     @patch.object(writer, "_ensure_index")
     @patch.object(writer, "_get_client")

@@ -35,6 +35,10 @@ TRANSIENT_STATUSES = {429, 503}
 MAX_BULK_RETRIES = 3
 BACKOFF_BASE_SECONDS = 0.5
 
+# 索引に書き込んだ時刻。created_at(ノートの作成時刻)は日次Extractだと数日前になり、新着順に追えない。
+# 定義を変えると put_mapping が衝突して書き込みが全件止まる。変えるときは索引を作り直す
+INDEXED_AT_MAPPING = {"type": "date", "format": "strict_date_optional_time||epoch_millis"}
+
 # spec: 2026-07-08-opensearch-phase2-etl-design.md §7
 INDEX_BODY = {
     "settings": {
@@ -72,6 +76,7 @@ INDEX_BODY = {
             },
             "language": {"type": "keyword"},
             "created_at": {"type": "date", "format": "strict_date_optional_time||epoch_millis"},
+            "indexed_at": INDEXED_AT_MAPPING,
             "impression_bucket": {"type": "keyword"},
             "embedding": {
                 "type": "knn_vector",
@@ -137,6 +142,8 @@ def _ensure_index(client: OpenSearch) -> None:
     if not client.indices.exists(index=INDEX_NAME):
         client.indices.create(index=INDEX_NAME, body=INDEX_BODY)
         logger.info(f"Created index {INDEX_NAME}")
+    # 作成済みのインデックスにはINDEX_BODYが効かない。動的マッピングで型が決まる前に足す(同じ定義なら冪等)
+    client.indices.put_mapping(index=INDEX_NAME, body={"properties": {"indexed_at": INDEXED_AT_MAPPING}})
     if not client.indices.exists_alias(name=ALIAS_NAME):
         # 初回: alias が全く無い → 空でも付与(初期構築を妨げない)
         client.indices.put_alias(index=INDEX_NAME, name=ALIAS_NAME)
@@ -191,10 +198,12 @@ def _bulk_index_docs(client: OpenSearch, docs: List[Tuple[str, str, Dict[str, An
     failed: List[str] = []
 
     for attempt in range(MAX_BULK_RETRIES + 1):
+        # 再送のたびに取り直し、バックオフ待ちの分だけ検索に見える時刻より古くならないようにする
+        indexed_at = int(time.time() * 1000)
         bulk_body: List[Dict[str, Any]] = []
         for _, note_id, doc in pending:
             bulk_body.append({"index": {"_index": ALIAS_NAME, "_id": note_id}})
-            bulk_body.append(doc)
+            bulk_body.append({**doc, "indexed_at": indexed_at})
 
         response = client.bulk(body=bulk_body)
 
